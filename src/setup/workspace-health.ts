@@ -37,6 +37,18 @@ export type PDevBridgeHealthStatus =
   | "unhealthy"
   | "verified";
 
+/**
+ * Aggregate semantics for canonical health facts.
+ * Do not collapse credential/bridge/webhook facts into a single "connected" bit.
+ */
+export type HealthAggregateStatus =
+  | "missing"
+  | "configured"
+  | "verification_pending"
+  | "verified"
+  | "degraded"
+  | "repairing";
+
 export function credentialHealthLabel(status: CredentialHealthStatus): string {
   switch (status) {
     case "missing":
@@ -93,4 +105,20 @@ export function bridgeHealthLabel(status: PDevBridgeHealthStatus): string {
     case "verified":
       return "Verified";
   }
+}
+
+/**
+ * Client-safe helper: accept verify payload only when fingerprints match the
+ * mount snapshot. Lives here (not workspace-health-snapshot) so GUI client
+ * bundles never pull credential-health → @cursor/sdk.
+ */
+export function shouldAcceptHealthRefresh(input: {
+  mountedControlPlaneFingerprint: string;
+  responseControlPlaneFingerprint: string | null | undefined;
+}): boolean {
+  if (!input.responseControlPlaneFingerprint) return false;
+  return (
+    input.mountedControlPlaneFingerprint ===
+    input.responseControlPlaneFingerprint
+  );
 }

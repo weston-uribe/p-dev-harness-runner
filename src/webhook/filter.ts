@@ -1,7 +1,7 @@
 import { isDispatchTriggerStatus } from "./dispatch-statuses.js";
 import type { HarnessConfig } from "../config/types.js";
 import { runLinearAssociationGate } from "../config/linear-association-gate.js";
-import { isHarnessOrchestratorComment } from "../linear/comments.js";
+import { isHarnessOwnedBridgeComment } from "./bridge-dispatch-contract.js";
 import type {
   ParsedLinearCommentWebhook,
   ParsedLinearIssueWebhook,
@@ -78,9 +78,10 @@ export function shouldDispatchLinearCommentEvent(
   const marker =
     options?.orchestratorMarker ?? options?.config?.orchestratorMarker;
   if (
-    marker &&
-    event.commentBody &&
-    isHarnessOrchestratorComment(event.commentBody, marker)
+    isHarnessOwnedBridgeComment(event.commentBody, {
+      orchestratorMarker: marker,
+      issueId: event.issueId,
+    })
   ) {
     return { dispatch: false, reason: "ignored_event" };
   }

@@ -26,10 +26,12 @@ describe("settings deployments Vercel options auto-load", () => {
     expect(editor).toContain("projectsRequestIdRef");
     expect(editor).toContain("mountedRef");
     expect(editor).toContain("loadedCredentialRef");
-    expect(editor).toContain('previewPolicy="optional"');
-    expect(editor).toContain('confirmScope="vercel-bridge-write"');
+    expect(editor).toContain("Save deployment selection");
+    expect(editor).toContain("window.confirm");
     expect(editor).toContain("applyVercelBridge({");
     expect(editor).toContain("previewVercelBridge(buildPlanPayload())");
+    expect(editor).toContain("committedTeamId");
+    expect(editor).not.toContain("SettingsMutationPanel");
     expect(editor).not.toMatch(/VERCEL_TOKEN\s*[:=]\s*["'][^"']+["']/);
     expect(editor).not.toContain("sk_");
   });

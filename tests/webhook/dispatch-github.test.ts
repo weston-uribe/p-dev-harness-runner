@@ -123,6 +123,9 @@ describe("handleLinearWebhook integration", () => {
       envelopeSchemaVersion: 1,
       publicEventType: "linear_issue_status_changed",
       executionRepository: "owner/execution-repo",
+      dispatched: true,
+      duplicate: false,
+      ackConfirmed: true,
     }));
 
     const result = await handleLinearWebhook({

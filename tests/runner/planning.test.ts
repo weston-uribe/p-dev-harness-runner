@@ -1,7 +1,42 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getPlanningResultPath } from "../../src/artifacts/paths.js";
+
+const VALID_IMPLEMENTATION_READY_PLAN = `
+## Context
+Add a hello route for the planning happy-path fixture.
+
+## Approach
+1. Add a dedicated hello page route in the target app.
+2. Wire navigation so the route is reachable from the home page.
+3. Keep changes limited to the hello page and shared nav entry.
+
+## Files to touch
+| File | Change |
+| --- | --- |
+| app/hello/page.tsx | Add hello page |
+| components/nav.tsx | Link to hello route |
+
+## Files explicitly out of scope
+- Harness orchestration and Linear workflow changes
+
+## Risks
+| Risk | Mitigation |
+| --- | --- |
+| Route naming collision | Use an unused \`/hello\` path |
+
+## Acceptance Verification Plan
+- Confirm \`/hello\` renders the expected greeting text.
+- Confirm home navigation includes a link to \`/hello\`.
+- Automated: run the target app route smoke check if available.
+
+## Rollback
+Remove the hello page and nav link in a follow-up commit.
+`.trim();
+
+const SHORT_INVALID_PLAN_STUB = "## Implementation plan\n\nStep 1";
 
 const mocks = vi.hoisted(() => ({
   transitionIssueStatus: vi.fn(),
@@ -119,7 +154,7 @@ describe("executePlanningPhase", () => {
     mocks.sendAndObserve.mockResolvedValue({
       agentId: "agent-abc",
       runId: "run-xyz",
-      assistantText: "## Implementation plan\n\nStep 1",
+      assistantText: VALID_IMPLEMENTATION_READY_PLAN,
       result: { id: "run-xyz", status: "completed" },
     });
 
@@ -187,6 +222,46 @@ describe("executePlanningPhase", () => {
     expect(mocks.transitionIssueStatus).toHaveBeenCalledTimes(2);
     expect(mocks.postPlanningComment).toHaveBeenCalledTimes(1);
     expect(mocks.sendAndObserve).toHaveBeenCalledTimes(1);
+  });
+
+  it("repairs a short plan stub on the second sendAndObserve call", async () => {
+    mocks.sendAndObserve
+      .mockResolvedValueOnce({
+        agentId: "agent-abc",
+        runId: "run-stub",
+        assistantText: SHORT_INVALID_PLAN_STUB,
+        result: { id: "run-stub", status: "completed" },
+      })
+      .mockResolvedValueOnce({
+        agentId: "agent-abc",
+        runId: "run-repaired",
+        assistantText: VALID_IMPLEMENTATION_READY_PLAN,
+        result: { id: "run-repaired", status: "completed" },
+      });
+
+    const result = await executePlanningPhase({
+      issueKey: "WES-PLAN",
+      configPath,
+    });
+
+    expect(result.manifest.errorClassification).toBeNull();
+    expect(result.exitCode).toBe(0);
+    expect(result.manifest.finalOutcome).toBe("success");
+    expect(mocks.sendAndObserve).toHaveBeenCalledTimes(2);
+    expect(result.manifest.cursorRunId).toBe("run-repaired");
+    expect(mocks.postPlanningComment).toHaveBeenCalledWith(
+      expect.anything(),
+      "issue-plan",
+      VALID_IMPLEMENTATION_READY_PLAN,
+      expect.objectContaining({
+        cursorRunId: "run-repaired",
+        phase: "planning",
+      }),
+    );
+
+    const planningResultPath = getPlanningResultPath(result.runDirectory);
+    const persisted = await readFile(planningResultPath, "utf8");
+    expect(persisted.trim()).toBe(VALID_IMPLEMENTATION_READY_PLAN);
   });
 
   it("skips stale wrong_status when issue left Ready for Planning before claim", async () => {

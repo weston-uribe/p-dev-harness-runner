@@ -106,7 +106,7 @@ export const CURRENT_WORKFLOW_INVENTORY: readonly WorkflowLifecycleInventoryEntr
       statusName: "PR Open",
       statusId: "pr-open",
       owner: "orchestrator",
-      trigger: "webhook dispatch-trigger",
+      trigger: "harness-owned post-build (not bridge dispatch)",
       runner: "handoff",
       agentRole: null,
       promptRole: null,
@@ -122,7 +122,8 @@ export const CURRENT_WORKFLOW_INVENTORY: readonly WorkflowLifecycleInventoryEntr
       statusName: "Code Review",
       statusId: "code-review",
       owner: "agent",
-      trigger: "optional; only when configuredReady after handoff/revision",
+      trigger:
+        "explicit durable code_review job after post-build; reconciler redispatches if missing",
       runner: "code_review",
       agentRole: "code_reviewer",
       promptRole: "code_reviewer",

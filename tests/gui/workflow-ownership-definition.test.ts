@@ -33,4 +33,15 @@ describe("workflow ownership from shared definition", () => {
     const agent = WORKFLOW_OWNERSHIP_COLUMNS.find((c) => c.id === "agent");
     expect(agent?.statuses).toEqual(["planning", "building", "revising"]);
   });
+
+  it("places optional reviews after agent-owned anchors", () => {
+    expect(
+      WORKFLOW_OPTIONAL_PHASES.find((phase) => phase.statusKey === "plan-review")
+        ?.insertAfter,
+    ).toBe("planning");
+    expect(
+      WORKFLOW_OPTIONAL_PHASES.find((phase) => phase.statusKey === "code-review")
+        ?.insertAfter,
+    ).toBe("building");
+  });
 });

@@ -19,9 +19,12 @@ import {
   getVercelDeploymentPath,
 } from "../../artifacts/paths.js";
 import {
+  buildBuildCompleteCommentBody,
   buildHandoffCommentBody,
   writeCommentsArtifact,
 } from "../../linear/comments.js";
+import { createCodeReviewJobAndDispatch } from "../../workflow/job-request/dispatch-opaque.js";
+import { buildCodeReviewSubjectIdentity } from "../../workflow/subject-identities.js";
 import { fetchLinearIssue } from "../../linear/client.js";
 import { findImplementationPullRequest } from "../../github/pr-discovery.js";
 import {
@@ -610,7 +613,7 @@ export async function executeHandoffPhase(
     }
 
     const publishObs = phaseTrace?.startChild("p-dev.handoff.publish", "span");
-    const handoffBody = buildHandoffCommentBody({
+    const handoffCommentInput = {
       prTitle: inspection.title,
       prUrl: inspection.url,
       branch: inspection.branch,
@@ -622,7 +625,7 @@ export async function executeHandoffPhase(
       checkSummary: inspection.checkSummary,
       harnessRunId: runId,
       previousImplementationRunId,
-    });
+    };
 
     const builderEvidence =
       resolveBuilderThreadMarkerEvidence({
@@ -652,6 +655,9 @@ export async function executeHandoffPhase(
       linearStatuses,
       issueKey: options.issueKey,
     });
+    const handoffBody = codeReadiness.configuredReady
+      ? buildBuildCompleteCommentBody(handoffCommentInput)
+      : buildHandoffCommentBody(handoffCommentInput);
     const logDirectory = config.logDirectory ?? "runs";
     const store = await resolvePhaseWorkflowStateStore({
     config,
@@ -759,14 +765,17 @@ export async function executeHandoffPhase(
 
     // Decision-before-effects: CAS-record accepted handoff subject + pending effects
     // before posting Linear comment or moving status.
+    const commentEffectKind = codeReadiness.configuredReady
+      ? ("build_complete_marker" as const)
+      : ("handoff_marker" as const);
     const commentEffectId = buildSideEffectIdentity({
-      kind: "handoff_marker",
+      kind: commentEffectKind,
       subjectIdentity: handoffSubjectIdentity,
     });
     const statusEffectId = buildSideEffectIdentity({
       kind: "linear_status_transition",
       subjectIdentity: handoffSubjectIdentity,
-      detail: "pm_review",
+      detail: codeReadiness.configuredReady ? "code_review" : "pm_review",
     });
     let durable = upsertPendingSideEffect(
       {
@@ -774,7 +783,7 @@ export async function executeHandoffPhase(
         handoffSubjectIdentity,
         latestImplementationArtifact: implementationArtifact,
       },
-      { identity: commentEffectId, kind: "handoff_marker" },
+      { identity: commentEffectId, kind: commentEffectKind },
     );
     durable = upsertPendingSideEffect(durable, {
       identity: statusEffectId,
@@ -798,6 +807,7 @@ export async function executeHandoffPhase(
     if (!isSideEffectCompleted(durable, commentEffectId)) {
       handoffCommentId = await postHandoffComment(client, issue.id, handoffBody, {
       ...footerBase,
+      phase: codeReadiness.configuredReady ? "build_complete" : "handoff",
       branch: branch ?? undefined,
       prUrl: prUrl ?? undefined,
       previewUrl: previewUrl ?? undefined,
@@ -876,12 +886,12 @@ export async function executeHandoffPhase(
         bypass: applied.result?.bypass ?? null,
       };
     })();
-    const pmReviewStatus = handoffSuccess.statusName;
-    await transitionIssueStatus(client, issue, pmReviewStatus);
-    linearStatusAfter = pmReviewStatus;
+    const nextStatus = handoffSuccess.statusName;
+    await transitionIssueStatus(client, issue, nextStatus);
+    linearStatusAfter = nextStatus;
     await events.log("linear_status_changed", "info", {
       from: linearStatusBefore,
-      to: pmReviewStatus,
+      to: nextStatus,
       transitionReason: handoffSuccess.result.reason,
       bypass: handoffSuccess.bypass?.event ?? null,
     });
@@ -889,8 +899,49 @@ export async function executeHandoffPhase(
       ?.startChild("p-dev.linear.status-transition", "event")
       ?.end({
         linearStatusBefore,
-        linearStatusAfter: pmReviewStatus,
+        linearStatusAfter: nextStatus,
       });
+
+    if (codeReadiness.configuredReady) {
+      const reviewCycle = durable.cycleCounters.code_review_cycles ?? 0;
+      const reviewSubjectIdentity = buildCodeReviewSubjectIdentity({
+        issueKey: options.issueKey,
+        prNumber: implementationArtifact.prNumber,
+        headSha: implementationArtifact.headSha,
+        diffHash: implementationArtifact.diffHash,
+        reviewCycle,
+      });
+      const dispatchEffectId = buildSideEffectIdentity({
+        kind: "code_review_dispatch",
+        subjectIdentity: reviewSubjectIdentity,
+      });
+      if (!isSideEffectCompleted(durable, dispatchEffectId)) {
+        durable = upsertPendingSideEffect(durable, {
+          identity: dispatchEffectId,
+          kind: "code_review_dispatch",
+        });
+        await createCodeReviewJobAndDispatch({
+          issueKey: options.issueKey,
+          reviewSubjectIdentity,
+        });
+        durable = markSideEffectCompleted(durable, dispatchEffectId);
+        durable = {
+          ...durable,
+          stateRevision: durable.stateRevision + 1,
+          activeReviewSubjectIdentity: reviewSubjectIdentity,
+        };
+        await store.compareAndSet({
+          issueKey: options.issueKey,
+          expectedRevision: durable.stateRevision - 1,
+          next: durable,
+        });
+        await events.log("code_review_job_dispatched", "info", {
+          reviewSubjectIdentity,
+          prNumber: implementationArtifact.prNumber,
+          headSha: implementationArtifact.headSha,
+        });
+      }
+    }
 
     const afterIssue = await fetchLinearIssue(options.issueKey, linearApiKey);
     await writeFile(

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LinearSetupSummary } from "@harness/setup/linear-setup-summary";
-import type { LinearWorkspacePreview } from "@harness/setup/linear-workspace-plan";
 import type { ResolvedLinearAssociation } from "@harness/config/resolve-linear-workspace";
 import type {
   LinearProjectSummary,
@@ -22,12 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { GuidedSelect } from "@/components/ui/guided-select";
-import { SettingsMutationPanel } from "@/components/settings/settings-mutation-panel";
-import {
-  initialSettingsMutationState,
-  sanitizeSettingsErrorMessage,
-  type SettingsMutationState,
-} from "@/lib/settings/settings-mutation";
+import { sanitizeSettingsErrorMessage } from "@/lib/settings/settings-mutation";
 import {
   applyLinearWorkspace,
   previewLinearWorkspace,
@@ -41,6 +35,7 @@ type LinearEditorInitialData = {
   workspaceId: string;
   workspaceName: string;
   driftWarnings: Array<{ code: string; message: string }>;
+  workspaceHealth?: import("@harness/setup/workspace-health-snapshot").WorkspaceHealthSnapshot;
 };
 
 type LinearSettingsEditorProps = {
@@ -49,12 +44,7 @@ type LinearSettingsEditorProps = {
 
 export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps) {
   const [summary, setSummary] = useState(initialData.summary);
-  const [committedAssociations, setCommittedAssociations] = useState(
-    initialData.associations,
-  );
-  const [draftAssociations, setDraftAssociations] = useState(
-    initialData.associations,
-  );
+  const [associations, setAssociations] = useState(initialData.associations);
   const [expectedCommittedFingerprint, setExpectedCommittedFingerprint] =
     useState(initialData.expectedCommittedFingerprint);
   const [teams, setTeams] = useState<LinearTeamSummary[]>([]);
@@ -63,23 +53,21 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [addTeamId, setAddTeamId] = useState("");
   const [addProjectIds, setAddProjectIds] = useState<string[]>([]);
-  const [addRepoId, setAddRepoId] = useState(initialData.repos[0]?.id ?? "");
-  const [mutation, setMutation] = useState<
-    SettingsMutationState<LinearWorkspacePreview>
-  >(initialSettingsMutationState());
-  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const requestGenerationRef = useRef(0);
 
   const linearApiKeyConfigured = summary.linearApiKeyConfigured;
   const evidence = summary.controlPlane?.linearWorkspace;
-  const groupedCommitted = useMemo(
-    () => groupAssociationsByTeam(committedAssociations),
-    [committedAssociations],
+  const workspaceName =
+    initialData.workspaceHealth?.linear.workspaceName?.trim() ||
+    initialData.workspaceName;
+  const grouped = useMemo(
+    () => groupAssociationsByTeam(associations),
+    [associations],
   );
-  const groupedDraft = useMemo(
-    () => groupAssociationsByTeam(draftAssociations),
-    [draftAssociations],
-  );
+  const defaultRepo = initialData.repos[0];
 
   useEffect(() => {
     if (!linearApiKeyConfigured) {
@@ -133,8 +121,8 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
   }, [linearApiKeyConfigured]);
 
   const configuredKeys = useMemo(
-    () => buildConfiguredAssociationKeys(draftAssociations),
-    [draftAssociations],
+    () => buildConfiguredAssociationKeys(associations),
+    [associations],
   );
 
   const projectOptions = useMemo(() => {
@@ -145,116 +133,77 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
   }, [projects, addTeamId]);
 
   const selectedTeam = teams.find((team) => team.id === addTeamId);
-  const targetRepo =
-    initialData.repos.find((repo) => repo.id === addRepoId)?.targetRepo ?? "";
 
-  const buildWorkspacePlan = () => ({
-    expectedCommittedFingerprint,
-    workspaceId: initialData.workspaceId,
-    workspaceName: initialData.workspaceName,
-    requestedAssociations: draftAssociations,
-  });
-
-  const formatPreviewSummary = (preview: LinearWorkspacePreview) => {
-    const lines = [
-      `Teams to add: ${preview.impactSummary.teamsToAdd.join(", ") || "none"}`,
-      `Projects to add: ${preview.impactSummary.projectsToAdd.join(", ") || "none"}`,
-      `Teams to repair: ${preview.impactSummary.teamsToRepair.join(", ") || "none"}`,
-      `Projects to detach: ${preview.impactSummary.projectsToDetach.join(", ") || "none"}`,
-      `Teams to detach: ${preview.impactSummary.teamsToDetach.join(", ") || "none"}`,
-      `Metadata blocks to remove: ${
-        preview.impactSummary.metadataBlocksToRemove.join(", ") || "none"
-      }`,
-      ...preview.impactSummary.explicitNonActions,
-    ];
-    return lines.join("\n");
-  };
-
-  const runPreview = async () => {
-    setMutation((current) => ({ ...current, phase: "previewing", error: null }));
-    setConfirmed(false);
+  const commitAssociations = async (
+    next: ResolvedLinearAssociation[],
+    successMessage: string,
+  ) => {
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
     try {
-      const preview = await previewLinearWorkspace(buildWorkspacePlan());
+      const plan = {
+        expectedCommittedFingerprint,
+        workspaceId: initialData.workspaceId,
+        workspaceName,
+        requestedAssociations: next,
+      };
+      const preview = await previewLinearWorkspace(plan);
       if (preview.validationError) {
         throw new Error(preview.validationError);
       }
-      setMutation({
-        phase: "preview-ready",
-        preview,
-        error: null,
-        successMessage: null,
-      });
-    } catch (error) {
-      setMutation({
-        phase: "error",
-        preview: null,
-        error: sanitizeSettingsErrorMessage(
-          error instanceof Error ? error.message : "Linear preview failed.",
-        ),
-        successMessage: null,
-      });
-    }
-  };
-
-  const runApply = async () => {
-    setMutation((current) => ({ ...current, phase: "applying", error: null }));
-    try {
       const result = await applyLinearWorkspace({
-        plan: buildWorkspacePlan(),
-        fingerprint: mutation.preview?.fingerprint,
+        plan,
+        fingerprint: preview.fingerprint,
       });
       if (!result.apply.verified) {
         throw new Error("Linear apply finished without verification.");
       }
       setSummary(result.summary as LinearSetupSummary);
-      setCommittedAssociations(initialData.associations);
-      setDraftAssociations(initialData.associations);
+      setAssociations(next);
       setExpectedCommittedFingerprint(result.expectedCommittedFingerprint);
-      setMutation({
-        phase: "success",
-        preview: null,
-        error: null,
-        successMessage: "Linear workspace updated.",
-      });
-      setConfirmed(false);
-      window.location.reload();
+      setActionMessage(successMessage);
     } catch (error) {
-      setMutation({
-        phase: "error",
-        preview: mutation.preview,
-        error: sanitizeSettingsErrorMessage(
-          error instanceof Error ? error.message : "Linear apply failed.",
+      setActionError(
+        sanitizeSettingsErrorMessage(
+          error instanceof Error ? error.message : "Linear update failed.",
         ),
-        successMessage: null,
-      });
+      );
+    } finally {
+      setBusy(false);
     }
   };
 
   const addSelectedProjects = () => {
-    if (!selectedTeam || !targetRepo || addProjectIds.length === 0) {
+    if (!selectedTeam || !defaultRepo || addProjectIds.length === 0) {
       return;
     }
     const selectedProjects = addProjectIds
       .map((projectId) => projects.find((item) => item.id === projectId))
       .filter((project): project is LinearProjectSummary => Boolean(project));
-    setDraftAssociations((current) =>
-      addProjectsToDraft({
-        draft: current,
-        workspaceId: initialData.workspaceId,
-        team: {
-          id: selectedTeam.id,
-          key: selectedTeam.key,
-          name: selectedTeam.name,
-        },
-        projects: selectedProjects.map((project) => ({
-          id: project.id,
-          name: project.name,
-        })),
-        targetRepo,
-        repoConfigId: addRepoId,
-      }),
+    const confirmedAdd = window.confirm(
+      `Add ${selectedProjects.length} project(s) from "${selectedTeam.name}" to PDev?\n\nThis will write Linear status configuration for required PDev statuses.`,
     );
+    if (!confirmedAdd) {
+      return;
+    }
+    const next = addProjectsToDraft({
+      draft: associations,
+      workspaceId: initialData.workspaceId,
+      team: {
+        id: selectedTeam.id,
+        key: selectedTeam.key,
+        name: selectedTeam.name,
+      },
+      projects: selectedProjects.map((project) => ({
+        id: project.id,
+        name: project.name,
+      })),
+      targetRepo: defaultRepo.targetRepo,
+      repoConfigId: defaultRepo.id,
+    });
     setAddProjectIds([]);
+    void commitAssociations(next, "Team and project associations updated.");
   };
 
   const detachProject = (association: ResolvedLinearAssociation) => {
@@ -264,11 +213,12 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
     if (!confirmedDetach) {
       return;
     }
-    setDraftAssociations((current) => removeDraftAssociation(current, association));
+    const next = removeDraftAssociation(associations, association);
+    void commitAssociations(next, "Project detached from PDev.");
   };
 
   const detachTeam = (teamId: string) => {
-    const teamAssociations = draftAssociations.filter(
+    const teamAssociations = associations.filter(
       (association) => association.teamId === teamId,
     );
     const projectLines = teamAssociations
@@ -280,11 +230,9 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
     if (!confirmedDetach) {
       return;
     }
-    setDraftAssociations((current) => removeDraftTeam(current, teamId));
+    const next = removeDraftTeam(associations, teamId);
+    void commitAssociations(next, "Team removed from PDev.");
   };
-
-  const draftDirty =
-    JSON.stringify(committedAssociations) !== JSON.stringify(draftAssociations);
 
   return (
     <div className="space-y-8">
@@ -292,19 +240,7 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
         <h3 className="text-sm font-semibold">Connected workspace</h3>
         <p className="text-sm">
           <span className="text-muted-foreground">Workspace:</span>{" "}
-          {initialData.workspaceName}
-        </p>
-        <p className="text-sm">
-          <span className="text-muted-foreground">Credential:</span>{" "}
-          {linearApiKeyConfigured ? "Configured" : "Missing LINEAR_API_KEY"}
-        </p>
-        <p className="text-sm">
-          <span className="text-muted-foreground">Configured teams:</span>{" "}
-          {groupedCommitted.size}
-        </p>
-        <p className="text-sm">
-          <span className="text-muted-foreground">Configured projects:</span>{" "}
-          {committedAssociations.length}
+          {workspaceName}
         </p>
         {initialData.driftWarnings.length > 0 ? (
           <div className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
@@ -313,17 +249,28 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
             ))}
           </div>
         ) : null}
+        {actionMessage ? (
+          <p className="text-sm text-emerald-700 dark:text-emerald-300">
+            {actionMessage}
+          </p>
+        ) : null}
+        {actionError ? (
+          <p className="text-sm text-destructive">{actionError}</p>
+        ) : null}
+        {busy ? (
+          <p className="text-sm text-muted-foreground">Updating Linear…</p>
+        ) : null}
       </section>
 
       <section className="space-y-4 rounded-md border border-border p-4">
         <h3 className="text-sm font-semibold">Configured teams and projects</h3>
-        {groupedDraft.size === 0 ? (
+        {grouped.size === 0 ? (
           <p className="text-sm text-muted-foreground">
             No Linear team and project associations are configured yet.
           </p>
         ) : (
           <div className="space-y-4">
-            {[...groupedDraft.entries()].map(([teamId, associations]) => {
+            {[...grouped.entries()].map(([teamId, teamAssociations]) => {
               const teamEvidence = evidence?.teams.find(
                 (team) => team.teamId === teamId,
               );
@@ -333,11 +280,9 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                     <div>
                       <p className="text-sm font-medium">
                         {formatLinearTeamLabel({
-                          teamName: associations[0]?.teamName,
-                          teamKey: associations[0]?.teamKey ?? teamId,
-                        })}{" "}
-                        · {associations.length} project
-                        {associations.length === 1 ? "" : "s"}
+                          teamName: teamAssociations[0]?.teamName,
+                          teamKey: teamAssociations[0]?.teamKey ?? teamId,
+                        })}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Health: {teamEvidence?.health ?? "verification_pending"}
@@ -347,13 +292,14 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                       type="button"
                       variant="outline"
                       size="sm"
+                      disabled={busy}
                       onClick={() => detachTeam(teamId)}
                     >
                       Remove from PDev
                     </Button>
                   </div>
                   <ul className="mt-3 space-y-2">
-                    {associations.map((association) => {
+                    {teamAssociations.map((association) => {
                       const projectEvidence = teamEvidence?.projects.find(
                         (project) => project.projectId === association.projectId,
                       );
@@ -365,9 +311,6 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                           <div>
                             <p>{association.projectName}</p>
                             <p className="text-xs text-muted-foreground">
-                              {association.targetRepo}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
                               {projectEvidence?.health ?? "verification_pending"}
                             </p>
                           </div>
@@ -375,6 +318,7 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                             type="button"
                             variant="ghost"
                             size="sm"
+                            disabled={busy}
                             onClick={() => detachProject(association)}
                           >
                             Detach
@@ -400,42 +344,26 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
         {optionsError ? (
           <p className="text-sm text-destructive">{optionsError}</p>
         ) : null}
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="settings-linear-add-team">Team</Label>
-            <GuidedSelect
-              id="settings-linear-add-team"
-              value={addTeamId}
-              disabled={optionsLoading || !linearApiKeyConfigured}
-              onChange={(event) => {
-                setAddTeamId(event.target.value);
-                setAddProjectIds([]);
-              }}
-            >
-              <option value="">
-                {optionsLoading ? "Loading teams…" : "Select a team"}
+        <div className="space-y-2">
+          <Label htmlFor="settings-linear-add-team">Team</Label>
+          <GuidedSelect
+            id="settings-linear-add-team"
+            value={addTeamId}
+            disabled={optionsLoading || !linearApiKeyConfigured || busy}
+            onChange={(event) => {
+              setAddTeamId(event.target.value);
+              setAddProjectIds([]);
+            }}
+          >
+            <option value="">
+              {optionsLoading ? "Loading teams…" : "Select a team"}
+            </option>
+            {teams.map((team) => (
+              <option key={team.id} value={team.id}>
+                {team.name} ({team.key})
               </option>
-              {teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name} ({team.key})
-                </option>
-              ))}
-            </GuidedSelect>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="settings-linear-target-repo">Target repository</Label>
-            <GuidedSelect
-              id="settings-linear-target-repo"
-              value={addRepoId}
-              onChange={(event) => setAddRepoId(event.target.value)}
-            >
-              {initialData.repos.map((repo) => (
-                <option key={repo.id} value={repo.id}>
-                  {repo.targetRepo}
-                </option>
-              ))}
-            </GuidedSelect>
-          </div>
+            ))}
+          </GuidedSelect>
         </div>
         {addTeamId ? (
           <div className="space-y-2">
@@ -460,7 +388,7 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                     >
                       <input
                         type="checkbox"
-                        disabled={alreadyConfigured}
+                        disabled={alreadyConfigured || busy}
                         checked={addProjectIds.includes(project.id)}
                         onChange={(event) => {
                           setAddProjectIds((current) =>
@@ -481,32 +409,14 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
             </div>
             <Button
               type="button"
-              variant="outline"
-              disabled={!addProjectIds.length || !targetRepo}
+              disabled={!addProjectIds.length || !defaultRepo || busy}
               onClick={addSelectedProjects}
             >
-              Add selected projects to draft
+              Add selected projects
             </Button>
           </div>
         ) : null}
       </section>
-
-      <SettingsMutationPanel
-        phase={mutation.phase}
-        error={mutation.error}
-        successMessage={mutation.successMessage}
-        previewPolicy="optional"
-        previewSummary={
-          mutation.preview ? formatPreviewSummary(mutation.preview) : null
-        }
-        confirmScope="linear-write"
-        confirmed={confirmed}
-        onConfirmedChange={setConfirmed}
-        onPreview={() => void runPreview()}
-        onApply={() => void runApply()}
-        disablePreview={!draftDirty || draftAssociations.length === 0}
-        disableApply={!draftDirty || draftAssociations.length === 0}
-      />
     </div>
   );
 }

@@ -34,6 +34,8 @@
     "evaluation:reproject-langfuse": "tsx src/index.ts eval reproject-langfuse",
     "evaluation:canary-langfuse-projection": "tsx src/index.ts eval canary-langfuse-projection",
     "evaluation:canary-native-skill": "tsx src/index.ts eval canary-native-skill",
+    "evaluation:probe-cursor-sdk-usage": "tsx src/index.ts eval probe-cursor-sdk-usage",
+    "evaluation:import-cursor-usage": "tsx src/index.ts eval import-cursor-usage",
     "prompts:validate": "tsx src/index.ts prompts:validate",
     "prompts:langfuse:sync": "tsx src/index.ts prompts:langfuse:sync",
     "generate:evaluator-manifest": "node scripts/generate-evaluator-manifest.mjs",

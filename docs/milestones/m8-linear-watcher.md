@@ -6,7 +6,7 @@
 
 - **Vercel webhook endpoint** — [`api/linear-webhook.ts`](../../api/linear-webhook.ts) verifies Linear signatures and dispatches GitHub `repository_dispatch`
 - **Webhook modules** — [`src/webhook/`](../../src/webhook/) (verify, parse, filter, dispatch)
-- **Dispatch allowlist** — only trigger statuses dispatch GHA: Ready for Planning, Ready for Build, PR Open, Needs Revision, Ready to Merge
+- **Dispatch allowlist** — only human-owned trigger statuses dispatch GHA: Ready for Planning, Ready for Build, Needs Revision, Ready to Merge
 - **GitHub Actions runner** — [`.github/workflows/harness-auto-runner.yml`](../../.github/workflows/harness-auto-runner.yml)
 - **Manual fallback** — `workflow_dispatch` runs harness in cloud without local CLI
 - **Operator guide** — [`docs/linear-watcher-setup.md`](../linear-watcher-setup.md)
@@ -43,10 +43,9 @@ Linear status change
 |--------|-----------------|---------------|
 | Ready for Planning | yes | planning |
 | Ready for Build | yes | implementation |
-| PR Open | yes | handoff |
 | Needs Revision | yes | revision |
 | Ready to Merge | yes | merge |
-| Planning, Building, PM Review, Merging, Merged / Deployed, etc. | no (`ignored_status`) | — |
+| PR Open, Code Review, Planning, Building, PM Review, Merging, Merged / Deployed, etc. | no (`ignored_status`) | — |
 
 Harness remains authoritative for phase execution and idempotency once GHA runs.
 

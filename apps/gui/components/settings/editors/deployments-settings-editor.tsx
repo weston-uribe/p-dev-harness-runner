@@ -3,23 +3,19 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VercelSetupSummary } from "@harness/setup/vercel-setup-summary";
-import type { VercelBridgePreview } from "@harness/setup/vercel-setup-apply";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { GuidedSelect } from "@/components/ui/guided-select";
-import { SettingsMutationPanel } from "@/components/settings/settings-mutation-panel";
-import {
-  initialSettingsMutationState,
-  sanitizeSettingsErrorMessage,
-  type SettingsMutationState,
-} from "@/lib/settings/settings-mutation";
+import { sanitizeSettingsErrorMessage } from "@/lib/settings/settings-mutation";
 import {
   applyVercelBridge,
   previewVercelBridge,
 } from "@/lib/settings/settings-setup-client";
+import type { WorkspaceHealthSnapshot } from "@harness/setup/workspace-health-snapshot";
 
 type DeploymentsSettingsEditorProps = {
   initialSummary: VercelSetupSummary;
+  workspaceHealth?: WorkspaceHealthSnapshot;
 };
 
 type ScopeOption = { id: string; label: string };
@@ -27,17 +23,28 @@ type ProjectOption = { id: string; name: string };
 
 export function DeploymentsSettingsEditor({
   initialSummary,
+  workspaceHealth,
 }: DeploymentsSettingsEditorProps) {
   const [summary, setSummary] = useState(initialSummary);
   const [scopes, setScopes] = useState<ScopeOption[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
-  const committedTeamId = summary.controlPlane?.vercel?.teamId ?? "";
-  const committedProjectId = summary.controlPlane?.vercel?.projectId ?? "";
+  const committedTeamId =
+    workspaceHealth?.vercel.selectedScope?.teamId ??
+    summary.controlPlane?.vercel?.teamId ??
+    "";
+  const committedProjectId =
+    workspaceHealth?.vercel.selectedProject?.projectId ??
+    summary.controlPlane?.vercel?.projectId ??
+    "";
+  const committedScopeLabel =
+    workspaceHealth?.vercel.selectedScope?.teamName ??
+    summary.controlPlane?.vercel?.teamName ??
+    (committedTeamId ? "Team" : "Personal");
   const [teamId, setTeamId] = useState(committedTeamId);
   const [projectId, setProjectId] = useState(committedProjectId);
-  const [mutation, setMutation] =
-    useState<SettingsMutationState<VercelBridgePreview>>(initialSettingsMutationState());
-  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [teamsLoading, setTeamsLoading] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState<string | null>(null);
@@ -80,6 +87,19 @@ export function DeploymentsSettingsEditor({
         }),
       );
       setScopes(nextScopes);
+      // Keep durable scope selected — do not fall back to personal when a team is stored.
+      setTeamId((current) => {
+        if (
+          committedTeamId &&
+          nextScopes.some((scope) => scope.id === committedTeamId)
+        ) {
+          return committedTeamId;
+        }
+        if (current && nextScopes.some((scope) => scope.id === current)) {
+          return current;
+        }
+        return committedTeamId;
+      });
       if (data.loadError) {
         setOptionsError(data.loadError);
       }
@@ -98,7 +118,7 @@ export function DeploymentsSettingsEditor({
         setTeamsLoading(false);
       }
     }
-  }, [credentialFingerprint, summary.vercelTokenConfigured]);
+  }, [committedTeamId, credentialFingerprint, summary.vercelTokenConfigured]);
 
   const loadProjects = useCallback(
     async (scopeId: string) => {
@@ -190,37 +210,27 @@ export function DeploymentsSettingsEditor({
     [projectId, summary.controlPlane?.linear?.teamId, summary.controlPlane?.linear?.teamKey, teamId],
   );
 
-  const runPreview = useCallback(async () => {
-    setMutation((current) => ({ ...current, phase: "previewing", error: null }));
-    setConfirmed(false);
-    try {
-      const preview = await previewVercelBridge(buildPlanPayload());
-      if (preview.validationError) {
-        throw new Error(preview.validationError);
-      }
-      setMutation({
-        phase: "preview-ready",
-        preview,
-        error: null,
-        successMessage: null,
-      });
-    } catch (error) {
-      setMutation({
-        phase: "error",
-        preview: null,
-        error: sanitizeSettingsErrorMessage(
-          error instanceof Error ? error.message : "Vercel preview failed.",
-        ),
-        successMessage: null,
-      });
-    }
-  }, [buildPlanPayload]);
+  const dirty =
+    teamId !== committedTeamId || projectId !== committedProjectId;
+  const selectionComplete = Boolean(projectId);
 
-  const runApply = useCallback(async () => {
-    if (!confirmed) {
+  const saveSelection = useCallback(async () => {
+    if (!selectionComplete || !dirty) {
       return;
     }
-    setMutation((current) => ({ ...current, phase: "applying", error: null }));
+    const scopeLabel =
+      scopes.find((scope) => scope.id === teamId)?.label ?? committedScopeLabel;
+    const projectLabel =
+      projects.find((project) => project.id === projectId)?.name ?? projectId;
+    const confirmedSave = window.confirm(
+      `Save Vercel deployment selection?\n\nScope: ${scopeLabel}\nProject: ${projectLabel}\n\nPDev will update the automation bridge and verify the connection.`,
+    );
+    if (!confirmedSave) {
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
     try {
       const freshPreview = await previewVercelBridge(buildPlanPayload());
       if (freshPreview.validationError) {
@@ -231,45 +241,74 @@ export function DeploymentsSettingsEditor({
         fingerprint: freshPreview.fingerprint,
       });
       setSummary(result.summary as VercelSetupSummary);
-      setMutation({
-        phase: "success",
-        preview: null,
-        error: null,
-        successMessage:
-          "PDev automation bridge updated. Redeploy verification may continue in Vercel.",
-      });
-      setConfirmed(false);
+      setActionMessage(
+        "PDev automation bridge updated. Redeploy verification may continue in Vercel.",
+      );
     } catch (error) {
-      setMutation({
-        phase: "error",
-        preview: mutation.preview,
-        error: sanitizeSettingsErrorMessage(
+      setActionError(
+        sanitizeSettingsErrorMessage(
           error instanceof Error ? error.message : "Vercel apply failed.",
         ),
-        successMessage: null,
-      });
+      );
+    } finally {
+      setBusy(false);
     }
-  }, [buildPlanPayload, confirmed, mutation.preview]);
-
-  const selectionComplete = Boolean(projectId);
+  }, [
+    buildPlanPayload,
+    committedScopeLabel,
+    dirty,
+    projectId,
+    projects,
+    scopes,
+    selectionComplete,
+    teamId,
+  ]);
 
   return (
     <div className="space-y-6">
       <div className="rounded-md border border-border p-4 text-sm">
         <p>
+          <span className="text-muted-foreground">Scope:</span>{" "}
+          {committedScopeLabel}
+        </p>
+        <p className="mt-2">
           <span className="text-muted-foreground">Current project:</span>{" "}
-          {summary.controlPlane?.vercel?.projectName ?? "Not configured"}
+          {workspaceHealth?.vercel.selectedProject?.projectName ??
+            summary.controlPlane?.vercel?.projectName ??
+            "Not configured"}
         </p>
         <p className="mt-2">
           <span className="text-muted-foreground">Production URL:</span>{" "}
-          {summary.controlPlane?.vercel?.productionUrl ?? "—"}
+          {workspaceHealth?.vercel.productionUrl ??
+            summary.controlPlane?.vercel?.productionUrl ??
+            "—"}
+        </p>
+        <p className="mt-2">
+          <span className="text-muted-foreground">Bridge:</span>{" "}
+          {workspaceHealth
+            ? workspaceHealth.vercel.bridgeDeployed
+              ? workspaceHealth.vercel.bridgeReachable
+                ? "Deployed, reachable"
+                : "Deployed, not reachable"
+              : "Not deployed"
+            : "—"}
         </p>
         <p className="mt-2">
           <span className="text-muted-foreground">Linear webhook:</span>{" "}
-          {summary.controlPlane?.vercel?.linearWebhookVerified
+          {workspaceHealth?.vercel.webhookVerified
             ? "Verified"
-            : "Not verified"}
+            : workspaceHealth?.vercel.webhookConfigured
+              ? "Configured, not verified"
+              : summary.controlPlane?.vercel?.linearWebhookVerified
+                ? "Verified"
+                : "Not verified"}
         </p>
+        {workspaceHealth?.vercel.lastVerifiedAt ? (
+          <p className="mt-2">
+            <span className="text-muted-foreground">Last verified:</span>{" "}
+            {workspaceHealth.vercel.lastVerifiedAt}
+          </p>
+        ) : null}
       </div>
 
       {!summary.vercelTokenConfigured ? (
@@ -314,13 +353,15 @@ export function DeploymentsSettingsEditor({
                 disabled={teamsLoading && scopes.length === 0}
                 onChange={(event) => {
                   setTeamId(event.target.value);
-                  setConfirmed(false);
-                  setMutation(initialSettingsMutationState());
+                  setActionMessage(null);
+                  setActionError(null);
                 }}
               >
                 {scopes.length === 0 ? (
-                  <option value="">
-                    {teamsLoading ? "Loading Vercel teams…" : "Select a team"}
+                  <option value={committedTeamId}>
+                    {teamsLoading
+                      ? "Loading Vercel teams…"
+                      : committedScopeLabel}
                   </option>
                 ) : null}
                 {scopes.map((scope) => (
@@ -343,8 +384,8 @@ export function DeploymentsSettingsEditor({
                 disabled={projectsLoading && projects.length === 0}
                 onChange={(event) => {
                   setProjectId(event.target.value);
-                  setConfirmed(false);
-                  setMutation(initialSettingsMutationState());
+                  setActionMessage(null);
+                  setActionError(null);
                 }}
               >
                 <option value="">
@@ -368,30 +409,30 @@ export function DeploymentsSettingsEditor({
         </div>
       )}
 
-      <SettingsMutationPanel
-        title="Apply deployment changes"
-        explanation="Save the selected Vercel team and project, then verify the resulting connection."
-        phase={mutation.phase}
-        error={mutation.error}
-        successMessage={mutation.successMessage}
-        previewPolicy="optional"
-        previewSummary={
-          mutation.preview?.manualSteps?.length
-            ? mutation.preview.manualSteps.join("\n")
-            : mutation.preview
-              ? "PDev automation bridge preview is ready."
-              : null
-        }
-        confirmScope="vercel-bridge-write"
-        confirmed={confirmed}
-        onConfirmedChange={setConfirmed}
-        onPreview={() => void runPreview()}
-        onApply={() => void runApply()}
-        disablePreview={!selectionComplete || !summary.vercelTokenConfigured}
-        disableApply={
-          !selectionComplete || !confirmed || !summary.vercelTokenConfigured
-        }
-      />
+      {actionMessage ? (
+        <p className="text-sm text-emerald-700 dark:text-emerald-300">
+          {actionMessage}
+        </p>
+      ) : null}
+      {actionError ? (
+        <p className="text-sm text-destructive">{actionError}</p>
+      ) : null}
+
+      {dirty && summary.vercelTokenConfigured ? (
+        <div className="rounded-md border border-border p-4 space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Unsaved deployment selection. Confirm to update the automation
+            bridge.
+          </p>
+          <Button
+            type="button"
+            disabled={!selectionComplete || busy}
+            onClick={() => void saveSelection()}
+          >
+            {busy ? "Saving…" : "Save deployment selection"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

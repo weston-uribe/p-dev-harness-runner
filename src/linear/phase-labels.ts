@@ -32,6 +32,7 @@ const COMPLETION_LABELS: Record<string, string> = {
   planning: "Planning complete",
   plan_review: "Plan Review complete",
   implementation: "Building complete",
+  build_complete: "Build complete",
   handoff: "PM handoff",
   code_review: "Code Review complete",
   code_revision: "Code Revision complete",

@@ -258,13 +258,15 @@ export async function handleLinearWebhook(
     logWebhookEvent({
       linearDeliveryId,
       accepted: true,
-      dispatched: true,
+      dispatched: dispatched.dispatched,
+      duplicate: dispatched.duplicate,
       requestId: dispatched.requestId,
     });
 
     return jsonResponse(200, {
       accepted: true,
-      dispatched: true,
+      dispatched: dispatched.dispatched,
+      ...(dispatched.duplicate ? { duplicate: true } : {}),
       requestId: dispatched.requestId,
     });
   } catch {

@@ -41,7 +41,9 @@ export type WebhookIgnoreReason =
 
 export interface WebhookAcceptedResponse {
   accepted: true;
-  dispatched: true;
+  /** False when this delivery is a duplicate of an already-accepted envelope. */
+  dispatched: boolean;
+  duplicate?: boolean;
   /** Opaque job-request id — never an issue key. */
   requestId: string;
 }

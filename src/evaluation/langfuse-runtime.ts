@@ -343,13 +343,18 @@ export async function createLangfuseRuntime(
     recordScore(input: EvaluationScoreInput): void {
       if (demoted || !scoreClient) return;
       try {
+        const scoreClass = input.scoreClass ?? "operational";
+        const defaultComment =
+          scoreClass === "cursor_usage_import"
+            ? "cursor_usage_import scoreClass=cursor_usage_import"
+            : "operational scoreClass=operational";
         const payload: Record<string, unknown> = {
           id: input.id,
           name: input.name,
           dataType: input.dataType,
           value: mapScoreValueForLangfuse(input.dataType, input.value),
           timestamp: input.timestamp,
-          comment: "operational scoreClass=operational",
+          comment: input.comment ?? defaultComment,
         };
         if (input.target === "trace" && input.traceId) {
           payload.traceId = input.traceId;

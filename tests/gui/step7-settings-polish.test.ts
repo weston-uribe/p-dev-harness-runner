@@ -153,7 +153,7 @@ describe("Linear full team name display", () => {
     );
 
     expect(settings).toContain("formatLinearTeamLabel");
-    expect(settings).toContain("teamName: associations[0]?.teamName");
+    expect(settings).toContain("teamName: teamAssociations[0]?.teamName");
     expect(guided).toContain("formatLinearTeamLabel");
     expect(guided).not.toMatch(/\{associations\[0\]\?\.teamKey\} ·/);
   });

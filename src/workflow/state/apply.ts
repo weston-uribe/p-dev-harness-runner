@@ -20,7 +20,14 @@ import {
 } from "./store.js";
 import type { PlanArtifactIdentity } from "../plan-artifact.js";
 import type { ImplementationArtifactIdentity } from "../implementation-artifact.js";
-import type { PhaseExecutionFreeze, WorkflowStateRecord } from "./types.js";
+import type {
+  ActiveRunLease,
+  PhaseExecutionFreeze,
+  WorkflowStateRecord,
+} from "./types.js";
+
+/** Default Code Review / agent lease TTL (covers long Cursor runs + queue delay). */
+export const DEFAULT_ACTIVE_RUN_LEASE_TTL_MS = 45 * 60 * 1000;
 
 export interface ApplyWorkflowTransitionInput {
   store: WorkflowStateStore;
@@ -33,6 +40,10 @@ export interface ApplyWorkflowTransitionInput {
   evidence: TransitionEvidence;
   phaseExecutionId?: string;
   claimActiveRunId?: string;
+  /** When claiming, exclusive lease identity (e.g. code_review:{subject}). */
+  claimLeaseIdentity?: string;
+  claimSubjectIdentity?: string;
+  claimLeaseTtlMs?: number;
   clearActiveRunId?: string;
   returnDestination?: string | null;
   latestPlanArtifact?: PlanArtifactIdentity | null;
@@ -65,7 +76,19 @@ function normalizeWorkflowState(record: WorkflowStateRecord): WorkflowStateRecor
     latestImplementationArtifact: record.latestImplementationArtifact ?? null,
     phaseExecutionFreeze: record.phaseExecutionFreeze ?? null,
     supersededGenerationIdentities: record.supersededGenerationIdentities ?? [],
+    activeRunLease: record.activeRunLease ?? null,
   };
+}
+
+export function isActiveRunLeaseExpired(
+  lease: ActiveRunLease | null | undefined,
+  nowMs: number,
+): boolean {
+  if (!lease?.expiresAt) {
+    return false;
+  }
+  const expires = Date.parse(lease.expiresAt);
+  return Number.isFinite(expires) && expires <= nowMs;
 }
 
 function buildNextState(input: {
@@ -75,6 +98,9 @@ function buildNextState(input: {
   outcome: PhaseOutcome;
   phaseExecutionId?: string;
   claimActiveRunId?: string;
+  claimLeaseIdentity?: string;
+  claimSubjectIdentity?: string;
+  claimLeaseTtlMs?: number;
   clearActiveRunId?: string;
   returnDestination?: string | null;
   latestPlanArtifact?: PlanArtifactIdentity | null;
@@ -98,13 +124,40 @@ function buildNextState(input: {
   }
 
   let activeRunIdentities = [...previous.activeRunIdentities];
+  let activeRunLease = previous.activeRunLease ?? null;
   if (input.claimActiveRunId) {
-    activeRunIdentities = [input.claimActiveRunId];
+    const leaseIdentity =
+      input.claimLeaseIdentity ??
+      `${input.currentPhaseId}:${input.claimActiveRunId}`;
+    activeRunIdentities = [leaseIdentity];
+    const acquiredAt = input.now;
+    const ttlMs = input.claimLeaseTtlMs ?? DEFAULT_ACTIVE_RUN_LEASE_TTL_MS;
+    const expiresAt = new Date(
+      Date.parse(acquiredAt) + ttlMs,
+    ).toISOString();
+    activeRunLease = {
+      identity: leaseIdentity,
+      ownerRunId: input.claimActiveRunId,
+      phaseId: input.currentPhaseId,
+      subjectIdentity: input.claimSubjectIdentity ?? leaseIdentity,
+      acquiredAt,
+      expiresAt,
+      heartbeatAt: acquiredAt,
+    };
   }
   if (input.clearActiveRunId) {
+    const clearsOwner =
+      activeRunLease?.ownerRunId === input.clearActiveRunId ||
+      activeRunIdentities.includes(input.clearActiveRunId);
     activeRunIdentities = activeRunIdentities.filter(
-      (id) => id !== input.clearActiveRunId,
+      (id) =>
+        id !== input.clearActiveRunId &&
+        activeRunLease?.ownerRunId !== input.clearActiveRunId,
     );
+    if (clearsOwner || activeRunLease?.ownerRunId === input.clearActiveRunId) {
+      activeRunLease = null;
+      activeRunIdentities = [];
+    }
   }
 
   let lastAccepted = previous.lastAcceptedReviewDecision;
@@ -206,6 +259,7 @@ function buildNextState(input: {
     lastAcceptedReviewDecision: lastAccepted,
     returnDestination,
     activeRunIdentities,
+    activeRunLease,
     completedPhaseIdentities: completed,
     supersededGenerationIdentities: superseded,
     lastTransitionIdentity: input.transition.idempotencyIdentity,
@@ -335,18 +389,28 @@ export async function applyWorkflowTransition(
         loaded.latestImplementationArtifact?.workflowStateRevision,
     };
 
-    if (
-      input.claimActiveRunId &&
-      loaded.activeRunIdentities.length > 0 &&
-      !loaded.activeRunIdentities.includes(input.claimActiveRunId)
-    ) {
-      return {
-        ok: false,
-        state: loaded,
-        transition: null,
-        reason: "active_run_conflict",
-        attempts,
-      };
+    if (input.claimActiveRunId) {
+      const nowMs = Date.parse(input.now?.() ?? new Date().toISOString());
+      const lease = loaded.activeRunLease ?? null;
+      // Ownership is by owner run id only — matching leaseIdentity alone is not ownership
+      // (another run may hold the same subject key after a crash/recovery race).
+      const ownsExisting =
+        lease?.ownerRunId === input.claimActiveRunId ||
+        loaded.activeRunIdentities.includes(input.claimActiveRunId);
+      const stale = isActiveRunLeaseExpired(lease, nowMs);
+      const hasForeignClaim =
+        (loaded.activeRunIdentities.length > 0 || Boolean(lease)) &&
+        !ownsExisting &&
+        !stale;
+      if (hasForeignClaim) {
+        return {
+          ok: false,
+          state: loaded,
+          transition: null,
+          reason: "active_run_conflict",
+          attempts,
+        };
+      }
     }
 
     if (
@@ -397,6 +461,9 @@ export async function applyWorkflowTransition(
       transition: transition,
       currentPhaseId: input.currentPhaseId,
       outcome: input.outcome,
+      claimLeaseIdentity: input.claimLeaseIdentity,
+      claimSubjectIdentity: input.claimSubjectIdentity,
+      claimLeaseTtlMs: input.claimLeaseTtlMs,
       phaseExecutionId: input.phaseExecutionId,
       claimActiveRunId: input.claimActiveRunId,
       clearActiveRunId: input.clearActiveRunId,
@@ -465,7 +532,7 @@ export async function applyWorkflowTransition(
 }
 
 /**
- * Claim exclusive agent eligibility (one active run identity).
+ * Claim exclusive agent eligibility with a recoverable bounded lease.
  */
 export async function claimAgentRun(input: {
   store: WorkflowStateStore;
@@ -475,6 +542,10 @@ export async function claimAgentRun(input: {
   currentPhaseId: string;
   runId: string;
   evidence: TransitionEvidence;
+  /** Subject-scoped lease identity; defaults to phase:runId. */
+  leaseIdentity?: string;
+  subjectIdentity?: string;
+  leaseTtlMs?: number;
   maxRetries?: number;
 }): Promise<ApplyWorkflowTransitionResult> {
   return applyWorkflowTransition({
@@ -490,6 +561,9 @@ export async function claimAgentRun(input: {
     },
     evidence: input.evidence,
     claimActiveRunId: input.runId,
+    claimLeaseIdentity: input.leaseIdentity,
+    claimSubjectIdentity: input.subjectIdentity,
+    claimLeaseTtlMs: input.leaseTtlMs ?? DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
     phaseExecutionId: input.runId,
     maxRetries: input.maxRetries,
   });

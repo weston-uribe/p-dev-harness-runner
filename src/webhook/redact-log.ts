@@ -9,6 +9,7 @@ export interface WebhookLogFields {
   previousStatusName?: string | null;
   accepted?: boolean;
   dispatched?: boolean;
+  duplicate?: boolean;
   reason?: string | null;
   error?: string | null;
 }

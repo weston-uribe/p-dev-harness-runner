@@ -50,12 +50,14 @@ export const WORKFLOW_OPTIONAL_PHASES: readonly WorkflowOptionalPhaseDefinition[
   {
     statusKey: "plan-review",
     alwaysVisible: true,
+    // Agent column — after Planning
     insertAfter: "planning",
   },
   {
     statusKey: "code-review",
     alwaysVisible: true,
-    insertAfter: "pr-open",
+    // Agent column — after Building (not PR Open / harness column)
+    insertAfter: "building",
   },
 ];
 

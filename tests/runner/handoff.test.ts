@@ -154,6 +154,8 @@ describe("executeHandoffPhase", () => {
       state: "open",
       merged: false,
       repoUrl: "https://github.com/owner/example-target-app",
+      headSha: "abc123def456",
+      baseSha: "fedcba654321",
       changedFiles: [{ path: "src/app/hello/page.tsx", status: "added" }],
       checks: [],
       checkSummary: "No GitHub check runs reported for the PR head commit.",
@@ -311,6 +313,20 @@ describe("executeHandoffPhase", () => {
         body: `## PM handoff\n\n<!--\nharness-orchestrator-v1\nphase: handoff\nrun_id: prior-run\npr_url: https://github.com/owner/example-target-app/pull/4\n-->`,
       },
     ]);
+    // Legacy marker without subject identity only suppresses when already in PM Review.
+    mocks.fetchLinearIssue.mockReset();
+    mocks.fetchLinearIssue.mockResolvedValue({
+      id: "issue-handoff",
+      identifier: "WES-13",
+      title: "M3 implementation integration test",
+      description: issueDescription,
+      status: "PM Review",
+      projectName: "Example Target App",
+      teamName: "WES",
+      teamKey: null,
+      teamId: "team-1",
+      url: "https://linear.app/example/issue/WES-13/test",
+    });
 
     const result = await executeHandoffPhase({
       issueKey: "WES-13",

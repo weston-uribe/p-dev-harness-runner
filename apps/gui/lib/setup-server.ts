@@ -945,6 +945,20 @@ export async function loadLinearWorkspaceEditorState(cwd = resolveCwd()) {
     config: loaded.config,
     controlPlane,
   });
+
+  let workspaceId =
+    loaded.config.linear?.workspaceId ?? evidence?.workspaceId ?? "";
+  let workspaceName = evidence?.workspaceName?.trim() ?? "";
+  if ((!workspaceName || !workspaceId) && summary.linearApiKeyConfigured) {
+    try {
+      const options = await loadLinearWorkspaceOptions();
+      workspaceId = workspaceId || options.workspaceId;
+      workspaceName = workspaceName || options.workspaceName;
+    } catch {
+      // Keep durable evidence only when live org lookup fails.
+    }
+  }
+
   return {
     summary,
     associations,
@@ -953,9 +967,8 @@ export async function loadLinearWorkspaceEditorState(cwd = resolveCwd()) {
       targetRepo: repo.targetRepo,
     })),
     expectedCommittedFingerprint,
-    workspaceId:
-      loaded.config.linear?.workspaceId ?? evidence?.workspaceId ?? "",
-    workspaceName: evidence?.workspaceName ?? "Linear workspace",
+    workspaceId,
+    workspaceName: workspaceName || "Workspace name unavailable",
     driftWarnings,
   };
 }

@@ -171,6 +171,7 @@ export type RunEventName =
   | "preview_captured"
   | "preview_not_found"
   | "handoff_comment_posted"
+  | "code_review_job_dispatched"
   | "handoff_comment_loaded"
   | "pm_feedback_loaded"
   | "revision_pending_pm_feedback"

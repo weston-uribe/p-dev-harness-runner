@@ -6,7 +6,8 @@ import { isRunnerUpgradeUiEnabled } from "@/lib/settings/runner-upgrade-feature-
 export const dynamic = "force-dynamic";
 
 export default async function SettingsDeploymentsPage() {
-  const { summary, runnerUpgradeStatus } = await loadDeploymentsEditorData();
+  const { summary, runnerUpgradeStatus, workspaceHealth } =
+    await loadDeploymentsEditorData();
   const showRunnerUpgrade = isRunnerUpgradeUiEnabled();
 
   return (
@@ -22,7 +23,10 @@ export default async function SettingsDeploymentsPage() {
       {showRunnerUpgrade ? (
         <RunnerUpgradeSettingsCard initialStatus={runnerUpgradeStatus} />
       ) : null}
-      <DeploymentsSettingsEditor initialSummary={summary} />
+      <DeploymentsSettingsEditor
+        initialSummary={summary}
+        workspaceHealth={workspaceHealth}
+      />
     </div>
   );
 }

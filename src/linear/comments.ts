@@ -409,7 +409,61 @@ export interface HandoffCommentBodyInput {
   changeSummary?: string;
 }
 
-export function buildHandoffCommentBody(input: HandoffCommentBodyInput): string {
+/** Informational post-build comment when automated Code Review will run next. */
+export function buildBuildCompleteCommentBody(
+  input: HandoffCommentBodyInput,
+): string {
+  const links: HarnessCommentLink[] = [{ label: "Pull request", url: input.prUrl }];
+  if (input.previewUrl) {
+    links.unshift({ label: "Preview deployment", url: input.previewUrl });
+  }
+
+  const pmSection = [
+    "Build complete. Automated Code Review is starting for this pull request.",
+    "",
+    ...formatLinksAsMarkdown(links),
+    "",
+    "You do not need to approve the preview until automated Code Review finishes and posts the review request.",
+  ];
+  if (input.previewWarning) {
+    pmSection.push("", input.previewWarning);
+  }
+
+  return buildHarnessComment({
+    phaseLabel: getCompletionLabel("build_complete"),
+    pmSection,
+    engineerSection: [
+      ...formatBulletList([
+        `Target repo: ${input.targetRepo}`,
+        input.baseBranch ? `Base branch: \`${input.baseBranch}\`` : "",
+        `Branch: \`${input.branch}\``,
+        `Harness run ID: ${input.harnessRunId}`,
+      ]).filter(Boolean),
+      "",
+      "### Changed files",
+      ...formatChangedFiles(input.changedFiles),
+      "",
+      "### Checks",
+      input.checkSummary,
+    ],
+    footer: "",
+  });
+}
+
+export function buildPmHandoffMarker(subjectIdentity: string): string {
+  return `<!-- p-dev-pm-handoff:${subjectIdentity} -->`;
+}
+
+export function hasPmHandoffMarker(
+  commentBody: string,
+  subjectIdentity: string,
+): boolean {
+  return commentBody.includes(buildPmHandoffMarker(subjectIdentity));
+}
+
+export function buildHandoffCommentBody(input: HandoffCommentBodyInput & {
+  subjectIdentity?: string;
+}): string {
   const links: HarnessCommentLink[] = [{ label: "Pull request", url: input.prUrl }];
   if (input.previewUrl) {
     links.unshift({ label: "Preview deployment", url: input.previewUrl });
@@ -430,7 +484,11 @@ export function buildHandoffCommentBody(input: HandoffCommentBodyInput): string 
     pmSection.push("", input.previewWarning);
   }
 
-  return buildHarnessComment({
+  const marker = input.subjectIdentity
+    ? `${buildPmHandoffMarker(input.subjectIdentity)}\n`
+    : "";
+
+  return `${marker}${buildHarnessComment({
     phaseLabel: getCompletionLabel("handoff"),
     pmSection,
     engineerSection: [
@@ -451,7 +509,7 @@ export function buildHandoffCommentBody(input: HandoffCommentBodyInput): string 
       input.checkSummary,
     ],
     footer: "",
-  }).replace(/\n\n$/, "");
+  })}`;
 }
 
 export function formatHandoffComment(

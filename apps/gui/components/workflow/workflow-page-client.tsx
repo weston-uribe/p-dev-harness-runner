@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { RoleModelRole } from "@harness/config/role-models";
 import type {
   WorkflowBootstrapPayload,
@@ -15,6 +16,10 @@ import {
   useWorkflowOptionalPhasesSave,
   type OptionalPhasesReadiness,
 } from "@/lib/workflow/use-workflow-optional-phases-save";
+import {
+  SETTINGS_DEFAULT_ROUTE,
+  SETTINGS_NAV_ITEMS,
+} from "@/lib/settings/settings-navigation";
 
 type WorkflowPageClientProps = {
   initialBootstrap: WorkflowBootstrapPayload;
@@ -42,6 +47,7 @@ function toCommittedOptionalReadiness(
 }
 
 export function WorkflowPageClient({ initialBootstrap }: WorkflowPageClientProps) {
+  const router = useRouter();
   const [bootstrap, setBootstrap] = useState(initialBootstrap);
   const [committedSelections, setCommittedSelections] = useState(() =>
     toCommittedSelections(initialBootstrap),
@@ -55,6 +61,14 @@ export function WorkflowPageClient({ initialBootstrap }: WorkflowPageClientProps
   const syncOptionalReadinessRef = useRef<(readiness: OptionalPhasesReadiness) => void>(
     () => {},
   );
+
+  // Prefetch Settings shell + default route while the operator is on Workflow.
+  useEffect(() => {
+    router.prefetch(SETTINGS_DEFAULT_ROUTE);
+    for (const item of SETTINGS_NAV_ITEMS) {
+      router.prefetch(item.href);
+    }
+  }, [router]);
 
   const unavailableReason =
     bootstrap.selectedScopeId === undefined && bootstrap.scopes.length > 0

@@ -40,6 +40,13 @@ export {
 } from "./resolution.js";
 
 export {
+  defaultEffortValueIfSupported,
+  filterParamsForSdkPropagation,
+  GUI_RENDERABLE_PARAM_IDS,
+  isGuiRenderableModelParam,
+} from "./sdk-param-propagation.js";
+
+export {
   assertModelSelectionAccepted,
   classifyProviderModelError,
   ModelParameterValidationError,

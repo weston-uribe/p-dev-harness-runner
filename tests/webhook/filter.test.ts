@@ -35,9 +35,12 @@ describe("shouldDispatchLinearIssueEvent", () => {
     expect(shouldDispatchLinearIssueEvent(parseFixture("issue-ready-for-planning.json"))).toEqual({
       dispatch: true,
     });
+  });
+
+  it("rejects harness-owned PR Open transitions", () => {
     expect(
       shouldDispatchLinearIssueEvent(parseFixture("issue-building-to-pr-open.json")),
-    ).toEqual({ dispatch: true });
+    ).toEqual({ dispatch: false, reason: "ignored_status" });
   });
 
   it.each(DISPATCH_TRIGGER_STATUSES)("dispatches for trigger status %s on create", (statusName) => {
@@ -63,6 +66,8 @@ describe("shouldDispatchLinearIssueEvent", () => {
     "Backlog",
     "Planning",
     "Building",
+    "PR Open",
+    "Code Review",
     "PM Review",
     "Revising",
     "Merging",
@@ -238,6 +243,38 @@ describe("shouldDispatchLinearCommentEvent", () => {
         },
         { orchestratorMarker: "harness-orchestrator-v1" },
       ),
+    ).toEqual({ dispatch: false, reason: "ignored_event" });
+  });
+
+  it("ignores run-status and build-complete comments", () => {
+    expect(
+      shouldDispatchLinearCommentEvent({
+        issueKey: "FRE-3",
+        issueId: "issue-1",
+        commentId: "c1",
+        commentBody:
+          "<!-- p-dev-run-status:issue-1 -->\n**PDev accepted this issue**",
+        action: "create",
+        eventType: "Comment",
+        linearDeliveryId: null,
+        linearWebhookId: null,
+        actorSummary: null,
+      }),
+    ).toEqual({ dispatch: false, reason: "ignored_event" });
+
+    expect(
+      shouldDispatchLinearCommentEvent({
+        issueKey: "FRE-3",
+        issueId: "issue-1",
+        commentId: "c2",
+        commentBody:
+          "**Phase:** Build complete\n\n<!--\nharness-orchestrator-v1\nphase: build_complete\nrun_id: run-1\n-->",
+        action: "create",
+        eventType: "Comment",
+        linearDeliveryId: null,
+        linearWebhookId: null,
+        actorSummary: null,
+      }),
     ).toEqual({ dispatch: false, reason: "ignored_event" });
   });
 });

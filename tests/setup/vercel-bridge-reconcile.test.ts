@@ -273,8 +273,96 @@ describe("vercel-bridge-reconcile", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it("returns unhealthy without writing when readiness is not ready", async () => {
+  it("returns unhealthy without writing when Deployment Protection hard-blocks repair", async () => {
     const apply = vi.fn();
+    const result = await reconcileVercelControlPlaneFromRemote({
+      cwd: tempRoot,
+      deps: {
+        loadVercelToken: async () => "token",
+        loadLinearApiKey: async () => "linear",
+        listTeams: async () => [{ id: "team-1", name: "Team", slug: "team" }],
+        listProjects: async (_token, teamId) =>
+          teamId
+            ? [{ id: "prj_one", name: "bridge", accountId: "team-1" }]
+            : [],
+        listEnvVars: async () => [
+          { key: PDEV_BRIDGE_PROJECT_MARKER_ENV, type: "plain", target: ["production"] },
+          { key: "LINEAR_WEBHOOK_SECRET", type: "encrypted", target: ["production"] },
+          { key: "GITHUB_DISPATCH_TOKEN", type: "encrypted", target: ["production"] },
+          { key: "HARNESS_TEAM_KEY", type: "plain", target: ["production"] },
+        ],
+        resolveProductionTarget: async () => ({
+          productionUrl: "https://bridge.example",
+          webhookUrl: "https://bridge.example/api/linear-webhook",
+          deploymentId: "dpl",
+          deploymentUrl: "bridge.example",
+          source: "production-alias",
+        }),
+        preview: async () =>
+          ({
+            actionId: "preview-vercel-bridge",
+            teams: [],
+            projects: [],
+            productionUrl: "https://bridge.example",
+            webhookUrl: "https://bridge.example/api/linear-webhook",
+            deploymentStatus: "ready",
+            endpointReachable: false,
+            endpointStatusCode: 401,
+            envWritePlan: [],
+            requiredEnvPresence: {
+              LINEAR_WEBHOOK_SECRET: "present",
+              GITHUB_DISPATCH_TOKEN: "present",
+              HARNESS_TEAM_KEY: "present",
+            },
+            linearWebhookVerified: false,
+            signedProbeReason: "protection_redirect",
+            readiness: {
+              projectSelected: true,
+              endpointReachable: false,
+              requiredEnvPresence: {
+                LINEAR_WEBHOOK_SECRET: "present",
+                GITHUB_DISPATCH_TOKEN: "present",
+                HARNESS_TEAM_KEY: "present",
+              },
+              linearWebhookVerified: false,
+              signedProbeVerified: false,
+              deploymentRedeployRequired: false,
+              manualComplete: false,
+              ready: false,
+              blockers: [
+                "Vercel Deployment Protection is blocking signed webhook verification.",
+              ],
+            },
+            manualSteps: [],
+            fingerprint: "fp-protection",
+            permission: "remote-secret-write",
+          }) as never,
+        apply,
+      },
+    });
+
+    expect(result.status).toBe("unhealthy");
+    expect(apply).not.toHaveBeenCalled();
+    const state = await readControlPlaneSetupState(tempRoot);
+    expect(state?.vercel).toBeUndefined();
+  });
+
+  it("returns verification_failed when repairable readiness apply is not fully verified", async () => {
+    const apply = vi.fn(async () => ({
+      actionId: "apply-vercel-bridge",
+      status: "deployment-required" as const,
+      projectId: "prj_one",
+      projectName: "bridge",
+      writtenEnvKeys: [],
+      skippedEnvKeys: [],
+      linearWebhookSetup: { mode: "manual-copy" as const, manualSteps: [] },
+      signedProbeVerified: false,
+      deploymentRedeployRequired: true,
+      verified: false,
+      fingerprint: "fp-bad",
+      permission: "remote-secret-write" as const,
+    }));
+
     const result = await reconcileVercelControlPlaneFromRemote({
       cwd: tempRoot,
       deps: {
@@ -327,18 +415,26 @@ describe("vercel-bridge-reconcile", () => {
               deploymentRedeployRequired: false,
               manualComplete: false,
               ready: false,
-              blockers: ["Verify /api/linear-webhook is reachable on the production URL."],
+              blockers: [
+                "Verify /api/linear-webhook is reachable on the production URL.",
+              ],
             },
             manualSteps: [],
             fingerprint: "fp-bad",
             permission: "remote-secret-write",
           }) as never,
-        apply,
+        apply: apply as never,
       },
     });
 
-    expect(result.status).toBe("unhealthy");
-    expect(apply).not.toHaveBeenCalled();
+    expect(result.status).toBe("verification_failed");
+    expect(apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verifyOnly: true,
+        confirmed: true,
+        fingerprint: "fp-bad",
+      }),
+    );
     const state = await readControlPlaneSetupState(tempRoot);
     expect(state?.vercel).toBeUndefined();
   });

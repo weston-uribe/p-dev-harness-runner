@@ -313,9 +313,51 @@ export async function evaluateWorkflowReconcileIssue(input: {
     reason = `pending_side_effects:${incompleteSideEffects.join(",")}`;
   }
 
+  // Explicit Code Review recovery: do not rely on Linear webhooks the harness owns.
+  if (
+    (issue.status ?? "").trim().toLowerCase() === "code review" &&
+    authoritativeState?.latestImplementationArtifact &&
+    action === "noop"
+  ) {
+    const { buildCodeReviewSubjectIdentity } = await import(
+      "../workflow/subject-identities.js"
+    );
+    const { isActiveRunLeaseExpired } = await import("../workflow/state/apply.js");
+    const artifact = authoritativeState.latestImplementationArtifact;
+    const reviewCycle = authoritativeState.cycleCounters.code_review_cycles ?? 0;
+    const subjectIdentity = buildCodeReviewSubjectIdentity({
+      issueKey,
+      prNumber: artifact.prNumber,
+      headSha: artifact.headSha,
+      diffHash: artifact.diffHash,
+      reviewCycle,
+    });
+    const leaseIdentity = `code_review:${subjectIdentity}`;
+    const accepted =
+      authoritativeState.acceptedReviewSubjects?.[subjectIdentity] ?? null;
+    const lease = authoritativeState.activeRunLease;
+    const leaseActive =
+      lease?.identity === leaseIdentity &&
+      !isActiveRunLeaseExpired(lease, Date.now());
+    if (!accepted && !leaseActive) {
+      action = "dispatch";
+      reason = "code_review_subject_missing_active_or_completed";
+      if (input.dispatch && !input.dryRun) {
+        const { createCodeReviewJobAndDispatch } = await import(
+          "../workflow/job-request/dispatch-opaque.js"
+        );
+        await createCodeReviewJobAndDispatch({
+          issueKey,
+          reviewSubjectIdentity: subjectIdentity,
+        });
+        dispatched = true;
+      }
+    }
+  }
+
   const shouldRun = action === "dispatch";
 
-  if (shouldRun && input.dispatch && !input.dryRun) {
+  if (shouldRun && input.dispatch && !input.dryRun && !dispatched) {
     const token = process.env.GITHUB_DISPATCH_TOKEN ?? process.env.GITHUB_TOKEN;
     if (!token) {
       return {
