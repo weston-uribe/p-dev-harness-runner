@@ -18,6 +18,19 @@ export class HarnessMarkerParseError extends Error {
   }
 }
 
+/** Explicit fail-closed classification for control-flow marker integrity. */
+export class HarnessMarkerIntegrityError extends Error {
+  readonly code = "marker_integrity" as const;
+  readonly parseCode: HarnessMarkerParseErrorCode;
+
+  constructor(cause: HarnessMarkerParseError) {
+    super(`marker_integrity: ${cause.message}`);
+    this.name = "HarnessMarkerIntegrityError";
+    this.parseCode = cause.code;
+    this.cause = cause;
+  }
+}
+
 export interface HarnessMarkers {
   orchestratorMarker?: string;
   phase?: string;

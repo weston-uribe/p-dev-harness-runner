@@ -1018,7 +1018,7 @@ export async function executePlanningPhase(
         config,
         planReviewEffectiveEnabled: false,
       });
-      const afterCas1 = await applyPlanningOnlySuccessTransition({
+      const { state: afterCas1 } = await applyPlanningOnlySuccessTransition({
         store,
         issueKey: options.issueKey,
         definition,

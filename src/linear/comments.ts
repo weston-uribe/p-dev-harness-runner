@@ -6,7 +6,13 @@ import {
   formatPullRequestLink,
 } from "../github/links.js";
 import type { ResolvedPreviewLinks } from "../preview/urls.js";
-import { HarnessMarkerParseError, parseHarnessMarkers } from "./markers.js";
+import {
+  HarnessMarkerIntegrityError,
+  HarnessMarkerParseError,
+  parseHarnessMarkers,
+} from "./markers.js";
+
+export { HarnessMarkerIntegrityError, HarnessMarkerParseError };
 import { toPublicProviderIdentityHashes } from "./provider-identity-public.js";
 import {
   buildHarnessComment,
@@ -103,7 +109,12 @@ export interface PhaseStartCommentFooterInput extends HarnessCommentFooterInput 
   githubActionsRunUrl?: string;
 }
 
-function tryParseHarnessMarkers(
+/**
+ * Tolerant parser for optional UI/display discovery only.
+ * Must never be used for idempotency, recovery, reconciliation, or dispatch
+ * suppression control flow.
+ */
+export function tryParseHarnessMarkersForDisplay(
   commentBody: string,
 ): ReturnType<typeof parseHarnessMarkers> | null {
   try {
@@ -116,14 +127,24 @@ function tryParseHarnessMarkers(
   }
 }
 
+function parseHarnessMarkersForControlFlow(
+  commentBody: string,
+): ReturnType<typeof parseHarnessMarkers> {
+  try {
+    return parseHarnessMarkers(commentBody);
+  } catch (error) {
+    if (error instanceof HarnessMarkerParseError) {
+      throw new HarnessMarkerIntegrityError(error);
+    }
+    throw error;
+  }
+}
+
 export function isHarnessOrchestratorComment(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = tryParseHarnessMarkers(commentBody);
-  if (!markers) {
-    return false;
-  }
+  const markers = parseHarnessMarkersForControlFlow(commentBody);
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     Boolean(markers.phase) &&
@@ -349,10 +370,7 @@ export function hasPlanningCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = tryParseHarnessMarkers(commentBody);
-  if (!markers) {
-    return false;
-  }
+  const markers = parseHarnessMarkersForControlFlow(commentBody);
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "planning" &&
@@ -364,10 +382,7 @@ export function hasHandoffCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = tryParseHarnessMarkers(commentBody);
-  if (!markers) {
-    return false;
-  }
+  const markers = parseHarnessMarkersForControlFlow(commentBody);
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "handoff" &&
@@ -380,10 +395,7 @@ export function hasRevisionCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = tryParseHarnessMarkers(commentBody);
-  if (!markers) {
-    return false;
-  }
+  const markers = parseHarnessMarkersForControlFlow(commentBody);
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "revision" &&
@@ -399,10 +411,7 @@ export function findRevisionMarkerForPmFeedback(
   pmFeedbackCommentId: string,
 ): boolean {
   return comments.some((comment) => {
-    const markers = tryParseHarnessMarkers(comment.body);
-    if (!markers) {
-      return false;
-    }
+    const markers = parseHarnessMarkersForControlFlow(comment.body);
     return (
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === "revision" &&
@@ -621,10 +630,7 @@ export function hasMergeCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = tryParseHarnessMarkers(commentBody);
-  if (!markers) {
-    return false;
-  }
+  const markers = parseHarnessMarkersForControlFlow(commentBody);
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "merge" &&
@@ -637,10 +643,7 @@ export function hasProductionSyncMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = tryParseHarnessMarkers(commentBody);
-  if (!markers) {
-    return false;
-  }
+  const markers = parseHarnessMarkersForControlFlow(commentBody);
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "production_sync" &&
@@ -655,10 +658,7 @@ export function findMergeMarkerForPrUrl(
 ): boolean {
   const normalized = prUrl.trim().toLowerCase();
   return comments.some((comment) => {
-    const markers = tryParseHarnessMarkers(comment.body);
-    if (!markers) {
-      return false;
-    }
+    const markers = parseHarnessMarkersForControlFlow(comment.body);
     return (
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === "merge" &&
@@ -675,16 +675,10 @@ export function findLatestMergeMarker(
   const mergeComments = comments
     .map((comment) => ({
       comment,
-      markers: tryParseHarnessMarkers(comment.body),
+      markers: parseHarnessMarkersForControlFlow(comment.body),
     }))
     .filter(
-      (
-        entry,
-      ): entry is {
-        comment: { body: string; createdAt?: string };
-        markers: NonNullable<ReturnType<typeof tryParseHarnessMarkers>>;
-      } =>
-        entry.markers !== null &&
+      (entry) =>
         entry.markers.orchestratorMarker === orchestratorMarker &&
         entry.markers.phase === "merge" &&
         Boolean(entry.markers.runId),
@@ -710,10 +704,7 @@ export function findProductionSyncMarkerForMergeCommit(
 ): boolean {
   const normalized = mergeCommitSha.trim().toLowerCase();
   return comments.some((comment) => {
-    const markers = tryParseHarnessMarkers(comment.body);
-    if (!markers) {
-      return false;
-    }
+    const markers = parseHarnessMarkersForControlFlow(comment.body);
     return (
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === "production_sync" &&
@@ -749,9 +740,8 @@ export function findAdoptableProductionSyncComment(input: {
   const productionBranch = input.productionBranch.trim();
 
   for (const comment of input.comments) {
-    const markers = tryParseHarnessMarkers(comment.body);
+    const markers = parseHarnessMarkersForControlFlow(comment.body);
     if (
-      !markers ||
       markers.orchestratorMarker !== input.orchestratorMarker ||
       markers.phase !== "production_sync" ||
       !markers.runId
@@ -1079,10 +1069,7 @@ export function hasPhaseStartMarker(
   phase: PhaseStartPhase,
   runId: string,
 ): boolean {
-  const markers = tryParseHarnessMarkers(commentBody);
-  if (!markers) {
-    return false;
-  }
+  const markers = parseHarnessMarkersForControlFlow(commentBody);
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === phase &&
@@ -1111,9 +1098,8 @@ export function findLatestPhaseStartRunId(
     if (!comment) {
       continue;
     }
-    const markers = tryParseHarnessMarkers(comment.body);
+    const markers = parseHarnessMarkersForControlFlow(comment.body);
     if (
-      markers &&
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === phase &&
       markers.runId

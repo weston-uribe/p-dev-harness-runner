@@ -6,6 +6,8 @@ import {
   findPhaseStartMarker,
   hasPlanningCompletionMarker,
   hasPhaseStartMarker,
+  HarnessMarkerIntegrityError,
+  tryParseHarnessMarkersForDisplay,
 } from "../../src/linear/comments.js";
 import { hashProviderIdentity } from "../../src/identity/provider-identity-hash.js";
 import {
@@ -107,6 +109,14 @@ describe("linear comments", () => {
     expect(hasPlanningCompletionMarker("no markers here", "harness-orchestrator-v1")).toBe(
       false,
     );
+  });
+
+  it("fails closed on malformed identity hash in planning completion markers", () => {
+    const malformed = `## Plan\n\nDone\n\n<!--\nharness-orchestrator-v1\nphase: planning\nrun_id: run-1\ncursor_agent_id_hash: NOT-A-VALID-HASH\n-->`;
+    expect(() =>
+      hasPlanningCompletionMarker(malformed, "harness-orchestrator-v1"),
+    ).toThrow(HarnessMarkerIntegrityError);
+    expect(tryParseHarnessMarkersForDisplay(malformed)).toBeNull();
   });
 
   it("formats building start comment with GitHub Actions link only and no visible metadata", () => {

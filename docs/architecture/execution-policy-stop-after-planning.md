@@ -28,7 +28,10 @@ After first successful claim, `executionPolicyFreeze` is authoritative:
 - Deterministic `policyIdentity` is a versioned SHA-256 of immutable binding operands only (not delivery/run/timestamps)
 - First-claim audit metadata is never rewritten
 - Retries adopt the same freeze; label removal does not revert to ordinary planning
-- Conflicting / multiple reserved labels after claim fail closed
+- When a reserved label is still attached, adoption requires **exact ID and normalized name** agreement with the freeze (ID-or-name is insufficient)
+- Adopted freezes also revalidate policy schema/version, policy kind, current Linear team ID, issue identity, workflow schema version, and frozen terminal status binding
+- Frozen terminal status revalidation requires the ID to exist on the current team, current name exactly equal to the frozen name, canonical `Canceled`, and still outside dispatch-trigger mappings
+- Conflicting / multiple / unknown reserved labels after claim fail closed
 - Current run ownership uses existing lease/CAS mechanisms only
 
 ## Terminal status
@@ -37,10 +40,12 @@ Before `createPlanningAgent`, resolve exactly one team `Canceled` state that is 
 
 ## Success sequence
 
-1. CAS1: planning complete + plan artifact + freeze + downstream suppression + `terminalization_pending` + pending `planning_only_terminal_transition`
+1. **CAS1 (one compare-and-set):** authoritative planning-only `TransitionResult` (`reason: planning_only_terminalization_pending`, `nextPhaseId: null`, no bypass/orchestrate) atomically records planning completion + plan artifact + freeze + downstream suppression + `terminalization_pending` + pending `planning_only_terminal_transition` with frozen terminal status ID. This is **not** a normal planning-success transition patched afterward.
 2. Linear transition by frozen status ID (skip if already there)
-3. CAS2: side effect `completed` + policy result `terminalized`
+3. **CAS2:** side effect `completed` + policy result `terminalized`
 4. Planning-only success only after CAS2
+
+There is no durable intermediate state where planning is complete but suppression / pending terminal effect are absent.
 
 Reconciliation retries only the frozen `Canceled` transition (or marks complete if already terminal). It never derives Plan Review or implementation work.
 

@@ -5,6 +5,7 @@ import {
   assertPlanningEligibleStatus,
   checkPlanningIdempotency,
 } from "../../src/runner/idempotency.js";
+import { HarnessMarkerIntegrityError } from "../../src/linear/comments.js";
 
 const config: HarnessConfig = {
   version: 1,
@@ -75,6 +76,19 @@ describe("planning idempotency", () => {
     expect(() => assertPlanningEligibleStatus(config, issue, false)).toThrow(
       /wrong_status/,
     );
+  });
+
+  it("fails closed when planning completion marker has malformed identity hash", () => {
+    const issue = { ...baseIssue, status: "Ready for Planning" };
+    const comments = [
+      {
+        id: "c1",
+        body: `## Plan\n\nDone\n\n<!--\nharness-orchestrator-v1\nphase: planning\nrun_id: run-1\ncursor_agent_id_hash: deadbeef\n-->`,
+      },
+    ];
+    expect(() =>
+      checkPlanningIdempotency(config, issue, comments, false),
+    ).toThrow(HarnessMarkerIntegrityError);
   });
 
   it("allows Planning status when force is set", () => {

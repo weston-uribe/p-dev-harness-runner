@@ -347,18 +347,24 @@ describe("execution-policy", () => {
       causedByReviewDecisionIdentity: null,
     });
 
-    const afterCas1 = await applyPlanningOnlySuccessTransition({
-      store,
-      issueKey,
-      definition,
-      expectedStateRevision: withFreeze.stateRevision,
-      freeze: claimed.freeze,
-      planArtifact,
-      planningRunId: "run-1",
-      planningStatusName: "Planning",
-    });
+    const { state: afterCas1, transition } =
+      await applyPlanningOnlySuccessTransition({
+        store,
+        issueKey,
+        definition,
+        expectedStateRevision: withFreeze.stateRevision,
+        freeze: claimed.freeze,
+        planArtifact,
+        planningRunId: "run-1",
+        planningStatusName: "Planning",
+      });
     expect(afterCas1.planningOnlyDownstreamSuppressed).toBe(true);
     expect(afterCas1.executionPolicyResult?.kind).toBe("terminalization_pending");
+    expect(afterCas1.currentPhaseId).toBeNull();
+    expect(transition?.reason).toBe("planning_only_terminalization_pending");
+    expect(transition?.nextPhaseId).toBeNull();
+    expect(transition?.bypass).toBeNull();
+    expect(transition?.requiredAction).toBe("noop");
 
     const afterCas2 = await completePlanningOnlyTerminalization({
       store,
@@ -652,7 +658,7 @@ describe("execution-policy", () => {
       causedByReviewDecisionIdentity: null,
     });
 
-    const afterCas1 = await applyPlanningOnlySuccessTransition({
+    const { state: afterCas1 } = await applyPlanningOnlySuccessTransition({
       store,
       issueKey,
       definition,
@@ -717,7 +723,7 @@ describe("execution-policy", () => {
       causedByReviewDecisionIdentity: null,
     });
 
-    const afterCas1 = await applyPlanningOnlySuccessTransition({
+    const { state: afterCas1 } = await applyPlanningOnlySuccessTransition({
       store,
       issueKey,
       definition,
@@ -744,59 +750,274 @@ describe("execution-policy", () => {
     expect(reconciled.executionPolicyResult?.kind).toBe("terminalized");
   });
 
-  it("suppresses plan review and implementation dispatch between CAS1 and CAS2", async () => {
+  it("requires exact ID and name agreement for attached reserved labels on adopt", () => {
+    const freeze = claimStopAfterPlanningFreeze();
+
+    // same name, different ID
+    expectExecutionPolicyError(
+      () =>
+        claimOrAdoptExecutionPolicyFreeze({
+          issueKey: "FRE-1",
+          issueInternalId: "issue-internal",
+          linearTeamId: "team-1",
+          labels: [{ id: "label-recycled", name: STOP_AFTER_PLANNING_LABEL }],
+          teamStates: TEAM_STATES,
+          workflowSchemaVersion: "product-development-v2",
+          linearDeliveryId: null,
+          firstPlanningRunId: "run-2",
+          existingFreeze: freeze,
+          existingResult: null,
+        }),
+      "conflicting_policy_label",
+    );
+
+    // same ID, conflicting name
+    expectExecutionPolicyError(
+      () =>
+        claimOrAdoptExecutionPolicyFreeze({
+          issueKey: "FRE-1",
+          issueInternalId: "issue-internal",
+          linearTeamId: "team-1",
+          labels: [
+            { id: "label-1", name: "p-dev-execution-policy:other-policy" },
+          ],
+          teamStates: TEAM_STATES,
+          workflowSchemaVersion: "product-development-v2",
+          linearDeliveryId: null,
+          firstPlanningRunId: "run-2",
+          existingFreeze: freeze,
+          existingResult: null,
+        }),
+      "conflicting_policy_label",
+    );
+
+    // exact same ID and name
+    const adopted = claimOrAdoptExecutionPolicyFreeze({
+      issueKey: "FRE-1",
+      issueInternalId: "issue-internal",
+      linearTeamId: "team-1",
+      labels: [{ id: "label-1", name: STOP_AFTER_PLANNING_LABEL }],
+      teamStates: TEAM_STATES,
+      workflowSchemaVersion: "product-development-v2",
+      linearDeliveryId: null,
+      firstPlanningRunId: "run-2",
+      existingFreeze: freeze,
+      existingResult: null,
+    });
+    expect(adopted.kind).toBe("adopted");
+  });
+
+  it("fails closed on adopted freeze team, schema, and renamed terminal mismatches", () => {
+    const freeze = claimStopAfterPlanningFreeze();
+
+    expectExecutionPolicyError(
+      () =>
+        claimOrAdoptExecutionPolicyFreeze({
+          issueKey: "FRE-1",
+          issueInternalId: "issue-internal",
+          linearTeamId: "team-other",
+          labels: [],
+          teamStates: TEAM_STATES,
+          workflowSchemaVersion: "product-development-v2",
+          linearDeliveryId: null,
+          firstPlanningRunId: "run-2",
+          existingFreeze: freeze,
+          existingResult: null,
+        }),
+      "unsupported_team",
+    );
+
+    expectExecutionPolicyError(
+      () =>
+        claimOrAdoptExecutionPolicyFreeze({
+          issueKey: "FRE-1",
+          issueInternalId: "issue-internal",
+          linearTeamId: "team-1",
+          labels: [],
+          teamStates: TEAM_STATES,
+          workflowSchemaVersion: "product-development-v3",
+          linearDeliveryId: null,
+          firstPlanningRunId: "run-2",
+          existingFreeze: freeze,
+          existingResult: null,
+        }),
+      "workflow_schema_mismatch",
+    );
+
+    expectExecutionPolicyError(
+      () =>
+        claimOrAdoptExecutionPolicyFreeze({
+          issueKey: "FRE-1",
+          issueInternalId: "issue-internal",
+          linearTeamId: "team-1",
+          labels: [],
+          teamStates: TEAM_STATES,
+          workflowSchemaVersion: "product-development-v2",
+          linearDeliveryId: null,
+          firstPlanningRunId: "run-2",
+          existingFreeze: {
+            ...freeze,
+            schemaVersion: "p-dev.execution-policy.v0" as ExecutionPolicyFreeze["schemaVersion"],
+          },
+          existingResult: null,
+        }),
+      "policy_schema_mismatch",
+    );
+
+    expectExecutionPolicyError(
+      () =>
+        revalidateFrozenTerminalStatus(
+          [{ id: "state-canceled", name: "Cancelled" }],
+          freeze,
+        ),
+      "terminal_status_invalidated",
+    );
+
+    expectExecutionPolicyError(
+      () =>
+        revalidateFrozenTerminalStatus(
+          [{ id: "state-canceled", name: "Canceled" }],
+          freeze,
+          ["Canceled"],
+        ),
+      "terminal_status_invalidated",
+    );
+  });
+
+  it("proves planning-only success is one CAS with coherent transition metadata", async () => {
     const store = new InMemoryWorkflowStateStore();
     const issueKey = "FRE-102";
-    const base = createEmptyWorkflowState({
+    const empty = createEmptyWorkflowState({
       issueKey,
       workflowSchemaVersion: "product-development-v2",
       effectiveOptionalPhases: { planReview: true, codeReview: false },
     });
+    await store.compareAndSet({
+      issueKey,
+      expectedRevision: 0,
+      next: { ...empty, stateRevision: 1 },
+    });
+
     const freeze = claimStopAfterPlanningFreeze();
-    const planGenerationId = "120aa5ff-005a-44e7-aa5a-0b4922d951b4";
-    const planHash =
-      "84076eff91fba2a0d2dd61d7da598f594d6362dd97186f1f3c7e4ef4dec56ba6";
+    const withFreeze = await persistExecutionPolicyFreezeClaim({
+      store,
+      issueKey,
+      expectedRevision: 1,
+      freeze,
+    });
+
+    const successfulWrites: Array<
+      import("../../src/workflow/state/types.js").WorkflowStateRecord
+    > = [];
+    const originalCompareAndSet = store.compareAndSet.bind(store);
+    store.compareAndSet = async (input) => {
+      const saved = await originalCompareAndSet(input);
+      if (saved) {
+        successfulWrites.push(structuredClone(saved));
+      }
+      return saved;
+    };
+
+    const config = {
+      workflow: migrateWorkflowConfigSection({} as HarnessConfig),
+    } as HarnessConfig;
+    const definition = resolveWorkflowDefinition({
+      workflowConfig: config.workflow,
+      effectiveOptionalPhases: { planReview: true, codeReview: false },
+    });
+    const planArtifact = createPlanArtifactIdentity({
+      planBody: "## Plan\n\nStep 1",
+      plannerRunId: "run-1",
+      promptContractVersion: "planning@1",
+      workflowStateRevision: withFreeze.stateRevision + 1,
+      supersedesPlanGenerationId: null,
+      causedByReviewDecisionIdentity: null,
+    });
+
+    const writesBeforeSuccess = successfulWrites.length;
+    const { state, transition } = await applyPlanningOnlySuccessTransition({
+      store,
+      issueKey,
+      definition,
+      expectedStateRevision: withFreeze.stateRevision,
+      freeze,
+      planArtifact,
+      planningRunId: "run-1",
+      planningStatusName: "Planning",
+    });
+    const successWrites = successfulWrites.slice(writesBeforeSuccess);
+
+    expect(successWrites).toHaveLength(1);
+    const persisted = successWrites[0]!;
+    const downstreamPhases = new Set([
+      "plan_review",
+      "implementation",
+      "implementation_dispatch",
+      "planning_dispatch",
+    ]);
+
+    expect(persisted.planningOnlyDownstreamSuppressed).toBe(true);
+    expect(persisted.executionPolicyResult?.kind).toBe("terminalization_pending");
+    expect(persisted.latestPlanArtifact?.planGenerationId).toBe(
+      planArtifact.planGenerationId,
+    );
+    expect(persisted.currentPhaseId).toBeNull();
+    expect(persisted.planReviewSubjectIdentity ?? null).toBeNull();
+    expect(persisted.implementationSubjectIdentity ?? null).toBeNull();
+    expect(
+      (persisted.sideEffects ?? []).filter(
+        (effect) => effect.kind === "planning_only_terminal_transition",
+      ),
+    ).toHaveLength(1);
+    expect(
+      (persisted.sideEffects ?? []).some((effect) =>
+        ["plan_review_dispatch", "implementation_dispatch"].includes(effect.kind),
+      ),
+    ).toBe(false);
+    expect(persisted.lastTransitionIdentity).toMatch(
+      /^planning_only_terminalization:/,
+    );
+    expect(persisted.lastTransitionIdentity).not.toMatch(/implementation/);
+    expect(persisted.lastTransitionIdentity).not.toMatch(/plan_review/);
+
+    expect(transition).not.toBeNull();
+    expect(transition!.reason).toBe("planning_only_terminalization_pending");
+    expect(transition!.nextPhaseId).toBeNull();
+    expect(transition!.bypass).toBeNull();
+    expect(transition!.requiredAction).toBe("noop");
+    expect(transition!.idempotencyIdentity).toMatch(
+      /^planning_only_terminalization:/,
+    );
+
+    expect(isPlanningOnlySuppressed(persisted)).toBe(true);
+    expect(isPlanningOnlySuppressed(state)).toBe(true);
+    expect(
+      successWrites.filter(
+        (snapshot) =>
+          snapshot.latestPlanArtifact &&
+          !snapshot.planningOnlyDownstreamSuppressed,
+      ),
+    ).toHaveLength(0);
+    expect(
+      [persisted.currentPhaseId, transition!.nextPhaseId].some(
+        (phase) => phase != null && downstreamPhases.has(phase),
+      ),
+    ).toBe(false);
+
     const planReviewSubject = buildPlanReviewSubjectIdentity({
       issueKey,
-      planGenerationId,
-      planHash,
+      planGenerationId: planArtifact.planGenerationId,
+      planHash: planArtifact.planArtifactHash,
       reviewCycle: 0,
     });
     const implementationSubject = buildImplementationSubjectIdentity({
       issueKey,
       targetRepo: "https://github.com/owner/example-target-app",
       baseBranch: "main",
-      planGenerationId,
-      planArtifactHash: planHash,
+      planGenerationId: planArtifact.planGenerationId,
+      planArtifactHash: planArtifact.planArtifactHash,
       implementationCycle: 0,
     });
-
-    let state: import("../../src/workflow/state/types.js").WorkflowStateRecord = {
-      ...base,
-      stateRevision: 1,
-      executionPolicyFreeze: freeze,
-      planningOnlyDownstreamSuppressed: true,
-      executionPolicyResult: {
-        kind: "terminalization_pending",
-        policyIdentity: freeze.policyIdentity,
-        terminalStatusId: freeze.terminalStatusId,
-        planningPhaseExecutionId: "run-1",
-        planGenerationId,
-      },
-      latestPlanArtifact: {
-        planGenerationId,
-        planArtifactHash: planHash,
-        plannerRunId: "run-1",
-        promptContractVersion: "planning@1",
-        workflowStateRevision: 1,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        supersedesPlanGenerationId: null,
-        causedByReviewDecisionIdentity: null,
-      },
-    };
-    store.seed(state);
-
-    expect(isPlanningOnlySuppressed(state)).toBe(true);
 
     const afterPlanReviewPending = await ensurePlanReviewDispatchPending({
       store,
@@ -804,9 +1025,7 @@ describe("execution-policy", () => {
       reviewSubjectIdentity: planReviewSubject,
       state,
     });
-    expect(afterPlanReviewPending).toBe(state);
     expect(afterPlanReviewPending.planReviewSubjectIdentity).toBeNull();
-
     const planReviewDispatch = await ensurePlanReviewJobDispatched({
       store,
       issueKey,
@@ -814,7 +1033,6 @@ describe("execution-policy", () => {
       ownerGeneration: "run-1",
       state,
     });
-    expect(planReviewDispatch.outcome).toBe("already_dispatched");
     expect(planReviewDispatch.httpDispatched).toBe(false);
 
     const afterImplementationPending = await ensureImplementationDispatchPending({
@@ -823,9 +1041,7 @@ describe("execution-policy", () => {
       implementationSubjectIdentity: implementationSubject,
       state,
     });
-    expect(afterImplementationPending).toBe(state);
     expect(afterImplementationPending.implementationSubjectIdentity).toBeNull();
-
     const implementationDispatch = await ensureImplementationJobDispatched({
       store,
       issueKey,
@@ -833,7 +1049,121 @@ describe("execution-policy", () => {
       ownerGeneration: "run-1",
       state,
     });
-    expect(implementationDispatch.outcome).toBe("already_dispatched");
     expect(implementationDispatch.httpDispatched).toBe(false);
+  });
+
+  it("reconcile at planning-only boundaries never dispatches downstream work", async () => {
+    const store = new InMemoryWorkflowStateStore();
+    const issueKey = "FRE-103";
+    const empty = createEmptyWorkflowState({
+      issueKey,
+      workflowSchemaVersion: "product-development-v2",
+    });
+    await store.compareAndSet({
+      issueKey,
+      expectedRevision: 0,
+      next: { ...empty, stateRevision: 1 },
+    });
+    const freeze = claimStopAfterPlanningFreeze();
+    const withFreeze = await persistExecutionPolicyFreezeClaim({
+      store,
+      issueKey,
+      expectedRevision: 1,
+      freeze,
+    });
+    const config = {
+      workflow: migrateWorkflowConfigSection({} as HarnessConfig),
+    } as HarnessConfig;
+    const definition = resolveWorkflowDefinition({
+      workflowConfig: config.workflow,
+      effectiveOptionalPhases: { planReview: false, codeReview: false },
+    });
+    const planArtifact = createPlanArtifactIdentity({
+      planBody: "## Plan\n\nStep 1",
+      plannerRunId: "run-1",
+      promptContractVersion: "planning@1",
+      workflowStateRevision: withFreeze.stateRevision + 1,
+      supersedesPlanGenerationId: null,
+      causedByReviewDecisionIdentity: null,
+    });
+
+    const assertNoDownstream = async (
+      state: import("../../src/workflow/state/types.js").WorkflowStateRecord,
+    ) => {
+      if (!isPlanningOnlySuppressed(state) && !state.latestPlanArtifact) {
+        return;
+      }
+      if (state.latestPlanArtifact) {
+        expect(isPlanningOnlySuppressed(state)).toBe(true);
+      }
+      const planReviewSubject = buildPlanReviewSubjectIdentity({
+        issueKey,
+        planGenerationId:
+          state.latestPlanArtifact?.planGenerationId ??
+          planArtifact.planGenerationId,
+        planHash:
+          state.latestPlanArtifact?.planArtifactHash ??
+          planArtifact.planArtifactHash,
+        reviewCycle: 0,
+      });
+      const implementationSubject = buildImplementationSubjectIdentity({
+        issueKey,
+        targetRepo: "https://github.com/owner/example-target-app",
+        baseBranch: "main",
+        planGenerationId:
+          state.latestPlanArtifact?.planGenerationId ??
+          planArtifact.planGenerationId,
+        planArtifactHash:
+          state.latestPlanArtifact?.planArtifactHash ??
+          planArtifact.planArtifactHash,
+        implementationCycle: 0,
+      });
+      const pr = await ensurePlanReviewJobDispatched({
+        store,
+        issueKey,
+        reviewSubjectIdentity: planReviewSubject,
+        ownerGeneration: "run-1",
+        state,
+      });
+      const impl = await ensureImplementationJobDispatched({
+        store,
+        issueKey,
+        implementationSubjectIdentity: implementationSubject,
+        ownerGeneration: "run-1",
+        state,
+      });
+      expect(pr.httpDispatched).toBe(false);
+      expect(impl.httpDispatched).toBe(false);
+    };
+
+    // before CAS1
+    await assertNoDownstream(withFreeze);
+
+    const { state: afterCas1 } = await applyPlanningOnlySuccessTransition({
+      store,
+      issueKey,
+      definition,
+      expectedStateRevision: withFreeze.stateRevision,
+      freeze,
+      planArtifact,
+      planningRunId: "run-1",
+      planningStatusName: "Planning",
+    });
+    // immediately after CAS1 / before Linear
+    await assertNoDownstream(afterCas1);
+
+    const transitionToTerminal = vi.fn().mockResolvedValue(undefined);
+    // after remote transition but before CAS2 — still pending
+    await assertNoDownstream(afterCas1);
+    const afterCas2 = await reconcilePlanningOnlyTerminalTransition({
+      store,
+      issueKey,
+      freeze,
+      currentStatusId: freeze.terminalStatusId,
+      transitionToTerminal,
+    });
+    await assertNoDownstream(afterCas2);
+    expect(afterCas2.executionPolicyResult?.kind).toBe("terminalized");
+    expect(transitionToTerminal).not.toHaveBeenCalled();
   });
 });
