@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../src/workflow/job-request/dispatch-opaque.js", () => ({
   createCodeReviewJobAndDispatch: mocks.createCodeReviewJobAndDispatch,
   redispatchJobRequestById: vi.fn().mockResolvedValue({
-    requestId: "cr-subject:subject-abc",
+    requestId: "dlv-13ae737eb0b2bd93d5505554aebfeb82",
     dispatched: true,
   }),
 }));

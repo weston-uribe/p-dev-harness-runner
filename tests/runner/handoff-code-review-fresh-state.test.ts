@@ -101,7 +101,7 @@ describe("handoff Code Review fresh-state contract", () => {
       expect(input.reviewSubjectIdentity).toBe(subject);
       return {
         outcome: "dispatched",
-        reviewRequestId: `cr-subject:${subject}`,
+        reviewRequestId: "dlv-522c8b38361b4c426e3048a762c2c381",
         state: {
           ...input.state,
           stateRevision: 9,
@@ -129,7 +129,7 @@ describe("handoff Code Review fresh-state contract", () => {
 
     expect(dispatchResult.outcome).toBe("dispatched");
     expect(dispatchResult.reviewRequestId).toBe(
-      "cr-subject:b4b3af1da3fa55b01518156ac87f3264",
+      "dlv-522c8b38361b4c426e3048a762c2c381",
     );
     expect(mocks.ensureCodeReviewJobDispatched).toHaveBeenCalledWith(
       expect.objectContaining({

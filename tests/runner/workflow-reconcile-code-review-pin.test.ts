@@ -186,7 +186,7 @@ describe("pinned Code Review reconcile", () => {
     expect(result.codeReviewSubjectIdentity).toBe(subject);
     expect(result.codeReviewRequestId).toBe(buildCodeReviewRequestId(subject));
     expect(result.codeReviewRequestId).toBe(
-      "cr-subject:b4b3af1da3fa55b01518156ac87f3264",
+      "dlv-522c8b38361b4c426e3048a762c2c381",
     );
     expect(result.dispatched).toBe(false);
     expect(mocks.ensureCodeReviewJobDispatched).not.toHaveBeenCalled();

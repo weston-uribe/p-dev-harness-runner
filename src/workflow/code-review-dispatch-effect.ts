@@ -28,6 +28,7 @@ import {
 } from "./job-request/dispatch-opaque.js";
 import { createGithubJobRequestStoreFromEnv } from "./job-request/runtime-store.js";
 import { reopenFalseDuplicateJobRequestForRetry } from "./job-request/claim.js";
+import { resolveJobRequestId } from "./job-request/request-id.js";
 import { resolveDispatchGithubToken } from "../public-execution/runtime-repos.js";
 import { CODE_REVIEW_DISPATCH_MAX_CLAIM_RETRIES } from "./reconcile-health.js";
 import { clearActiveRunLeaseIfMatches } from "./state/apply.js";
@@ -35,8 +36,15 @@ import { clearActiveRunLeaseIfMatches } from "./state/apply.js";
 export const MISSING_DISPATCH_TOKEN_MESSAGE =
   "missing_dispatch_token: GITHUB_DISPATCH_TOKEN is not available to the harness runner. Ensure the managed-runner job sets GITHUB_DISPATCH_TOKEN from secrets.HARNESS_GITHUB_TOKEN, then resume with harness:reconcile-workflow --issue <KEY> --phase code_review --dispatch.";
 
-export function buildCodeReviewRequestId(reviewSubjectIdentity: string): string {
+export function buildCodeReviewDeliveryId(reviewSubjectIdentity: string): string {
   return `cr-subject:${reviewSubjectIdentity}`;
+}
+
+/** Deterministic envelope id — must match createCodeReviewJobAndDispatch. */
+export function buildCodeReviewRequestId(reviewSubjectIdentity: string): string {
+  return resolveJobRequestId({
+    linearDeliveryId: buildCodeReviewDeliveryId(reviewSubjectIdentity),
+  });
 }
 
 export function buildCodeReviewDispatchEffectId(

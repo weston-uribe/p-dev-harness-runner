@@ -109,7 +109,7 @@ describe("ensureCodeReviewJobDispatched claim_lost recovery", () => {
 
     expect(isCodeReviewDispatchProven(result.outcome)).toBe(true);
     expect(result.reviewRequestId).toBe(
-      "cr-subject:b4b3af1da3fa55b01518156ac87f3264",
+      "dlv-522c8b38361b4c426e3048a762c2c381",
     );
     expect(result.claimLostRecoveries).toBeGreaterThanOrEqual(1);
     expect(mocks.createCodeReviewJobAndDispatch).toHaveBeenCalledTimes(1);
