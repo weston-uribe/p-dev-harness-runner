@@ -45,6 +45,14 @@ export interface ApplyWorkflowTransitionInput {
   claimSubjectIdentity?: string;
   claimLeaseTtlMs?: number;
   clearActiveRunId?: string;
+  /**
+   * Safe lease clear: only clears when identity + ownerRunId both match the
+   * authoritative lease. Never clears a foreign or newer lease.
+   */
+  clearActiveRunLease?: {
+    expectedIdentity: string;
+    expectedOwnerRunId: string;
+  };
   returnDestination?: string | null;
   latestPlanArtifact?: PlanArtifactIdentity | null;
   latestImplementationArtifact?: ImplementationArtifactIdentity | null;
@@ -103,6 +111,10 @@ function buildNextState(input: {
   claimSubjectIdentity?: string;
   claimLeaseTtlMs?: number;
   clearActiveRunId?: string;
+  clearActiveRunLease?: {
+    expectedIdentity: string;
+    expectedOwnerRunId: string;
+  };
   returnDestination?: string | null;
   latestPlanArtifact?: PlanArtifactIdentity | null;
   latestImplementationArtifact?: ImplementationArtifactIdentity | null;
@@ -158,6 +170,20 @@ function buildNextState(input: {
     if (clearsOwner || activeRunLease?.ownerRunId === input.clearActiveRunId) {
       activeRunLease = null;
       activeRunIdentities = [];
+    }
+  }
+  if (input.clearActiveRunLease) {
+    const expectedIdentity = input.clearActiveRunLease.expectedIdentity.trim();
+    const expectedOwner = input.clearActiveRunLease.expectedOwnerRunId.trim();
+    if (
+      activeRunLease &&
+      activeRunLease.identity === expectedIdentity &&
+      activeRunLease.ownerRunId === expectedOwner
+    ) {
+      activeRunLease = null;
+      activeRunIdentities = activeRunIdentities.filter(
+        (id) => id !== expectedIdentity,
+      );
     }
   }
 
@@ -468,6 +494,7 @@ export async function applyWorkflowTransition(
       phaseExecutionId: input.phaseExecutionId,
       claimActiveRunId: input.claimActiveRunId,
       clearActiveRunId: input.clearActiveRunId,
+      clearActiveRunLease: input.clearActiveRunLease,
       returnDestination: input.returnDestination,
       latestPlanArtifact: input.latestPlanArtifact,
       latestImplementationArtifact: input.latestImplementationArtifact,
@@ -568,4 +595,64 @@ export async function claimAgentRun(input: {
     phaseExecutionId: input.runId,
     maxRetries: input.maxRetries,
   });
+}
+
+/**
+ * CAS-clear an active run lease only when identity and owner match.
+ * Used by handoff / reconcile to drop a stale implementation lease safely.
+ */
+export async function clearActiveRunLeaseIfMatches(input: {
+  store: WorkflowStateStore;
+  issueKey: string;
+  expectedStateRevision: number;
+  expectedIdentity: string;
+  expectedOwnerRunId: string;
+  expectedPhaseId?: string;
+}): Promise<{
+  ok: boolean;
+  state: WorkflowStateRecord | null;
+  reason: string;
+}> {
+  const loaded = await input.store.load(input.issueKey);
+  if (!loaded) {
+    return { ok: false, state: null, reason: "missing_state" };
+  }
+  if (loaded.stateRevision !== input.expectedStateRevision) {
+    return { ok: false, state: loaded, reason: "revision_mismatch" };
+  }
+  const lease = loaded.activeRunLease;
+  if (!lease) {
+    return { ok: true, state: loaded, reason: "already_clear" };
+  }
+  if (
+    lease.identity !== input.expectedIdentity.trim() ||
+    lease.ownerRunId !== input.expectedOwnerRunId.trim()
+  ) {
+    return { ok: false, state: loaded, reason: "lease_mismatch" };
+  }
+  if (
+    input.expectedPhaseId &&
+    lease.phaseId &&
+    lease.phaseId !== input.expectedPhaseId
+  ) {
+    return { ok: false, state: loaded, reason: "phase_mismatch" };
+  }
+  const next: WorkflowStateRecord = {
+    ...loaded,
+    activeRunLease: null,
+    activeRunIdentities: loaded.activeRunIdentities.filter(
+      (id) => id !== lease.identity,
+    ),
+    stateRevision: loaded.stateRevision + 1,
+  };
+  const ok = await input.store.compareAndSet({
+    issueKey: input.issueKey,
+    expectedRevision: loaded.stateRevision,
+    next,
+  });
+  if (!ok) {
+    const latest = await input.store.load(input.issueKey);
+    return { ok: false, state: latest, reason: "cas_conflict" };
+  }
+  return { ok: true, state: next, reason: "cleared" };
 }

@@ -4,7 +4,11 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_PLANNING_TIMEOUT_SECONDS, MILESTONE } from "../../config/defaults.js";
+import {
+  CODE_REVIEW_PROMPT_VERSION,
+  DEFAULT_PLANNING_TIMEOUT_SECONDS,
+  MILESTONE,
+} from "../../config/defaults.js";
 import { loadHarnessConfig } from "../../config/load-config.js";
 import { emptyMergeManifestFields } from "../../artifacts/manifest-fields.js";
 import { writeManifest } from "../../artifacts/manifest.js";
@@ -33,12 +37,15 @@ import {
 import {
   createCodeReviewAgent,
   disposeAgent,
+  downloadAgentReviewArtifacts,
   sendAndObserve,
 } from "../../agents/index.js";
+import { selectPrimaryReviewArtifact } from "../../cursor/review-artifacts.js";
 import { buildCodeReviewSubjectIdentity } from "../../workflow/subject-identities.js";
 import {
   claimAgentRun,
   DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
+  isActiveRunLeaseExpired,
 } from "../../workflow/state/index.js";
 import { resolveDefinitionForConfig } from "../workflow-transition.js";
 import { manifestModelEvidence } from "../../cursor/model.js";
@@ -63,10 +70,12 @@ import {
   evaluateCodeReviewExecutionEligibility,
   evaluateCodeReviewReadiness,
 } from "../../workflow/code-review-readiness.js";
+import { toEngineCodeReviewOutcome } from "../../workflow/review-contracts.js";
 import {
-  extractCodeReviewOutcomeFromText,
-  toEngineCodeReviewOutcome,
-} from "../../workflow/review-contracts.js";
+  REVIEW_DECISION_REPAIR_PROMPT,
+  extractReviewDecision,
+  extractReviewDecisionAfterRepair,
+} from "../../workflow/review-decision-extract.js";
 import { buildTelemetryCorrelation } from "../../evaluation/telemetry/correlation.js";
 import {
   buildPromptProvenance,
@@ -562,13 +571,48 @@ export async function executeCodeReviewPhase(
     leaseTtlMs: DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
   });
   if (!claimResult.ok) {
-    await events.log("idempotency_skip", "info", {
-      reason: "code_review_claim_conflict",
-      reviewSubjectIdentity,
-      claimReason: claimResult.reason,
-    });
-    finalOutcome = "duplicate";
-    errorClassification = "duplicate_phase_completed";
+    const claimReason = String(claimResult.reason ?? "");
+    const lease = claimResult.state?.activeRunLease ?? state.activeRunLease;
+    const leaseExpired = isActiveRunLeaseExpired(lease, Date.now());
+    const sameSubjectActive =
+      lease?.identity === leaseIdentity && !leaseExpired;
+    // Only treat as completed duplicate when durable acceptance exists.
+    // active_run_conflict alone must never terminalize as duplicate_phase_completed.
+    let claimOutcome: FinalOutcome = "failed";
+    let claimClassification: ErrorClassification = "foreign_active_run_conflict";
+    let exitCode = 1;
+    if (acceptedForSubject) {
+      claimOutcome = "duplicate";
+      claimClassification = "duplicate_phase_completed";
+      exitCode = 0;
+    } else if (sameSubjectActive || claimReason.includes("already_active")) {
+      claimOutcome = "duplicate";
+      claimClassification = "active_run_already_claimed";
+      exitCode = 0;
+    } else if (leaseExpired) {
+      claimClassification = "foreign_active_run_conflict";
+      exitCode = 1;
+    } else if (claimReason.includes("foreign_active_conflict")) {
+      claimClassification = "foreign_active_run_conflict";
+      exitCode = 1;
+    } else {
+      claimClassification = "foreign_active_run_conflict";
+      exitCode = 1;
+    }
+    await events.log(
+      claimOutcome === "duplicate" ? "idempotency_skip" : "cursor_event",
+      claimOutcome === "duplicate" ? "info" : "warn",
+      {
+        reason: "code_review_claim_conflict",
+        reviewSubjectIdentity,
+        claimReason,
+        leaseIdentity: lease?.identity ?? null,
+        leaseOwnerRunId: lease?.ownerRunId ?? null,
+        claimClassification,
+      },
+    );
+    finalOutcome = claimOutcome;
+    errorClassification = claimClassification;
     const manifest: RunManifest = {
       runId,
       issueKey: options.issueKey,
@@ -605,7 +649,7 @@ export async function executeCodeReviewPhase(
     };
     await writeManifest(runDirectory, manifest);
     await writeRunSummary(runDirectory, manifest, parsed, resolved);
-    return { manifest, runDirectory, exitCode: 0 };
+    return { manifest, runDirectory, exitCode };
   }
   state = claimResult.state ?? state;
   ownedActiveClaim = true;
@@ -816,28 +860,59 @@ export async function executeCodeReviewPhase(
       const resultPath = getCodeReviewResultPath(runDirectory);
       await writeFile(resultPath, `${observed.assistantText}\n`, "utf8");
 
-      let validated = extractCodeReviewOutcomeFromText(observed.assistantText);
-      if (!validated.ok || !validated.outcome) {
-        // One repair turn: agents sometimes return prose instead of the required JSON.
-        const repairPrompt = [
-          "Your previous reply was not valid structured Code Review output.",
-          `Parser error: ${validated.error ?? "malformed_json"}.`,
-          "Reply again with ONLY a fenced ```json code block matching the required schema.",
-          "Do not include any prose outside the JSON fence.",
-          `Set reviewedPrNumber=${latestImplementation.prNumber},`,
-          `reviewedHeadSha=${latestImplementation.headSha},`,
-          `reviewedDiffHash=${latestImplementation.diffHash}.`,
-        ].join(" ");
+      const downloadedArtifacts = await downloadAgentReviewArtifacts(agent);
+      const primaryArtifact = selectPrimaryReviewArtifact(downloadedArtifacts);
+      if (primaryArtifact) {
+        await writeFile(
+          path.join(runDirectory, "outputs", "code-review-artifact.md"),
+          `${primaryArtifact.text}\n`,
+          "utf8",
+        );
+      }
+
+      const expectedCodeIdentity = {
+        prNumber: latestImplementation.prNumber,
+        headSha: latestImplementation.headSha,
+        diffHash: latestImplementation.diffHash,
+      };
+      let extraction = extractReviewDecision({
+        kind: "code_review",
+        rawResponse: observed.assistantText,
+        artifactText: primaryArtifact?.text ?? null,
+        artifactIdentity: primaryArtifact?.path ?? null,
+        expectedCodeIdentity,
+      });
+      let repairTurnCount = 0;
+
+      if (!extraction.ok || !extraction.codeOutcome) {
         await events.log("cursor_event", "warn", {
           phase: "code_review",
-          event: "structured_outcome_repair_attempt",
-          priorError: validated.error ?? "malformed_json",
+          event: "decision_repair_attempt",
+          priorFailure: extraction.failureClassification ?? "decision_unresolved",
+          extractionSource: extraction.source,
         });
-        observed = await observeWithTimeout(repairPrompt);
+        const repairObs =
+          phaseTrace?.startChild("p-dev.code-review.decision-repair", "generation") ??
+          null;
+        observed = await observeWithTimeout(REVIEW_DECISION_REPAIR_PROMPT);
         cursorAgentId = observed.agentId;
         cursorRunId = observed.runId;
         await writeFile(resultPath, `${observed.assistantText}\n`, "utf8");
-        validated = extractCodeReviewOutcomeFromText(observed.assistantText);
+        extraction = extractReviewDecisionAfterRepair({
+          prior: extraction,
+          repairResponse: observed.assistantText,
+          kind: "code_review",
+          expectedCodeIdentity,
+        });
+        repairTurnCount = extraction.repairTurnCount ?? 1;
+        repairObs?.end({
+          metadata: {
+            repairTurnCount,
+            extractionSource: extraction.source,
+            decision: extraction.decision ?? null,
+            failureClassification: extraction.failureClassification ?? null,
+          },
+        });
       }
 
       const outputRef = await buildArtifactRef({
@@ -846,20 +921,39 @@ export async function executeCodeReviewPhase(
         artifactKind: "agent_output",
       });
 
-      if (!validated.ok || !validated.outcome) {
+      if (!extraction.ok || !extraction.codeOutcome || !extraction.decision) {
         reviewerObs?.end({
           metadata: {
             modelId: observed.model?.id ?? model,
             modelRole: "code_reviewer",
-            schemaFailure: validated.error ?? "malformed_json",
-            repairAttempted: true,
+            schemaFailure:
+              extraction.failureClassification ?? "decision_unresolved",
+            extractionSource: extraction.source,
+            artifactUsed: Boolean(primaryArtifact),
+            repairTurnCount,
           },
         });
+        const failure =
+          extraction.failureClassification ?? "decision_unresolved";
         throw new CodeReviewError(
-          "validation_failed",
-          `Code Review structured outcome invalid: ${validated.error ?? "unknown"}`,
+          failure === "decision_unresolved"
+            ? "decision_unresolved"
+            : "validation_failed",
+          `Code Review decision could not be parsed: ${failure}`,
         );
       }
+
+      await events.log("code_review_decision_extracted", "info", {
+        extractionSource: extraction.source,
+        decision: extraction.decision,
+        artifactUsed: Boolean(primaryArtifact),
+        artifactIdentity: primaryArtifact?.path ?? null,
+        repairTurnCount,
+        attempts: extraction.attempts,
+        promptVersion: CODE_REVIEW_PROMPT_VERSION,
+      });
+
+      const validated = { ok: true as const, outcome: extraction.codeOutcome };
 
       const reviewCycle =
         state.cycleCounters.code_review_cycles ?? 0;

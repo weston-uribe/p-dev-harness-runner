@@ -66,6 +66,7 @@ export {
 export {
   applyWorkflowTransition,
   claimAgentRun,
+  clearActiveRunLeaseIfMatches,
   DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
   isActiveRunLeaseExpired,
   type ApplyWorkflowTransitionInput,

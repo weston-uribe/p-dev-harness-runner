@@ -88,6 +88,15 @@ export function disposeAgent(agent: AgentHandle): Promise<void> {
   return cursorAgentProvider.disposeAgent(agent);
 }
 
+export async function downloadAgentReviewArtifacts(
+  agent: AgentHandle,
+): Promise<import("../cursor/review-artifacts.js").DownloadedReviewArtifact[]> {
+  const { downloadAgentReviewArtifacts: download } = await import(
+    "./cursor-provider.js"
+  );
+  return download(agent);
+}
+
 export type {
   AcquireBuilderAgentParams,
   AcquiredBuilderAgent,

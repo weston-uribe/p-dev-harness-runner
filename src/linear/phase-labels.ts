@@ -69,6 +69,29 @@ export function formatHarnessPhaseLabel(label: string): string {
   return label;
 }
 
+/** Visible Phase line for error cards — phase name only (Outcome carries Error). */
 export function formatHarnessErrorPhaseLabel(phase: HarnessErrorPhase): string {
-  return `${getErrorLabel(phase)} error`;
+  return getErrorLabel(phase);
+}
+
+/** Human-readable Reason line for recoverable review/parse failures. */
+export function formatHarnessErrorReason(
+  phase: HarnessErrorPhase,
+  message: string,
+  errorClassification?: string,
+): string {
+  const classification = (errorClassification ?? "").trim();
+  if (
+    classification === "decision_unresolved" ||
+    classification === "validation_failed" ||
+    /decision could not be parsed|malformed|unresolved/i.test(message)
+  ) {
+    return "Reviewer decision could not be parsed";
+  }
+  const trimmed = message.trim();
+  if (trimmed) {
+    const firstLine = trimmed.split("\n")[0]?.trim() ?? trimmed;
+    return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine;
+  }
+  return classification || `${getErrorLabel(phase)} failed`;
 }

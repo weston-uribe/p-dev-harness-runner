@@ -17,6 +17,7 @@ import {
 } from "./comment-card.js";
 import {
   formatHarnessErrorPhaseLabel,
+  formatHarnessErrorReason,
   getCompletionLabel,
   getPhaseStartLabel,
   type HarnessErrorPhase,
@@ -950,6 +951,12 @@ export function buildErrorCommentBody(
 
   return buildHarnessComment({
     phaseLabel: formatHarnessErrorPhaseLabel(phase),
+    outcomeLabel: "Error",
+    reasonLabel: formatHarnessErrorReason(
+      phase,
+      message,
+      input.errorClassification,
+    ),
     pmSection,
     engineerSection: formatBulletList([
       input.errorClassification

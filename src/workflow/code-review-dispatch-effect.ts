@@ -22,10 +22,15 @@ import {
   markCodeReviewDispatchBlocked,
   markCodeReviewDispatchDispatched,
 } from "./state/side-effects.js";
-import { createCodeReviewJobAndDispatch } from "./job-request/dispatch-opaque.js";
+import {
+  createCodeReviewJobAndDispatch,
+  redispatchJobRequestById,
+} from "./job-request/dispatch-opaque.js";
 import { createGithubJobRequestStoreFromEnv } from "./job-request/runtime-store.js";
+import { reopenFalseDuplicateJobRequestForRetry } from "./job-request/claim.js";
 import { resolveDispatchGithubToken } from "../public-execution/runtime-repos.js";
 import { CODE_REVIEW_DISPATCH_MAX_CLAIM_RETRIES } from "./reconcile-health.js";
+import { clearActiveRunLeaseIfMatches } from "./state/apply.js";
 
 export const MISSING_DISPATCH_TOKEN_MESSAGE =
   "missing_dispatch_token: GITHUB_DISPATCH_TOKEN is not available to the harness runner. Ensure the managed-runner job sets GITHUB_DISPATCH_TOKEN from secrets.HARNESS_GITHUB_TOKEN, then resume with harness:reconcile-workflow --issue <KEY> --phase code_review --dispatch.";
@@ -51,7 +56,8 @@ export type EnsureCodeReviewDispatchOutcome =
   | "claim_lost"
   | "conflicting_subject"
   | "decision_already_accepted"
-  | "reviewer_already_active";
+  | "reviewer_already_active"
+  | "false_duplicate_recovered";
 
 export type EnsureCodeReviewDispatchResult = {
   outcome: EnsureCodeReviewDispatchOutcome;
@@ -71,7 +77,8 @@ export function isCodeReviewDispatchProven(
     outcome === "request_already_present" ||
     outcome === "already_dispatched" ||
     outcome === "decision_already_accepted" ||
-    outcome === "reviewer_already_active"
+    outcome === "reviewer_already_active" ||
+    outcome === "false_duplicate_recovered"
   );
 }
 
@@ -335,6 +342,100 @@ async function attemptDispatchOnce(input: {
   };
 }
 
+/**
+ * Best-effort clear of a leftover implementation lease that blocks Code Review
+ * claims after handoff (FRE-7). Never clears a foreign code_review lease.
+ */
+export async function clearBlockingImplementationLeaseForCodeReview(input: {
+  store: WorkflowStateStore;
+  issueKey: string;
+  state: WorkflowStateRecord;
+}): Promise<WorkflowStateRecord> {
+  const lease = input.state.activeRunLease;
+  if (
+    !lease ||
+    !(
+      lease.phaseId === "implementation" ||
+      lease.identity.startsWith("implementation:")
+    )
+  ) {
+    return input.state;
+  }
+  const cleared = await clearActiveRunLeaseIfMatches({
+    store: input.store,
+    issueKey: input.issueKey,
+    expectedStateRevision: input.state.stateRevision,
+    expectedIdentity: lease.identity,
+    expectedOwnerRunId: lease.ownerRunId,
+    expectedPhaseId: lease.phaseId ?? "implementation",
+  });
+  return cleared.ok && cleared.state ? cleared.state : input.state;
+}
+
+/**
+ * FRE-7 recovery: reopen a completed false-duplicate job request for the same
+ * subject and redispatch once. Returns null when recovery does not apply.
+ */
+export async function recoverFalseDuplicateCodeReviewDispatch(input: {
+  store: WorkflowStateStore;
+  issueKey: string;
+  reviewSubjectIdentity: string;
+  state: WorkflowStateRecord;
+  env?: Record<string, string | undefined>;
+  fetchImpl?: typeof fetch;
+}): Promise<EnsureCodeReviewDispatchResult | null> {
+  const env = input.env ?? process.env;
+  let state = await clearBlockingImplementationLeaseForCodeReview({
+    store: input.store,
+    issueKey: input.issueKey,
+    state: input.state,
+  });
+  const reviewRequestId = buildCodeReviewRequestId(input.reviewSubjectIdentity);
+
+  if (decisionAlreadyAccepted(state, input.reviewSubjectIdentity)) {
+    return null;
+  }
+  if (reviewerAlreadyActive(state, input.reviewSubjectIdentity)) {
+    return null;
+  }
+
+  try {
+    const jobStore = await createGithubJobRequestStoreFromEnv(env);
+    const reopened = await reopenFalseDuplicateJobRequestForRetry(jobStore, {
+      requestId: reviewRequestId,
+      durableCompletionEvidenceAbsent: true,
+    });
+    if (!reopened) {
+      return null;
+    }
+    const token = resolveDispatchGithubToken(env);
+    if (!token) {
+      return {
+        outcome: "missing_dispatch_token",
+        reviewRequestId,
+        state,
+        httpDispatched: false,
+        claimLostRecoveries: 0,
+      };
+    }
+    const redispatched = await redispatchJobRequestById({
+      requestId: reviewRequestId,
+      env,
+      fetchImpl: input.fetchImpl,
+      dispatchToken: token,
+    });
+    return {
+      outcome: "false_duplicate_recovered",
+      reviewRequestId,
+      state,
+      httpDispatched: redispatched.dispatched,
+      claimLostRecoveries: 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function ensureCodeReviewJobDispatched(input: {
   store: WorkflowStateStore;
   issueKey: string;
@@ -348,7 +449,11 @@ export async function ensureCodeReviewJobDispatched(input: {
   const env = input.env ?? process.env;
   const maxRetries =
     input.maxClaimRetries ?? CODE_REVIEW_DISPATCH_MAX_CLAIM_RETRIES;
-  let state = input.state;
+  let state = await clearBlockingImplementationLeaseForCodeReview({
+    store: input.store,
+    issueKey: input.issueKey,
+    state: input.state,
+  });
   let claimLostRecoveries = 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -361,6 +466,27 @@ export async function ensureCodeReviewJobDispatched(input: {
       env,
       fetchImpl: input.fetchImpl,
     });
+
+    if (
+      result.outcome === "already_dispatched" ||
+      result.outcome === "request_already_present"
+    ) {
+      // FRE-7: durable/present request may be a false-duplicate completion.
+      const recovered = await recoverFalseDuplicateCodeReviewDispatch({
+        store: input.store,
+        issueKey: input.issueKey,
+        reviewSubjectIdentity: input.reviewSubjectIdentity,
+        state: result.state,
+        env,
+        fetchImpl: input.fetchImpl,
+      });
+      if (
+        recovered?.outcome === "false_duplicate_recovered" ||
+        recovered?.outcome === "missing_dispatch_token"
+      ) {
+        return { ...recovered, claimLostRecoveries };
+      }
+    }
 
     if (result.outcome !== "claim_lost") {
       return { ...result, claimLostRecoveries };

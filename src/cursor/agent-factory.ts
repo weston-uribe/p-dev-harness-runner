@@ -137,7 +137,8 @@ export type CodeRevisionAgentParams = RevisionAgentParams;
 
 /**
  * Fresh Plan Reviewer agent — must not reuse the planner conversation.
- * Read-only plan mode; never auto-creates a PR.
+ * Agent mode returns normal assistant prose (decision agents, not planners).
+ * Never auto-creates a PR.
  */
 export async function createPlanReviewCloudAgent(
   params: PlanReviewAgentParams,
@@ -146,7 +147,7 @@ export async function createPlanReviewCloudAgent(
   return createCloudAgentWithModel({
     apiKey: params.apiKey,
     model,
-    mode: "plan",
+    mode: "agent",
     config: params.config,
     role: "planReviewer",
     cloud: {
@@ -164,7 +165,7 @@ export async function createPlanReviewCloudAgent(
 
 /**
  * Fresh Code Reviewer agent — must not reuse the implementer conversation.
- * Read-only plan mode on the PR branch; never auto-creates a PR.
+ * Agent mode on the PR branch returns normal assistant prose; never auto-creates a PR.
  */
 export async function createCodeReviewCloudAgent(
   params: CodeReviewAgentParams,
@@ -173,7 +174,7 @@ export async function createCodeReviewCloudAgent(
   return createCloudAgentWithModel({
     apiKey: params.apiKey,
     model,
-    mode: "plan",
+    mode: "agent",
     config: params.config,
     role: "codeReviewer",
     cloud: {

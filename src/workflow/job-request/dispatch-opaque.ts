@@ -180,6 +180,48 @@ export async function createEnvelopeAndDispatch(
   };
 }
 
+/**
+ * Redispatch an existing job-request envelope by id (same subject/request).
+ * Used after reopening a false-duplicate completed envelope.
+ */
+export async function redispatchJobRequestById(input: {
+  requestId: string;
+  env?: Record<string, string | undefined>;
+  fetchImpl?: typeof fetch;
+  dispatchToken?: string;
+}): Promise<{ requestId: string; dispatched: boolean }> {
+  const env = input.env ?? process.env;
+  const dispatchToken =
+    input.dispatchToken?.trim() || resolveDispatchGithubToken(env);
+  if (!dispatchToken) {
+    throw new Error("missing_dispatch_token");
+  }
+  const execution =
+    resolveExecutionRepository(env) ??
+    (() => {
+      const slug = getDispatchRepository();
+      const [owner, repo] = slug.split("/");
+      return owner && repo ? { owner, repo } : null;
+    })();
+  if (!execution) {
+    throw new Error("missing_execution_repository");
+  }
+  const publicEventType = getDispatchEventType();
+  const clientPayload: OpaqueJobDispatchPayload = {
+    requestId: input.requestId,
+    envelopeSchemaVersion: JOB_REQUEST_SCHEMA_VERSION,
+    publicEventType,
+  };
+  await dispatchRepositoryEvent({
+    token: dispatchToken,
+    repository: `${execution.owner}/${execution.repo}`,
+    eventType: publicEventType,
+    clientPayload,
+    fetchImpl: input.fetchImpl,
+  });
+  return { requestId: input.requestId, dispatched: true };
+}
+
 /** Create + dispatch an explicit code_review job (no Linear ack; harness-owned). */
 export async function createCodeReviewJobAndDispatch(input: {
   issueKey: string;

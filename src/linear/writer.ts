@@ -234,6 +234,7 @@ export async function postErrorComment(
   footer: MergeCommentFooterInput,
   phase:
     | "planning"
+    | "plan_review"
     | "implementation"
     | "handoff"
     | "code_review"
