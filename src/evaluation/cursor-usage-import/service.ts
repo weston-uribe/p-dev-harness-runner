@@ -114,6 +114,20 @@ import {
   buildDiscoveryDiagnosticsFromAttribution,
   buildPublicAttributionSnapshot,
 } from "./public-preflight.js";
+import {
+  checkSourceDisposition,
+  buildDefaultDispositionManifest,
+  type DispositionManifest,
+} from "./disposition/registry.js";
+import {
+  resolveRegistryPinFromEnv,
+  runProvenanceScopePipeline,
+  rebuildLateEvidenceScan,
+  assertApplyLateEvidenceClean,
+  type RegistryPin,
+  type RegistryReadResult,
+} from "./provenance-scope/index.js";
+import type { LateEvidenceItem } from "../../provenance/lifecycle/types.js";
 
 export interface CursorUsageImportFilters {
   issueKeys?: string[];
@@ -221,10 +235,62 @@ export interface CursorUsageServiceDeps {
   sleep?: (ms: number) => Promise<void>;
   /** Test seam: override pricing lookup used during apply revalidation. */
   computeCostProxies?: typeof computeCostProxies;
+  /** v14+ provenance registry reader (in-memory or GitHub-backed). */
+  readRegistrySnapshot?: (pin: RegistryPin) => Promise<RegistryReadResult>;
+  /** v14+ resolve registry pin; null skips provenance scope (offline tests). */
+  resolveRegistryPin?: () => RegistryPin | null;
+  /** v14+ late-evidence enumeration seam (seal exclusive → tip). */
+  listLateEvidence?: (input: {
+    pin: RegistryPin;
+    sealCommitSha: string;
+    tipCommitSha: string;
+  }) => Promise<LateEvidenceItem[]>;
+  /** v14+ disposition manifest override (tests). */
+  dispositionManifest?: DispositionManifest;
 }
 
 function publicAgentHash(cloudAgentId: string): string {
   return hashCloudAgentId(cloudAgentId);
+}
+
+function provenanceScopeIdentityFields(
+  manifest: import("./provenance-scope/contracts.js").ProvenanceScopeManifest | null,
+  dispositionDigest: string | null,
+) {
+  if (!manifest) return null;
+  return {
+    contractVersion: manifest.contractVersion,
+    timeContractVersion: manifest.timeContractVersion,
+    registryEventAttributionSlackMs: manifest.registryEventAttributionSlackMs,
+    stateRepository: manifest.pin.stateRepository,
+    stateBranch: manifest.pin.stateBranch,
+    registrySnapshotCommitSha: manifest.pin.registrySnapshotCommitSha,
+    activationEpochId: manifest.activationEpochId,
+    activationPayloadDigest: manifest.activationPayloadDigest,
+    activationHistoryProofDigest: manifest.activationHistoryProofDigest,
+    activationHistoryProofCommitSha: manifest.pin.activationHistoryProofCommitSha,
+    sealedCoverageStart: manifest.sealedInterval?.coverageStart ?? null,
+    sealedCoverageEnd: manifest.sealedInterval?.coverageEnd ?? null,
+    coverageSnapshotCommitSha: manifest.pin.coverageSnapshotCommitSha,
+    coverageSnapshotDigest: manifest.coverageDigest,
+    coverageSealCommitSha: manifest.pin.coverageSealCommitSha,
+    coverageSealDigest: manifest.sealDigest,
+    registryEventSetDigest: manifest.eventSetDigest,
+    includedAgentHashDigest: manifest.includedAgentHashDigest,
+    includedRunOperationSetDigest: manifest.includedRunOperationSetDigest,
+    outsideScopeExclusionDigest: manifest.outsideScopeExclusionDigest,
+    exactTargetTraceDigest: manifest.exactTargetTraceDigest,
+    provenanceScopeManifestDigest: manifest.manifestDigest,
+    dispositionManifestDigest: dispositionDigest,
+  };
+}
+
+async function loadRegistryForPin(
+  pin: RegistryPin | null,
+  deps?: CursorUsageServiceDeps,
+): Promise<RegistryReadResult | null> {
+  if (!pin || !deps?.readRegistrySnapshot) return null;
+  return deps.readRegistrySnapshot(pin);
 }
 
 function filterCandidates(
@@ -1182,6 +1248,25 @@ export async function preflightCsvImport(
     parseOptions: { assumedTimezone, disambiguation: disambiguationPolicy },
   });
 
+  const dispositionManifest =
+    params.deps?.dispositionManifest ?? buildDefaultDispositionManifest();
+  const disposition = checkSourceDisposition({
+    sourceDigestSha256: digestSha256,
+    manifest: dispositionManifest,
+  });
+  if (!disposition.ok) {
+    throw new Error(disposition.code);
+  }
+
+  const registryPin =
+    params.deps?.resolveRegistryPin?.() ?? resolveRegistryPinFromEnv().pin;
+  let registrySnapshot = await loadRegistryForPin(registryPin, params.deps);
+  if (registryPin && registrySnapshot && !registrySnapshot.integrityOk) {
+    throw new Error(
+      `registry_integrity_failure:${registrySnapshot.integrityFailures[0]?.code ?? "unknown"}`,
+    );
+  }
+
   const capabilityManifest = buildSourceCapabilityExclusionManifest(
     parsed.rowEvidence,
   );
@@ -1279,40 +1364,6 @@ export async function preflightCsvImport(
     }
   }
 
-  const identity = buildCanonicalImportIdentity({
-    namespace,
-    environment: environmentFilter,
-    sourceDigestSha256: digestSha256,
-    exportWindow,
-    sourceCoverageSafetyMarginMs: margin,
-    normalizedSourceExclusionSet: [],
-    sourceCapabilityExclusionDigest: capabilityManifest.digest,
-    assumedTimezone,
-    disambiguationPolicy,
-    discoveryConfigContractVersion: discoveryConfig
-      ? CURSOR_USAGE_DISCOVERY_CONFIG_CONTRACT_VERSION
-      : null,
-    canonicalEndpointIdentity:
-      discoveryConfig?.canonicalEndpointIdentity.canonicalUrl ?? null,
-    langfuseProjectScopeDigest:
-      discoveryConfig?.langfuseProjectScopeDigest ?? null,
-    discoveryProvider: discoveryConfig?.provider ?? null,
-    discoveryAlgorithmVersion: shouldDiscover
-      ? CURSOR_USAGE_DISCOVERY_ALGORITHM_VERSION
-      : null,
-    observationEligibilityContract: shouldDiscover
-      ? CURSOR_USAGE_OBSERVATION_ELIGIBILITY_CONTRACT
-      : null,
-    tracePaginationContractVersion: shouldDiscover
-      ? CURSOR_USAGE_TRACE_PAGINATION_CONTRACT_VERSION
-      : null,
-    observationPaginationContractVersion: shouldDiscover
-      ? CURSOR_USAGE_OBSERVATION_PAGINATION_CONTRACT_VERSION
-      : null,
-    deterministicDiscoveryEvidenceDigest: deterministicEvidenceDigest,
-  });
-  const canonicalImportIdentityFp = fingerprintCanonicalImportIdentity(identity);
-
   const attributed = attributeSegmentsToCandidates({
     segments,
     candidates,
@@ -1366,6 +1417,19 @@ export async function preflightCsvImport(
   const { rows, conflicts, attributionSnapshotDigest } =
     buildPublicAttributionSnapshot({ attributed });
 
+  const provenancePipeline = runProvenanceScopePipeline({
+    registry: registrySnapshot,
+    segments,
+    candidates,
+    dispositionManifest,
+    sourceDigestSha256: digestSha256,
+  });
+  if (provenancePipeline.registryIntegrityFailure) {
+    throw new Error(
+      `registry_integrity_failure:${provenancePipeline.sourceScopeBlockedReason ?? "unknown"}`,
+    );
+  }
+
   const computeFn = params.deps?.computeCostProxies ?? computeCostProxies;
   const built = buildAttachmentsFromBundles({
     namespace,
@@ -1393,6 +1457,50 @@ export async function preflightCsvImport(
     sourceScopeComplete = false;
     sourceScopeIncompleteReason = discoveryScopeReason;
   }
+  if (provenancePipeline.sourceScopeBlockedReason) {
+    sourceScopeComplete = false;
+    sourceScopeIncompleteReason = provenancePipeline.sourceScopeBlockedReason;
+  }
+
+  const provenanceScopeFields = provenanceScopeIdentityFields(
+    provenancePipeline.manifest,
+    provenancePipeline.dispositionDigest,
+  );
+
+  const identity = buildCanonicalImportIdentity({
+    namespace,
+    environment: environmentFilter,
+    sourceDigestSha256: digestSha256,
+    exportWindow,
+    sourceCoverageSafetyMarginMs: margin,
+    normalizedSourceExclusionSet: [],
+    sourceCapabilityExclusionDigest: capabilityManifest.digest,
+    assumedTimezone,
+    disambiguationPolicy,
+    discoveryConfigContractVersion: discoveryConfig
+      ? CURSOR_USAGE_DISCOVERY_CONFIG_CONTRACT_VERSION
+      : null,
+    canonicalEndpointIdentity:
+      discoveryConfig?.canonicalEndpointIdentity.canonicalUrl ?? null,
+    langfuseProjectScopeDigest:
+      discoveryConfig?.langfuseProjectScopeDigest ?? null,
+    discoveryProvider: discoveryConfig?.provider ?? null,
+    discoveryAlgorithmVersion: shouldDiscover
+      ? CURSOR_USAGE_DISCOVERY_ALGORITHM_VERSION
+      : null,
+    observationEligibilityContract: shouldDiscover
+      ? CURSOR_USAGE_OBSERVATION_ELIGIBILITY_CONTRACT
+      : null,
+    tracePaginationContractVersion: shouldDiscover
+      ? CURSOR_USAGE_TRACE_PAGINATION_CONTRACT_VERSION
+      : null,
+    observationPaginationContractVersion: shouldDiscover
+      ? CURSOR_USAGE_OBSERVATION_PAGINATION_CONTRACT_VERSION
+      : null,
+    deterministicDiscoveryEvidenceDigest: deterministicEvidenceDigest,
+    provenanceScope: provenanceScopeFields,
+  });
+  const canonicalImportIdentityFp = fingerprintCanonicalImportIdentity(identity);
 
   const approvalFp = fingerprintPreflightApproval({
     canonicalImportIdentity: canonicalImportIdentityFp,
@@ -1401,6 +1509,8 @@ export async function preflightCsvImport(
     expectedScoreManifestDigest:
       built.expectedScoreManifest.expectedScoreManifestDigest,
     attributionSnapshotDigest,
+    provenanceScopeManifestDigest:
+      provenancePipeline.manifest?.manifestDigest ?? null,
   });
 
   const lifecycle: ImportLifecycleState = sourceScopeComplete
@@ -1513,6 +1623,9 @@ export async function preflightCsvImport(
     attributionRows: rows,
     conflictReasonCodes: conflicts,
     attributionSnapshotDigest,
+    provenanceScopeManifestDigest:
+      provenancePipeline.manifest?.manifestDigest ?? null,
+    provenanceScopeIncompleteReason: provenancePipeline.sourceScopeBlockedReason,
   };
 
   const analyticsSummary = buildLedgerAnalyticsSummary({
@@ -1602,6 +1715,7 @@ export async function preflightCsvImport(
       parserEvidence,
       expectedScoreManifest: built.expectedScoreManifest,
       sourceCapabilityExclusionManifest: capabilityManifest,
+      provenanceScopeManifest: provenancePipeline.manifest ?? undefined,
     },
   });
 
@@ -1680,6 +1794,16 @@ export async function applyCsvImport(
   }
   if (!staged.expectedScoreManifest) {
     throw new Error("expected_score_manifest_missing");
+  }
+
+  const dispositionManifest =
+    params.deps?.dispositionManifest ?? buildDefaultDispositionManifest();
+  const disposition = checkSourceDisposition({
+    sourceDigestSha256: staged.preflight.sourceDigestSha256,
+    manifest: dispositionManifest,
+  });
+  if (!disposition.ok) {
+    throw new Error(disposition.code);
   }
 
   // Legacy staged imports (pre-v12 / schema < 3) cannot be applied.
@@ -1768,6 +1892,48 @@ export async function applyCsvImport(
     throw new Error(`source_scope_incomplete:${exportValidation.reason}`);
   }
 
+  const stagedProvenanceManifest = staged.provenanceScopeManifest;
+  const registryPin =
+    stagedProvenanceManifest?.pin ??
+    params.deps?.resolveRegistryPin?.() ??
+    resolveRegistryPinFromEnv().pin;
+
+  let applyRegistrySnapshot: RegistryReadResult | null = null;
+  if (registryPin) {
+    applyRegistrySnapshot = await loadRegistryForPin(registryPin, params.deps);
+    if (applyRegistrySnapshot && !applyRegistrySnapshot.integrityOk) {
+      throw new Error(
+        `registry_integrity_failure:${applyRegistrySnapshot.integrityFailures[0]?.code ?? "unknown"}`,
+      );
+    }
+    if (
+      staged.preflight.provenanceScopeManifestDigest &&
+      !applyRegistrySnapshot
+    ) {
+      throw new Error("provenance_scope_rebuild_unavailable");
+    }
+  }
+
+  if (
+    applyRegistrySnapshot &&
+    stagedProvenanceManifest?.sealedInterval &&
+    params.deps?.listLateEvidence
+  ) {
+    const lateItems = await params.deps.listLateEvidence({
+      pin: registryPin!,
+      sealCommitSha: stagedProvenanceManifest.pin.coverageSealCommitSha,
+      tipCommitSha: registryPin!.registrySnapshotCommitSha,
+    });
+    const lateScan = rebuildLateEvidenceScan({
+      sealCommitSha: stagedProvenanceManifest.pin.coverageSealCommitSha,
+      tipCommitSha: registryPin!.registrySnapshotCommitSha,
+      sealedInterval: stagedProvenanceManifest.sealedInterval,
+      items: lateItems,
+      enumerationComplete: true,
+    });
+    assertApplyLateEvidenceClean(lateScan);
+  }
+
   // Identity / approval revalidation before score client creation.
   const applyEligibility = buildObservationEligibilityWindow({
     exportStartIso: exportValidation.window.startIso,
@@ -1832,6 +1998,37 @@ export async function applyCsvImport(
     candidates = rediscovered.candidates;
     discovered = rediscovered.discovered;
 
+    attributed = attributeSegmentsToCandidates({
+      segments,
+      candidates,
+      canonicalEvents: events,
+    });
+
+    const applyProvenancePipeline = runProvenanceScopePipeline({
+      registry: applyRegistrySnapshot,
+      segments,
+      candidates,
+      dispositionManifest,
+      sourceDigestSha256: staged.preflight.sourceDigestSha256,
+    });
+    if (applyProvenancePipeline.registryIntegrityFailure) {
+      throw new Error(
+        `registry_integrity_failure:${applyProvenancePipeline.sourceScopeBlockedReason ?? "unknown"}`,
+      );
+    }
+    if (
+      staged.preflight.provenanceScopeManifestDigest &&
+      applyProvenancePipeline.manifest?.manifestDigest !==
+        staged.preflight.provenanceScopeManifestDigest
+    ) {
+      throw new Error("preflight_plan_changed:provenance_scope_manifest");
+    }
+
+    const provenanceScopeFields = provenanceScopeIdentityFields(
+      applyProvenancePipeline.manifest,
+      applyProvenancePipeline.dispositionDigest,
+    );
+
     const identity = buildCanonicalImportIdentity({
       namespace,
       environment: environmentFilter,
@@ -1858,6 +2055,7 @@ export async function applyCsvImport(
       deterministicDiscoveryEvidenceDigest: digestCanonical(
         discovered.deterministicEvidence,
       ),
+      provenanceScope: provenanceScopeFields,
     });
     identityFp = fingerprintCanonicalImportIdentity(identity);
     if (identityFp !== staged.preflight.canonicalImportIdentity) {
@@ -1871,11 +2069,6 @@ export async function applyCsvImport(
       throw new Error("preflight_plan_changed:discovery_evidence");
     }
 
-    attributed = attributeSegmentsToCandidates({
-      segments,
-      candidates,
-      canonicalEvents: events,
-    });
     ({ bundles, skipped } = bundleAttributedSegments({
       attributed,
       namespace,
@@ -1926,6 +2119,10 @@ export async function applyCsvImport(
       expectedScoreManifestDigest:
         built.expectedScoreManifest.expectedScoreManifestDigest,
       attributionSnapshotDigest,
+      provenanceScopeManifestDigest:
+        applyProvenancePipeline.manifest?.manifestDigest ??
+        staged.preflight.provenanceScopeManifestDigest ??
+        null,
     });
     if (rebuiltApproval !== staged.preflight.preflightApprovalFingerprint) {
       throw new Error("preflight_plan_changed");

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardCursorUsageGet } from "@/lib/cursor-usage-request-guard";
 import { resolveCursorUsageServerContext } from "@/lib/cursor-usage-server";
+import { resolveProvenanceCoveragePublicStatus } from "@harness/evaluation/cursor-usage-import/provenance-scope/coverage-status.js";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const ctx = await resolveCursorUsageServerContext();
   const d = ctx.discovery;
+  const provenanceCoverage = resolveProvenanceCoveragePublicStatus(process.env);
   return NextResponse.json({
     langfuseConfigured: d.langfuseConfigured,
     configurationStatus: d.configurationStatus,
@@ -25,5 +27,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     errorCode: d.errorCode,
     errorMessage: d.errorMessage,
     adminKeyConfigured: ctx.adminKeyConfigured,
+    provenanceCoverage,
   });
 }

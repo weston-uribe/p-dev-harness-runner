@@ -205,7 +205,7 @@ describe("cursor usage observed window + classification", () => {
   it("bumps importer/parser/canonical/score contract versions", () => {
     expect(PARSER_SCHEMA_VERSION).toBe(2);
     expect(CANONICAL_USAGE_SCHEMA_VERSION).toBe(2);
-    expect(CURSOR_USAGE_IMPORTER_VERSION).toBe("13.0.1");
+    expect(CURSOR_USAGE_IMPORTER_VERSION).toBe("14.0.0");
     expect(SCORE_CONTRACT_VERSION).toBe("11.0.0");
     expect(IMPORT_SCOPE_ID).toBe("pdev_cloud_agent_trace_enrichment_v1");
   });

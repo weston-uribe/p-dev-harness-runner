@@ -1,7 +1,8 @@
 # ADR 0008: Cursor Cloud Agent provenance registry (Linear-harness capture)
 
-**Status:** Accepted (capture-only foundation)  
-**Date:** 2026-07-22
+**Status:** Accepted (capture + importer registry consumption)  
+**Date:** 2026-07-22  
+**Updated:** 2026-07-23
 
 ## Context
 
@@ -110,18 +111,26 @@ Complete coverage requires (test-only until an operator-activated epoch exists):
 
 No complete coverage interval is activated by this change.
 
-### Future importer integration (deferred)
+### Importer registry consumption (implemented)
 
-Importer must **not** consume the registry in this cycle. Future join contract:
+Cursor usage importer **14.0.0+** consumes the private provenance registry under `src/evaluation/cursor-usage-import/provenance-scope/`.
 
-`agentHash + exact registry execution window` (exactly one eligible binding; no nearest-timestamp).
+Join contract (run-operation level, not agent-hash alone):
+
+- Exact agent hash + compatible durable identities are mandatory.
+- Time compatibility uses versioned `CURSOR_USAGE_REGISTRY_TIME_CONTRACT_VERSION` and fixed `registryEventAttributionSlackMs` (initially equal to importer `INGESTION_SLACK_MS`).
+- Slack validates compatibility but **never** selects the nearest run.
+- More than one compatible run after slack → `registry_ambiguous`.
+- Absence-based exclusion (`proven_outside_harness_scope`) requires the entire padded possible activity window inside a **sealed complete** coverage interval.
 
 Explicit:
 
 - Provider API is **not** the sole Apply authority.
-- Absence from an incomplete registry proves nothing.
+- Absence from an incomplete/unsealed registry proves nothing.
 - No historical unknown is manually backfilled.
-- Current real import remains unsafe to Apply.
+- Historical source digests marked `historical_scope_unrecoverable` in the disposition manifest remain permanently non-Applyable.
+- Apply detects overlapping raw late evidence from seal→tip independently of invalidation writers.
+- Activation → history-proof commit → coverage-snapshot commit → seal (in-memory proofs are insufficient).
 
 ### Runner packaging
 
@@ -145,18 +154,22 @@ Checkout, setup, install, build, gate, sync-production, reconcile-only, and eval
 
 Unset or empty mode resolves to `disabled`: no provenance state client, no encryption key required, no provenance network I/O. Workflow references may exist while the variable and secret remain absent.
 
-**Later authorized rollout order (do not perform without explicit approval):**
+**Operator rollout tooling:** `p-dev provenance <action>` / `npm run harness:provenance -- <action>` supports readiness, key generate/install (stdin/restricted file; never echoed), mode transitions, and coverage lifecycle actions (`quiet-window`, `activate`, `inspect-coverage`, `finalize`, `enumerate-seal-to-tip`). Coverage commands emit public-safe JSON only (no key material or provider identities). Fail closed on required-before-shadow and on incomplete coverage at finalize.
 
-1. Deploy/sync runner code with mode still unset/`disabled`
-2. Add `P_DEV_PROVENANCE_KEY_V1` secret
-3. Verify production runs remain `disabled` (doctor + no provenance writes)
-4. Set `P_DEV_CURSOR_PROVENANCE_MODE=shadow` last
+**Authorized live rollout order (when Build-authorized):**
 
-`required` mode, coverage-epoch activation, and importer registry consumption remain prohibited until separate authorization. State-token write permission for provenance paths is not proven until an authorized shadow write. Rollback is setting or deleting the mode variable back to disabled — do not rewrite state-repository history.
+1. Keep production capture on current runner main when capture code is unchanged
+2. Add `P_DEV_PROVENANCE_KEY_V1` secret (retain after any provenance records exist)
+3. Quiet-window across all production dispatch sources
+4. Set `P_DEV_CURSOR_PROVENANCE_MODE=shadow` → planning-only canary
+5. On success: `required` → activation record → required canary → persist history proof + coverage snapshot → seal
+6. Importer Apply only inside sealed complete coverage (or synthetic disposable canary corpus)
+
+Rollback is setting the mode variable back to `disabled` — do not rewrite state-repository history. At most one replacement shadow and one replacement required canary are authorized under the deterministic repair gates.
 
 ## Consequences
 
 - Production phases cannot bypass the provenance wrapper (structural tests).
 - Canaries/probes remain on the generic factory path.
 - Crash windows after provider create and before ack are irreducible gaps unless later reconciled with authoritative evidence.
-- Historical CSV Apply remains blocked until a future complete closed coverage epoch exists and importer consumption is implemented separately.
+- Historical CSV Apply remains blocked via the disposition manifest (`historical_scope_unrecoverable`); future eligible CSVs require sealed complete coverage.

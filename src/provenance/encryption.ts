@@ -89,6 +89,11 @@ export function resolveProvenanceKeyFromEnv(
   return parseProvenanceKey(env[PROVENANCE_KEY_ENV]);
 }
 
+/** Generate a new 32-byte provenance encryption key (hex-encoded). */
+export function generateProvenanceKey(): string {
+  return randomBytes(KEY_BYTES).toString("hex");
+}
+
 export function encryptProviderIdentity(
   plaintext: string,
   key: Buffer,

@@ -1,7 +1,7 @@
 # Execution policy: stop-after-planning
 
-Canary-readiness contract for a later production provenance shadow canary.
-This document describes **implemented** harness behavior. It does **not** authorize a live canary.
+Canary-readiness contract for production provenance shadow / required canaries.
+This document describes **implemented** harness behavior. Live canaries require an authorized Build rollout (see ADR 0008) and must use label adoption only after exact team/name/semantics validation.
 
 ## Label
 

@@ -63,6 +63,7 @@
     "harness:claim-job-request": "tsx src/index.ts claim-job-request",
     "harness:fail-job-request": "tsx src/index.ts fail-job-request",
     "harness:private-state-canary": "tsx src/index.ts private-state-canary",
+    "harness:provenance": "tsx src/index.ts provenance",
     "harness:reconcile-revision": "tsx src/index.ts reconcile-revision",
     "harness:reconcile-merge": "tsx src/index.ts reconcile-merge",
     "harness:reconcile-workflow": "tsx src/index.ts reconcile-workflow",

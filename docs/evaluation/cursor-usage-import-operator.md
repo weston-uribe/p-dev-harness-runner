@@ -2,6 +2,8 @@
 
 Bulk import of Cursor usage CSV into Langfuse as **score-only** enrichment on existing harness phase traces.
 
+Importer **14.0.0+** requires registry-backed ownership classification against the private Cursor Cloud Agent provenance registry (ADR 0008). Absence-based exclusions are allowed only inside a sealed complete coverage interval. Historical source digest `6ae495cf73d288a2…` is dispositioned `historical_scope_unrecoverable` (diagnostic only; Apply permanently disabled). Use Settings → Cursor usage **Provenance coverage** for the exact eligible export window.
+
 ## What this does / does not do
 
 | Does | Does not |

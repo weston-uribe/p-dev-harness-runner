@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { launchAttemptIdPrefix } from "./launch-attempt-id.js";
 import type { ProvenanceEventType } from "./events.js";
 
-const ROOT = ".p-dev/cursor-cloud-agent-provenance/events";
+const PROVENANCE_ROOT = ".p-dev/cursor-cloud-agent-provenance";
+const ROOT = `${PROVENANCE_ROOT}/events`;
 
 /** Singleton per-attempt events. */
 const SINGLETON_EVENTS = new Set<ProvenanceEventType>([
@@ -36,6 +38,75 @@ export function provenanceEventRemotePath(input: {
 
 export function provenanceEventsRootPrefix(): string {
   return ROOT;
+}
+
+export function provenanceLifecycleRootPrefix(): string {
+  return PROVENANCE_ROOT;
+}
+
+function safeLifecycleSegment(value: string, label: string): string {
+  const safe = value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128);
+  if (!safe) {
+    throw new Error(`${label} is required`);
+  }
+  return safe;
+}
+
+export function safeEpochId(epochId: string): string {
+  return safeLifecycleSegment(epochId, "epochId");
+}
+
+export function activationRecordRemotePath(epochId: string): string {
+  return `${PROVENANCE_ROOT}/activations/${safeEpochId(epochId)}/activation.json`;
+}
+
+export function activationHistoryProofRemotePath(epochId: string): string {
+  return `${PROVENANCE_ROOT}/activations/${safeEpochId(epochId)}/history-proof.json`;
+}
+
+export function coverageSnapshotRemotePath(epochId: string): string {
+  return `${PROVENANCE_ROOT}/activations/${safeEpochId(epochId)}/coverage-snapshot.json`;
+}
+
+export function coverageSealRemotePath(epochId: string): string {
+  return `${PROVENANCE_ROOT}/activations/${safeEpochId(epochId)}/seal.json`;
+}
+
+export function coverageGapRemotePath(
+  epochId: string,
+  gapDigest: string,
+): string {
+  return `${PROVENANCE_ROOT}/activations/${safeEpochId(epochId)}/gaps/${gapDigest}.json`;
+}
+
+export function coverageSupersessionRemotePath(
+  supersessionDigest: string,
+): string {
+  return `${PROVENANCE_ROOT}/supersessions/${supersessionDigest}.json`;
+}
+
+export function coverageIntervalInvalidationRemotePath(
+  supersessionDigest: string,
+): string {
+  return coverageSupersessionRemotePath(supersessionDigest);
+}
+
+/** Deterministic identity digest for lifecycle record paths (public-safe). */
+export function lifecycleRecordIdentityDigest(input: {
+  recordKind: string;
+  epochId?: string;
+  primaryDigest: string;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        recordKind: input.recordKind,
+        epochId: input.epochId ?? null,
+        primaryDigest: input.primaryDigest,
+      }),
+      "utf8",
+    )
+    .digest("hex");
 }
 
 /** Derive path from a validated event (for coverage integrity). */

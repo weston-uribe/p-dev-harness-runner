@@ -75,6 +75,52 @@ export interface CanonicalImportIdentity {
   observationPaginationContractVersion?: string;
   /** Digest of deterministic discovery evidence (v13+). */
   deterministicDiscoveryEvidenceDigest?: string;
+  /** Provenance-scope contract version (v14+). */
+  provenanceScopeContractVersion?: string;
+  /** Registry time contract version (v14+). */
+  registryTimeContractVersion?: string;
+  /** Registry event attribution slack ms (v14+). */
+  registryEventAttributionSlackMs?: number;
+  /** Private state repository (v14+). */
+  provenanceStateRepository?: string | null;
+  /** Private state branch (v14+). */
+  provenanceStateBranch?: string | null;
+  /** Immutable registry snapshot commit SHA (v14+). */
+  registrySnapshotCommitSha?: string | null;
+  /** Activation epoch ID (v14+). */
+  activationEpochId?: string | null;
+  /** Activation payload digest (v14+). */
+  activationPayloadDigest?: string | null;
+  /** Activation history proof digest (v14+). */
+  activationHistoryProofDigest?: string | null;
+  /** Activation history proof commit SHA (v14+). */
+  activationHistoryProofCommitSha?: string | null;
+  /** Sealed coverage interval start (v14+). */
+  sealedCoverageStart?: string | null;
+  /** Sealed coverage interval end exclusive (v14+). */
+  sealedCoverageEnd?: string | null;
+  /** Coverage snapshot commit SHA (v14+). */
+  coverageSnapshotCommitSha?: string | null;
+  /** Coverage snapshot digest (v14+). */
+  coverageSnapshotDigest?: string | null;
+  /** Coverage seal commit SHA (v14+). */
+  coverageSealCommitSha?: string | null;
+  /** Coverage seal digest (v14+). */
+  coverageSealDigest?: string | null;
+  /** Registry event-set digest (v14+). */
+  registryEventSetDigest?: string | null;
+  /** Included harness agent-hash set digest (v14+). */
+  includedAgentHashDigest?: string | null;
+  /** Included run-operation set digest (v14+). */
+  includedRunOperationSetDigest?: string | null;
+  /** Outside-scope exclusion manifest digest (v14+). */
+  outsideScopeExclusionDigest?: string | null;
+  /** Exact target-trace manifest digest (v14+). */
+  exactTargetTraceDigest?: string | null;
+  /** Private provenance-scope manifest digest (v14+). */
+  provenanceScopeManifestDigest?: string | null;
+  /** Disposition manifest digest when applicable (v14+). */
+  dispositionManifestDigest?: string | null;
 }
 
 export interface ParserEvidenceArtifact {
@@ -149,6 +195,9 @@ export interface PreflightPrivateArtifact {
   attributionRows?: PublicPreflightAttributionRow[];
   conflictReasonCodes?: string[];
   attributionSnapshotDigest?: string;
+  /** v14+ private provenance-scope manifest digest. */
+  provenanceScopeManifestDigest?: string | null;
+  provenanceScopeIncompleteReason?: string | null;
 }
 
 export interface PublicSummaryArtifact {
@@ -262,6 +311,7 @@ export interface StagingArtifacts {
   parserEvidence?: ParserEvidenceArtifact;
   expectedScoreManifest?: ExpectedScoreManifest;
   sourceCapabilityExclusionManifest?: SourceCapabilityExclusionManifest;
+  provenanceScopeManifest?: import("./provenance-scope/contracts.js").ProvenanceScopeManifest;
 }
 
 const STAGING_SUBDIR = "evaluation-reports/cursor-usage-imports";
@@ -329,6 +379,13 @@ async function writeStagingArtifactsIntoDir(
     await atomicWriteJson(
       path.join(dir, "source-capability-exclusion.private.json"),
       artifacts.sourceCapabilityExclusionManifest,
+      0o600,
+    );
+  }
+  if (artifacts.provenanceScopeManifest) {
+    await atomicWriteJson(
+      path.join(dir, "provenance-scope.private.json"),
+      artifacts.provenanceScopeManifest,
       0o600,
     );
   }
@@ -424,6 +481,16 @@ export async function readStagingArtifacts(
     } catch {
       sourceCapabilityExclusionManifest = undefined;
     }
+    let provenanceScopeManifest:
+      | import("./provenance-scope/contracts.js").ProvenanceScopeManifest
+      | undefined;
+    try {
+      provenanceScopeManifest = JSON.parse(
+        await readFile(path.join(dir, "provenance-scope.private.json"), "utf8"),
+      ) as import("./provenance-scope/contracts.js").ProvenanceScopeManifest;
+    } catch {
+      provenanceScopeManifest = undefined;
+    }
     return {
       canonicalEvents: JSON.parse(canonicalRaw) as CanonicalUsageEvent[],
       preflight: JSON.parse(preflightRaw) as PreflightPrivateArtifact,
@@ -432,6 +499,7 @@ export async function readStagingArtifacts(
       parserEvidence,
       expectedScoreManifest,
       sourceCapabilityExclusionManifest,
+      provenanceScopeManifest,
     };
   } catch {
     return null;
@@ -540,6 +608,31 @@ export function buildCanonicalImportIdentity(params: {
   tracePaginationContractVersion?: string | null;
   observationPaginationContractVersion?: string | null;
   deterministicDiscoveryEvidenceDigest?: string | null;
+  provenanceScope?: {
+    contractVersion: string;
+    timeContractVersion: string;
+    registryEventAttributionSlackMs: number;
+    stateRepository: string | null;
+    stateBranch: string | null;
+    registrySnapshotCommitSha: string | null;
+    activationEpochId: string | null;
+    activationPayloadDigest: string | null;
+    activationHistoryProofDigest: string | null;
+    activationHistoryProofCommitSha: string | null;
+    sealedCoverageStart: string | null;
+    sealedCoverageEnd: string | null;
+    coverageSnapshotCommitSha: string | null;
+    coverageSnapshotDigest: string | null;
+    coverageSealCommitSha: string | null;
+    coverageSealDigest: string | null;
+    registryEventSetDigest: string | null;
+    includedAgentHashDigest: string | null;
+    includedRunOperationSetDigest: string | null;
+    outsideScopeExclusionDigest: string | null;
+    exactTargetTraceDigest: string | null;
+    provenanceScopeManifestDigest: string | null;
+    dispositionManifestDigest: string | null;
+  } | null;
 }): CanonicalImportIdentity {
   return {
     namespace: params.namespace,
@@ -578,6 +671,49 @@ export function buildCanonicalImportIdentity(params: {
       params.observationPaginationContractVersion ?? undefined,
     deterministicDiscoveryEvidenceDigest:
       params.deterministicDiscoveryEvidenceDigest ?? undefined,
+    provenanceScopeContractVersion:
+      params.provenanceScope?.contractVersion ?? undefined,
+    registryTimeContractVersion:
+      params.provenanceScope?.timeContractVersion ?? undefined,
+    registryEventAttributionSlackMs:
+      params.provenanceScope?.registryEventAttributionSlackMs ?? undefined,
+    provenanceStateRepository:
+      params.provenanceScope?.stateRepository ?? undefined,
+    provenanceStateBranch: params.provenanceScope?.stateBranch ?? undefined,
+    registrySnapshotCommitSha:
+      params.provenanceScope?.registrySnapshotCommitSha ?? undefined,
+    activationEpochId: params.provenanceScope?.activationEpochId ?? undefined,
+    activationPayloadDigest:
+      params.provenanceScope?.activationPayloadDigest ?? undefined,
+    activationHistoryProofDigest:
+      params.provenanceScope?.activationHistoryProofDigest ?? undefined,
+    activationHistoryProofCommitSha:
+      params.provenanceScope?.activationHistoryProofCommitSha ?? undefined,
+    sealedCoverageStart:
+      params.provenanceScope?.sealedCoverageStart ?? undefined,
+    sealedCoverageEnd: params.provenanceScope?.sealedCoverageEnd ?? undefined,
+    coverageSnapshotCommitSha:
+      params.provenanceScope?.coverageSnapshotCommitSha ?? undefined,
+    coverageSnapshotDigest:
+      params.provenanceScope?.coverageSnapshotDigest ?? undefined,
+    coverageSealCommitSha:
+      params.provenanceScope?.coverageSealCommitSha ?? undefined,
+    coverageSealDigest:
+      params.provenanceScope?.coverageSealDigest ?? undefined,
+    registryEventSetDigest:
+      params.provenanceScope?.registryEventSetDigest ?? undefined,
+    includedAgentHashDigest:
+      params.provenanceScope?.includedAgentHashDigest ?? undefined,
+    includedRunOperationSetDigest:
+      params.provenanceScope?.includedRunOperationSetDigest ?? undefined,
+    outsideScopeExclusionDigest:
+      params.provenanceScope?.outsideScopeExclusionDigest ?? undefined,
+    exactTargetTraceDigest:
+      params.provenanceScope?.exactTargetTraceDigest ?? undefined,
+    provenanceScopeManifestDigest:
+      params.provenanceScope?.provenanceScopeManifestDigest ?? undefined,
+    dispositionManifestDigest:
+      params.provenanceScope?.dispositionManifestDigest ?? undefined,
   };
 }
 
@@ -593,6 +729,7 @@ export function fingerprintPreflightApproval(params: {
   targetTraceSetDigest: string;
   expectedScoreManifestDigest: string;
   attributionSnapshotDigest?: string | null;
+  provenanceScopeManifestDigest?: string | null;
 }): string {
   return digestCanonical({
     canonicalImportIdentity: params.canonicalImportIdentity,
@@ -600,6 +737,7 @@ export function fingerprintPreflightApproval(params: {
     targetTraceSetDigest: params.targetTraceSetDigest,
     expectedScoreManifestDigest: params.expectedScoreManifestDigest,
     attributionSnapshotDigest: params.attributionSnapshotDigest ?? null,
+    provenanceScopeManifestDigest: params.provenanceScopeManifestDigest ?? null,
   });
 }
 

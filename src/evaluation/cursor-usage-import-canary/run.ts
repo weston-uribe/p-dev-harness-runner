@@ -384,10 +384,37 @@ async function seedCanaryTraces(params: {
     await runtime.flushAndShutdown();
   }
 
-  // Align CSV/export timestamps with seed completion so export containment
-  // (margin=0) still covers observation windows under Langfuse clock skew.
-  const planningTs = new Date(Date.now() - 60_000).toISOString();
-  const planReviewTs = new Date(Date.now() + 60_000).toISOString();
+  // Prefer authoritative Langfuse trace timestamps. Reusing a pinned canary
+  // issue key keeps deterministic trace IDs whose stored timestamps may be
+  // older than this process clock; CSV/export windows must cover those.
+  const client = await createLangfuseApiClient(params.config);
+  let planningTs: string | null = null;
+  let planReviewTs: string | null = null;
+  for (const [index, traceId] of traceIds.entries()) {
+    try {
+      const response = await client.api.trace.get(traceId);
+      const body = asRecord(response);
+      const ts =
+        (typeof body?.timestamp === "string" && body.timestamp) ||
+        (typeof body?.createdAt === "string" && body.createdAt) ||
+        null;
+      if (!ts) continue;
+      if (index === 0) planningTs = ts;
+      if (index === 1) planReviewTs = ts;
+    } catch {
+      // Fall through to process-clock alignment below.
+    }
+  }
+
+  if (!planningTs || !planReviewTs) {
+    // Fresh seeds: align CSV/export timestamps with seed completion so export
+    // containment (margin=0) still covers observation windows under skew.
+    planningTs = new Date(Date.now() - 60_000).toISOString();
+    planReviewTs = new Date(Date.now() + 60_000).toISOString();
+  } else if (Date.parse(planReviewTs) <= Date.parse(planningTs)) {
+    planReviewTs = new Date(Date.parse(planningTs) + 1_000).toISOString();
+  }
+
   return { traceIds, planningTs, planReviewTs };
 }
 

@@ -9,8 +9,12 @@ import {
 import { decideConflictRetry } from "../workflow/state/conflict.js";
 import { DEFAULT_WORKFLOW_STATE_BRANCH } from "../public-execution/runtime-repos.js";
 import { CursorProvenanceError } from "./errors.js";
+import type { ProvenanceEventRecord } from "./event-integrity.js";
 import type { ProvenanceEvent } from "./events.js";
-import { provenanceEventRemotePath } from "./paths.js";
+import {
+  provenanceEventRemotePath,
+  provenanceEventsRootPrefix,
+} from "./paths.js";
 
 export interface GithubProvenanceEventStoreOptions {
   client: GitHubClient;
@@ -32,7 +36,19 @@ export interface PersistEventResult {
   commitSha: string | null;
 }
 
-export class GithubProvenanceEventStore {
+export interface ProvenanceEventStore {
+  persistImmutableEvent(input: {
+    event: ProvenanceEvent;
+    bindingOrStageId?: string;
+    commitMessage: string;
+  }): Promise<PersistEventResult>;
+  loadEvent(path: string): Promise<ProvenanceEvent | null>;
+  enumerateEventSnapshotAtCommit?(
+    commitSha: string,
+  ): Promise<ProvenanceEventRecord[]>;
+}
+
+export class GithubProvenanceEventStore implements ProvenanceEventStore {
   private readonly branch: string;
   private readonly maxConflictRetries: number;
   private readonly autoCreateBranch: boolean;
@@ -230,10 +246,74 @@ export class GithubProvenanceEventStore {
       }
     }
   }
+
+  /**
+   * Complete tree-walk of provenance events at a pinned commit.
+   * Fails closed when GitHub truncates the recursive tree response.
+   */
+  async enumerateEventSnapshotAtCommit(
+    commitSha: string,
+  ): Promise<ProvenanceEventRecord[]> {
+    const { client, owner, repo } = this.options;
+    const commit = await client.getGitCommit(owner, repo, commitSha);
+    const tree = await client.getGitTree({
+      owner,
+      repo,
+      treeSha: commit.tree.sha,
+      recursive: true,
+    });
+    if (tree.truncated) {
+      throw new CursorProvenanceError(
+        "cursor_provenance_coverage_integrity_error",
+        "Provenance event tree enumeration truncated.",
+      );
+    }
+
+    const eventsPrefix = `${provenanceEventsRootPrefix()}/`;
+    const eventPaths = tree.tree
+      .filter(
+        (entry) =>
+          entry.type === "blob" &&
+          typeof entry.path === "string" &&
+          entry.path.startsWith(eventsPrefix) &&
+          entry.path.endsWith(".json"),
+      )
+      .map((entry) => entry.path!)
+      .sort();
+
+    const records: ProvenanceEventRecord[] = [];
+    for (const path of eventPaths) {
+      const content = await client.getRepositoryContent(
+        owner,
+        repo,
+        path,
+        commitSha,
+      );
+      if (!content) {
+        throw new CursorProvenanceError(
+          "cursor_provenance_coverage_integrity_error",
+          "Provenance event path missing at pinned commit.",
+        );
+      }
+      const raw = client.decodeRepositoryContent(content);
+      try {
+        records.push({
+          path,
+          event: JSON.parse(raw) as ProvenanceEvent,
+        });
+      } catch {
+        throw new CursorProvenanceError(
+          "cursor_provenance_state_unavailable",
+          "Malformed provenance event at pinned commit.",
+        );
+      }
+    }
+    return records;
+  }
 }
 
 /** In-memory store for loopback tests. */
-export class InMemoryProvenanceEventStore {
+export class InMemoryProvenanceEventStore implements ProvenanceEventStore {
   private readonly events = new Map<string, ProvenanceEvent>();
 
   async persistImmutableEvent(input: {
@@ -275,11 +355,20 @@ export class InMemoryProvenanceEventStore {
     return [...this.events.values()].map((e) => structuredClone(e));
   }
 
+  async enumerateEventSnapshotAtCommit(
+    _commitSha: string,
+  ): Promise<ProvenanceEventRecord[]> {
+    const eventsPrefix = `${provenanceEventsRootPrefix()}/`;
+    const records: ProvenanceEventRecord[] = [];
+    for (const [path, event] of this.events.entries()) {
+      if (path.startsWith(eventsPrefix) && path.endsWith(".json")) {
+        records.push({ path, event: structuredClone(event) });
+      }
+    }
+    return records.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
   clear(): void {
     this.events.clear();
   }
 }
-
-export type ProvenanceEventStore =
-  | GithubProvenanceEventStore
-  | InMemoryProvenanceEventStore;

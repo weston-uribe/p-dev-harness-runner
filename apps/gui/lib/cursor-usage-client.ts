@@ -17,6 +17,23 @@ async function cursorUsageFetch(
   });
 }
 
+export interface ProvenanceCoveragePublicStatus {
+  provenanceConfigured: boolean;
+  mode: string;
+  activeEpochId: string | null;
+  earliestEligibleCsvUtc: string | null;
+  latestSealedCompleteUtc: string | null;
+  stateContractVersion: string | null;
+  coverageContractVersion: string | null;
+  activationDigestPrefix: string | null;
+  coverageDigestPrefix: string | null;
+  sealDigestPrefix: string | null;
+  unresolvedOrGapCount: number;
+  absenceBasedExclusionAuthorized: boolean;
+  historicalDispositionNote: string | null;
+  exportGuidance: string | null;
+}
+
 export interface CursorUsageConfigResponse {
   langfuseConfigured: boolean;
   configurationStatus:
@@ -36,6 +53,7 @@ export interface CursorUsageConfigResponse {
   errorCode: string | null;
   errorMessage: string | null;
   adminKeyConfigured: boolean;
+  provenanceCoverage?: ProvenanceCoveragePublicStatus | null;
 }
 
 export interface PublicPreflightRow {

@@ -28,6 +28,7 @@ import { ApplyConfirm } from "./ApplyConfirm";
 import { ResultsPanel } from "./ResultsPanel";
 import { AnalyticsPanel } from "./AnalyticsPanel";
 import { DiscoveryConfigPanel } from "./DiscoveryConfigPanel";
+import { ProvenanceCoveragePanel } from "./ProvenanceCoveragePanel";
 
 interface CursorUsagePageProps {
   nonce: string | null;
@@ -329,6 +330,10 @@ export function CursorUsagePage({ nonce }: CursorUsagePageProps) {
       </div>
 
       <DiscoveryConfigPanel config={config} />
+
+      <ProvenanceCoveragePanel
+        status={config?.provenanceCoverage ?? null}
+      />
 
       <UploadPanel
         file={file}
