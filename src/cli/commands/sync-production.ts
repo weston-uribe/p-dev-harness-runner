@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import { EXIT_CONFIG } from "../exit-codes.js";
+import { EXIT_CONFIG, EXIT_RUN_FAILURE, EXIT_SUCCESS } from "../exit-codes.js";
 import { loadHarnessConfig } from "../../config/load-config.js";
 import { executeProductionSyncForIssue } from "../../runner/phases/production-sync.js";
 import { fetchLinearIssue } from "../../linear/client.js";
@@ -282,5 +282,5 @@ export async function runSyncProductionCommand(
     }
   }
 
-  return 0;
+  return summary.issuesFailed > 0 ? EXIT_RUN_FAILURE : EXIT_SUCCESS;
 }
