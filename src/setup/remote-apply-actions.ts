@@ -105,7 +105,9 @@ async function buildHarnessSecretWriteRequests(input: {
         ? input.operatorInput?.linearApiKey
         : entry.name === "CURSOR_API_KEY"
           ? input.operatorInput?.cursorApiKey
-          : input.operatorInput?.githubToken;
+          : entry.name === "VERCEL_TOKEN"
+            ? input.operatorInput?.vercelToken
+            : input.operatorInput?.githubToken;
 
     if (!operatorValue?.trim()) {
       skippedSecretNames.push(entry.name);

@@ -67,14 +67,16 @@ export function createProgram(): Command {
     .description("Validate config, allowlist, and optional Linear auth")
     .option(
       "--profile <profile>",
-      "Validation profile: full (default phase), merge (GitHub/Linear), or reconciler (strict heartbeat/schedule health)",
+      "Validation profile: full (default phase), merge (GitHub/Linear), reconciler (strict heartbeat/schedule health), or production (production-sync / Vercel deploy credential)",
       "full",
     )
     .action(async (options: { profile?: string }) => {
       const configPath = program.opts<{ config: string }>().config;
       const raw = options.profile?.trim().toLowerCase();
       const profile =
-        raw === "merge" || raw === "reconciler" ? raw : "full";
+        raw === "merge" || raw === "reconciler" || raw === "production"
+          ? raw
+          : "full";
       const exitCode = await runDoctor({ configPath, profile });
       process.exitCode = exitCode;
     });
@@ -286,7 +288,7 @@ export function createProgram(): Command {
   program
     .command("upgrade-target-workflows")
     .description(
-      "Audit and upgrade managed target-repo production-sync workflows (contract v2)",
+      "Audit and upgrade managed target-repo production-sync workflows (contract v3)",
     )
     .option("--repo <id>", "Optional repo config id to scope audit/upgrade")
     .option("--dry-run", "Audit only; do not open upgrade PRs", false)

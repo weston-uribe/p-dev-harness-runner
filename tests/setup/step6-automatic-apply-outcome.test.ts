@@ -73,6 +73,7 @@ function allSecretsPresentRemoteSummary(): RemoteSetupSummary {
     harnessDispatchRepoResolved: true,
     harnessDispatchRepoSource: "explicit-config",
     harnessRepoAccess: "available",
+    requireVercelProductionToken: false,
     harnessSecretStatuses: HARNESS_ACTIONS_SECRET_NAMES.map((name) => ({
       name,
       status: "present" as const,

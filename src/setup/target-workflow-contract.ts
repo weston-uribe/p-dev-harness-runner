@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { HARNESS_LEGACY_ARCHIVED_RUNNER_REPO } from "./harness-template-identity.js";
 
 /** Managed target-workflow contract version. Bump when YAML shape/semantics change. */
-export const TARGET_WORKFLOW_CONTRACT_VERSION = 2;
+export const TARGET_WORKFLOW_CONTRACT_VERSION = 3;
 
 export const TARGET_WORKFLOW_CONTRACT_MARKER_PREFIX =
   "p-dev-target-workflow-contract";
+
+export const TARGET_WORKFLOW_GENERATED_BY = "p-dev-harness";
 
 export interface TargetWorkflowContractFields {
   contractVersion: number;
@@ -14,26 +16,69 @@ export interface TargetWorkflowContractFields {
   productionBranch: string;
 }
 
+/** True when the workflow file uses the invalid HTML contract marker (breaks GHA YAML). */
+export function hasInvalidHtmlContractMarker(
+  content: string | null | undefined,
+): boolean {
+  if (!content) {
+    return false;
+  }
+  return /<!--\s*p-dev-target-workflow-contract:v\d+/.test(content);
+}
+
 export function buildTargetWorkflowContractComment(
   fields: TargetWorkflowContractFields,
 ): string {
   return [
-    `<!-- ${TARGET_WORKFLOW_CONTRACT_MARKER_PREFIX}:v${fields.contractVersion}`,
-    `contract_version: ${fields.contractVersion}`,
-    `harness_dispatch_repo: ${fields.harnessDispatchRepo}`,
-    `repo_config_id: ${fields.repoConfigId}`,
-    `production_branch: ${fields.productionBranch}`,
-    "-->",
+    `# ${TARGET_WORKFLOW_CONTRACT_MARKER_PREFIX}:v${fields.contractVersion}`,
+    `# generated-by: ${TARGET_WORKFLOW_GENERATED_BY}`,
+    `# contract_version: ${fields.contractVersion}`,
+    `# harness_dispatch_repo: ${fields.harnessDispatchRepo}`,
+    `# repo_config_id: ${fields.repoConfigId}`,
+    `# production_branch: ${fields.productionBranch}`,
   ].join("\n");
 }
 
-export function parseTargetWorkflowContract(
-  content: string | null | undefined,
+function parseYamlContractComment(
+  content: string,
 ): TargetWorkflowContractFields | null {
-  if (!content) {
+  const markerMatch = content.match(
+    /^#\s*p-dev-target-workflow-contract:v(\d+)\s*$/m,
+  );
+  if (!markerMatch) {
     return null;
   }
 
+  const contractVersion = Number.parseInt(markerMatch[1] ?? "", 10);
+  if (!Number.isFinite(contractVersion)) {
+    return null;
+  }
+
+  const harnessDispatchRepo =
+    content.match(/^#\s*harness_dispatch_repo:\s*(\S+)\s*$/m)?.[1] ??
+    extractDispatchRepoFromCurl(content);
+  const repoConfigId =
+    content.match(/^#\s*repo_config_id:\s*(\S+)\s*$/m)?.[1] ?? "";
+  const productionBranch =
+    content.match(/^#\s*production_branch:\s*(\S+)\s*$/m)?.[1] ??
+    content.match(/branches:\s*\[([^\]]+)\]/)?.[1]?.trim() ??
+    "";
+
+  if (!harnessDispatchRepo) {
+    return null;
+  }
+
+  return {
+    contractVersion,
+    harnessDispatchRepo,
+    repoConfigId,
+    productionBranch,
+  };
+}
+
+function parseHtmlContractComment(
+  content: string,
+): TargetWorkflowContractFields | null {
   const markerMatch = content.match(
     /<!--\s*p-dev-target-workflow-contract:v(\d+)([\s\S]*?)-->/,
   );
@@ -66,6 +111,20 @@ export function parseTargetWorkflowContract(
     repoConfigId,
     productionBranch,
   };
+}
+
+/**
+ * Parse contract metadata from a target workflow file.
+ * Prefers YAML `#` markers (v3+); still parses invalid HTML v2 markers for upgrade detection.
+ */
+export function parseTargetWorkflowContract(
+  content: string | null | undefined,
+): TargetWorkflowContractFields | null {
+  if (!content) {
+    return null;
+  }
+
+  return parseYamlContractComment(content) ?? parseHtmlContractComment(content);
 }
 
 export function extractDispatchRepoFromCurl(content: string): string | null {
@@ -113,9 +172,15 @@ export function classifyTargetWorkflowAgainstContract(input: {
     return "stale_dispatch_target";
   }
 
-  const existingContract = parseTargetWorkflowContract(input.existingContent);
   const intendedVersion =
     input.intendedContractVersion ?? TARGET_WORKFLOW_CONTRACT_VERSION;
+
+  // Invalid HTML-prefixed workflows always need upgrade (broken GHA YAML).
+  if (hasInvalidHtmlContractMarker(input.existingContent)) {
+    return "contract_outdated";
+  }
+
+  const existingContract = parseTargetWorkflowContract(input.existingContent);
 
   if (
     !existingContract ||

@@ -19,6 +19,7 @@ describe("github-remote-provider", () => {
       { name: "LINEAR_API_KEY", status: "present" },
       { name: "CURSOR_API_KEY", status: "present" },
       { name: "HARNESS_GITHUB_TOKEN", status: "missing" },
+      { name: "VERCEL_TOKEN", status: "missing" },
     ]);
   });
 

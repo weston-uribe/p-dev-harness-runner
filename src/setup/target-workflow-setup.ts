@@ -17,6 +17,7 @@ import {
   classifyTargetWorkflowAgainstContract,
   TARGET_WORKFLOW_CONTRACT_VERSION,
 } from "./target-workflow-contract.js";
+import { assertValidGeneratedTargetWorkflow } from "./target-workflow-validation.js";
 
 export interface TargetWorkflowGenerationInput {
   harnessDispatchRepo: string;
@@ -71,7 +72,7 @@ export function generateTargetWorkflowYaml(
     productionBranch: input.productionBranch,
   });
 
-  return [
+  const content = [
     contractComment,
     "name: Trigger harness production sync",
     "",
@@ -106,6 +107,16 @@ export function generateTargetWorkflowYaml(
     `              '{event_type:"production_promoted", client_payload:{repo:$repo, productionBranch:$branch, sourceRepo:$source, after:$after, ref:$ref, githubRunId:$run_id, receivedAt:$received}}')"`,
     "",
   ].join("\n");
+
+  assertValidGeneratedTargetWorkflow({
+    content,
+    expectedProductionBranch: input.productionBranch,
+    expectedDispatchRepo: input.harnessDispatchRepo,
+    expectedRepoConfigId: input.repoConfigId,
+    expectedTargetRepoSlug: input.targetRepoSlug,
+  });
+
+  return content;
 }
 
 export function hashWorkflowContent(content: string): string {

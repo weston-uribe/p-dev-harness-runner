@@ -37,9 +37,13 @@ import {
 import { createLiveGitHubRemoteSetupProvider } from "../../setup/github-remote-setup-live.js";
 import { previewTargetWorkflowSetup } from "../../setup/target-workflow-setup.js";
 import { workflowStatusNeedsUpgrade } from "../../setup/target-workflow-contract.js";
+import {
+  classifyVercelProductionCredential,
+  verifyVercelProductionCredentialAuth,
+} from "../../setup/vercel-production-credential.js";
 import { EXIT_CONFIG, EXIT_SUCCESS } from "../exit-codes.js";
 
-export type DoctorProfile = "full" | "merge" | "reconciler";
+export type DoctorProfile = "full" | "merge" | "reconciler" | "production";
 
 export interface DoctorOptions {
   configPath: string;
@@ -49,7 +53,9 @@ export interface DoctorOptions {
 function reconcileHealthSeverity(
   profile: DoctorProfile,
 ): DoctorCheckSeverity {
-  return profile === "reconciler" ? "critical" : "degraded";
+  return profile === "reconciler" || profile === "production"
+    ? "critical"
+    : "degraded";
 }
 
 export async function runDoctor(options: DoctorOptions): Promise<number> {
@@ -292,7 +298,11 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
         detail: `warn: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
-  } else if (profile === "merge" || profile === "reconciler") {
+  } else if (
+    profile === "merge" ||
+    profile === "reconciler" ||
+    profile === "production"
+  ) {
     checks.push({
       label: "CURSOR_API_KEY set",
       ok: true,
@@ -301,7 +311,9 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
       detail:
         profile === "merge"
           ? "required only when merge integration repair needs a Cursor agent"
-          : "not required for reconciler health profile",
+          : profile === "production"
+            ? "not required for production-sync health profile"
+            : "not required for reconciler health profile",
     });
   } else {
     checks.push({
@@ -553,6 +565,54 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
                 : status,
         });
       }
+    }
+  }
+
+  if (config && (profile === "production" || profile === "full" || profile === "reconciler")) {
+    const presence = classifyVercelProductionCredential({
+      repos: config.repos,
+      env: process.env,
+    });
+    if (presence.required) {
+      const token = process.env.VERCEL_TOKEN?.trim() ?? "";
+      const verified =
+        token.length > 0
+          ? await verifyVercelProductionCredentialAuth({
+              repos: config.repos,
+              vercelToken: token,
+            })
+          : presence;
+      const severity: DoctorCheckSeverity =
+        profile === "production" || profile === "reconciler"
+          ? "critical"
+          : verified.ok
+            ? "informational"
+            : "critical";
+      checks.push({
+        label: "VERCEL_TOKEN production deployment verification",
+        ok: verified.ok,
+        severity,
+        classification: verified.classification,
+        detail: JSON.stringify({
+          checkName: verified.checkName,
+          affectedRepoIds: verified.affectedRepoIds,
+          provider: verified.provider,
+          severity: verified.severity,
+          missingEnvironmentVariable: verified.missingEnvironmentVariable,
+          productionProjectionBlocked: verified.productionProjectionBlocked,
+          classification: verified.classification,
+          detail: verified.detail,
+        }),
+      });
+    } else if (profile === "production") {
+      checks.push({
+        label: "VERCEL_TOKEN production deployment verification",
+        ok: true,
+        skipped: true,
+        severity: "informational",
+        classification: "not_required",
+        detail: presence.detail,
+      });
     }
   }
 

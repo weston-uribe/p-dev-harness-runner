@@ -12,6 +12,11 @@ import {
   validateManagedMarkerForReconnect,
 } from "./harness-managed-repo-marker.js";
 import { readLocalManagedRepoMarker } from "./runner-upgrade.js";
+import {
+  classifyVercelProductionCredential,
+  verifyVercelProductionCredentialAuth,
+  type VercelProductionCredentialClassification,
+} from "./vercel-production-credential.js";
 
 export interface RunnerConfigCanaryResult {
   ok: boolean;
@@ -23,6 +28,9 @@ export interface RunnerConfigCanaryResult {
   computedFingerprint: string | null;
   configDecodingSucceeded: boolean;
   associationResolutionSucceeded: boolean;
+  vercelProductionCredentialOk: boolean;
+  vercelProductionCredentialClassification: VercelProductionCredentialClassification | null;
+  vercelProductionAffectedRepoIds: string[];
   repository?: string;
   repositoryId?: number;
   snapshotContentId?: string;
@@ -107,6 +115,9 @@ export async function runRunnerConfigCanary(
       computedFingerprint,
       configDecodingSucceeded: false,
       associationResolutionSucceeded: false,
+      vercelProductionCredentialOk: false,
+      vercelProductionCredentialClassification: null,
+      vercelProductionAffectedRepoIds: [],
       targetRepos: [],
       ...partial,
     });
@@ -164,6 +175,11 @@ export async function runRunnerConfigCanary(
   let linearTeamKey: string | undefined;
   const targetRepos: Array<{ id: string; targetRepo: string }> = [];
 
+  let vercelProductionCredentialOk = true;
+  let vercelProductionCredentialClassification: VercelProductionCredentialClassification | null =
+    null;
+  let vercelProductionAffectedRepoIds: string[] = [];
+
   if (decoded.ok) {
     for (const repo of decoded.config.repos) {
       targetRepos.push({ id: repo.id, targetRepo: repo.targetRepo });
@@ -172,6 +188,28 @@ export async function runRunnerConfigCanary(
     associationResolutionSucceeded = associations.length > 0;
     linearTeamKey =
       associations[0]?.teamKey ?? decoded.config.linear?.teamKey ?? undefined;
+
+    const token = env.VERCEL_TOKEN;
+    const presence = classifyVercelProductionCredential({
+      repos: decoded.config.repos,
+      env,
+    });
+    vercelProductionAffectedRepoIds = presence.affectedRepoIds;
+    if (!presence.required) {
+      vercelProductionCredentialOk = true;
+      vercelProductionCredentialClassification = "not_required";
+    } else if (!token?.trim()) {
+      vercelProductionCredentialOk = false;
+      vercelProductionCredentialClassification = presence.classification;
+    } else {
+      const verified = await verifyVercelProductionCredentialAuth({
+        repos: decoded.config.repos,
+        vercelToken: token,
+      });
+      vercelProductionCredentialOk = verified.ok;
+      vercelProductionCredentialClassification = verified.classification;
+      vercelProductionAffectedRepoIds = verified.affectedRepoIds;
+    }
   }
 
   const failureReasons: string[] = [];
@@ -190,11 +228,17 @@ export async function runRunnerConfigCanary(
       "association resolution failed: decoded cloud config has no Linear→repo associations",
     );
   }
+  if (!vercelProductionCredentialOk) {
+    failureReasons.push(
+      `vercel production credential check failed: ${vercelProductionCredentialClassification ?? "unknown"}`,
+    );
+  }
 
   const ok =
     cloudConfigValid &&
     configDecodingSucceeded &&
-    associationResolutionSucceeded;
+    associationResolutionSucceeded &&
+    vercelProductionCredentialOk;
 
   return finalizeAndEmit({
     ok,
@@ -204,6 +248,9 @@ export async function runRunnerConfigCanary(
     computedFingerprint,
     configDecodingSucceeded,
     associationResolutionSucceeded,
+    vercelProductionCredentialOk,
+    vercelProductionCredentialClassification,
+    vercelProductionAffectedRepoIds,
     linearTeamKey,
     targetRepos,
     message: ok

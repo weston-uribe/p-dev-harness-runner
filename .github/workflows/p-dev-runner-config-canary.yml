@@ -23,6 +23,7 @@ jobs:
         env:
           HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
           HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           GITHUB_ACTIONS: "true"
         run: npm run harness:canary-runner-config
       - name: Assert built evaluation assets

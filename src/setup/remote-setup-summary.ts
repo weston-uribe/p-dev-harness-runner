@@ -1,4 +1,5 @@
 import { loadHarnessConfig } from "../config/load-config.js";
+import { repoRequiresVercelProductionDeploymentVerification } from "../preview/production-verification-requirement.js";
 import {
   formatHarnessDispatchRepo,
   readGitRemoteOrigin,
@@ -36,6 +37,8 @@ export interface RemoteSetupSummary {
   harnessDispatchRepoSource: string;
   harnessRepoAccess: RemoteAccessStatus;
   harnessSecretStatuses: HarnessSecretStatusEntry[];
+  /** True when any configured repo requires Vercel production deployment verification. */
+  requireVercelProductionToken: boolean;
   targetRepos: RemoteSetupRepoSummary[];
   staleSmokeDiagnostics: StaleSmokeDiagnostics;
 }
@@ -77,6 +80,7 @@ export async function buildRemoteSetupSummary(options?: {
   const targetRepos: RemoteSetupRepoSummary[] = [];
   let configRepos: Array<{ id: string; targetRepo: string }> | undefined;
   let allowedTargetRepos: string[] | undefined;
+  let requireVercelProductionToken = false;
   try {
     const loaded = await loadHarnessConfig({ baseDir: cwd });
     configRepos = loaded.config.repos.map((repo) => ({
@@ -84,6 +88,14 @@ export async function buildRemoteSetupSummary(options?: {
       targetRepo: repo.targetRepo,
     }));
     allowedTargetRepos = loaded.config.allowedTargetRepos;
+    requireVercelProductionToken = loaded.config.repos.some((repo) =>
+      repoRequiresVercelProductionDeploymentVerification({
+        id: repo.id,
+        previewProvider: repo.previewProvider,
+        baseBranch: repo.baseBranch,
+        productionBranch: repo.productionBranch ?? "main",
+      }),
+    );
     for (const repo of loaded.config.repos) {
       const workflowPreview = previewTargetWorkflowSetup({
         repoConfigId: repo.id,
@@ -137,6 +149,7 @@ export async function buildRemoteSetupSummary(options?: {
     harnessDispatchRepoSource: harnessDispatchRepo.source,
     harnessRepoAccess,
     harnessSecretStatuses,
+    requireVercelProductionToken,
     targetRepos,
     staleSmokeDiagnostics,
   };

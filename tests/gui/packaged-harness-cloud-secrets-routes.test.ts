@@ -191,9 +191,17 @@ describe("packaged harness cloud secrets route regression", () => {
     expect(result.evidence.harnessConfigJsonB64Written).toBe(true);
     expect(result.evidence.postApplyVerificationReady).toBe(true);
     expect(result.summary.harnessDispatchRepoResolved).toBe(true);
+    const coreSecretNames = [
+      "HARNESS_CONFIG_JSON_B64",
+      "LINEAR_API_KEY",
+      "CURSOR_API_KEY",
+      "HARNESS_GITHUB_TOKEN",
+    ];
     expect(
-      result.summary.harnessSecretStatuses.every(
-        (entry) => entry.status === "present",
+      coreSecretNames.every((name) =>
+        result.summary.harnessSecretStatuses.some(
+          (entry) => entry.name === name && entry.status === "present",
+        ),
       ),
     ).toBe(true);
   });
