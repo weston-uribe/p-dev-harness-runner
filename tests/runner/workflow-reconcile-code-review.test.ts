@@ -50,7 +50,10 @@ vi.mock("../../src/config/linear-association-gate.js", () => ({
   runLinearAssociationGate: mocks.runLinearAssociationGate,
 }));
 
-import { evaluateWorkflowReconcileIssue } from "../../src/runner/workflow-reconcile.js";
+import {
+  evaluateWorkflowReconcileIssue,
+  reconcileWorkflowStateTeamCandidates,
+} from "../../src/runner/workflow-reconcile.js";
 
 const config = {
   version: 1,
@@ -68,6 +71,34 @@ const config = {
   },
   repos: [],
   allowedTargetRepos: [],
+} as unknown as HarnessConfig;
+
+const multiTeamConfig = {
+  ...config,
+  repos: [
+    {
+      id: "portfolio",
+      targetRepo: "https://github.com/weston-uribe/weston-uribe-portfolio",
+      baseBranch: "dev",
+      linearAssociations: [
+        {
+          workspaceId: "ws",
+          teamId: "team-tt",
+          teamKey: "TT",
+          projectId: "proj-tt",
+        },
+        {
+          workspaceId: "ws",
+          teamId: "team-fre",
+          teamKey: "FRE",
+          projectId: "proj-fre",
+        },
+      ],
+    },
+  ],
+  allowedTargetRepos: [
+    "https://github.com/weston-uribe/weston-uribe-portfolio",
+  ],
 } as unknown as HarnessConfig;
 
 const artifact = {
@@ -214,6 +245,74 @@ describe("evaluateWorkflowReconcileIssue code review recovery", () => {
       expect.anything(),
       expect.anything(),
       "Code Review",
+    );
+  });
+
+  it("loads durable state from config-authoritative team when issue team path is empty", async () => {
+    const emptyIssueTeamStore = new InMemoryWorkflowStateStore();
+    const authoritativeStore = new InMemoryWorkflowStateStore();
+    const base = createEmptyWorkflowState({
+      issueKey: "FRE-5",
+      workflowSchemaVersion: "product-development-v2",
+    });
+    authoritativeStore.seed({
+      ...base,
+      stateRevision: 3,
+      currentPhaseId: "code_review",
+      handoffSubjectIdentity: "1f30fae5d07d0d31f067d83fbf4f510d",
+      latestImplementationArtifact: artifact,
+    });
+    mocks.createWorkflowStateStore.mockImplementation(async (input: { teamId?: string }) => {
+      if (input.teamId === "team-fre") return emptyIssueTeamStore;
+      if (input.teamId === "team-tt") return authoritativeStore;
+      throw new Error(`unexpected teamId ${input.teamId}`);
+    });
+    mocks.fetchLinearIssue.mockResolvedValue({
+      id: "issue-fre-5",
+      identifier: "FRE-5",
+      title: "Add Kinterra",
+      description: "",
+      status: "Blocked",
+      projectName: "harness",
+      teamName: "FRE",
+      teamKey: "FRE",
+      teamId: "team-fre",
+      projectId: "proj-fre",
+      url: "https://linear.app/example/issue/FRE-5",
+    });
+    mocks.ensureCodeReviewJobDispatched.mockResolvedValue({
+      outcome: "dispatched",
+      reviewRequestId: "cr-subject:abc",
+      state: (await authoritativeStore.load("FRE-5"))!,
+      httpDispatched: true,
+    });
+
+    expect(
+      reconcileWorkflowStateTeamCandidates({
+        config: multiTeamConfig,
+        issueTeamId: "team-fre",
+      }),
+    ).toEqual(["team-fre", "team-tt"]);
+
+    const result = await evaluateWorkflowReconcileIssue({
+      config: multiTeamConfig,
+      configPath: "/tmp/harness.config.json",
+      issueKey: "FRE-5",
+      linearApiKey: "lin",
+      dispatch: true,
+    });
+
+    expect(mocks.createWorkflowStateStore).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: "team-fre" }),
+    );
+    expect(mocks.createWorkflowStateStore).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: "team-tt" }),
+    );
+    expect(result.action).toBe("dispatch");
+    expect(result.reason).toBe("code_review_subject_missing_active_or_completed");
+    expect(result.dispatched).toBe(true);
+    expect(mocks.ensureCodeReviewJobDispatched).toHaveBeenCalledWith(
+      expect.objectContaining({ store: authoritativeStore }),
     );
   });
 
