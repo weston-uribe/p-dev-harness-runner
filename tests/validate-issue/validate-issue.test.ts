@@ -91,7 +91,7 @@ describe("validateIssueFromFile", () => {
     expect(result.resolverError?.classification).toBe("unknown_repo_denied");
   });
 
-  it("passes planning but fails direct implementation for broad issue", async () => {
+  it("passes planning and direct implementation for broad issue without a plan", async () => {
     const result = await validateIssueFromFile(
       path.join(fixturesDir, "broad-for-direct-impl.md"),
       testConfig,
@@ -99,11 +99,12 @@ describe("validateIssueFromFile", () => {
     );
 
     expect(result.validForPlanning).toBe(true);
-    expect(result.validForDirectImplementation).toBe(false);
-    expect(result.passesIntendedPhase).toBe(false);
+    expect(result.validForDirectImplementation).toBe(true);
+    expect(result.passesIntendedPhase).toBe(true);
+    expect(result.narrowIssue).toBe(false);
     expect(
-      result.repairInstructions.some((line) =>
-        line.includes("Ready for Planning"),
+      result.routingNotes.some((line) =>
+        line.includes("Advisory: issue exceeds narrow-size heuristics"),
       ),
     ).toBe(true);
   });
@@ -180,7 +181,7 @@ describe("computeIssueValidation intended phase", () => {
     expect(result.passesIntendedPhase).toBe(true);
   });
 
-  it("rejects direct implementation for broad file without marker", async () => {
+  it("accepts direct implementation for broad file without marker", async () => {
     const body = await loadFixtureBody("broad-for-direct-impl.md");
     const result = computeIssueValidation(
       body,
@@ -189,8 +190,9 @@ describe("computeIssueValidation intended phase", () => {
       { intendedPhase: "implementation", planningMarkerMode: "file" },
     );
 
-    expect(result.validForDirectImplementation).toBe(false);
+    expect(result.validForDirectImplementation).toBe(true);
     expect(result.hasPlanningMarker).toBe(false);
+    expect(result.passesIntendedPhase).toBe(true);
   });
 });
 

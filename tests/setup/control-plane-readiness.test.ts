@@ -136,10 +136,10 @@ describe("vercel bridge readiness", () => {
 });
 
 describe("linear status contract", () => {
-  it("includes engineering review and dispatch triggers", () => {
+  it("includes engineering review, plan review, and dispatch triggers", () => {
     const names = requiredStatusNames();
     expect(names).toContain("Engineering Review");
-    expect(names).not.toContain("Plan Review");
+    expect(names).toContain("Plan Review");
     expect(getDispatchTriggerStatuses()).toContain("Ready for Planning");
   });
 });

@@ -417,7 +417,7 @@ export async function buildImplementationPrompt(
     : "";
   const planningComment =
     params.planningCommentBody?.trim() ||
-    "_No durable planning comment was found. Proceed only because the issue is narrow and well-scoped._";
+    "_No supplemental planning context was loaded. The Linear issue title, description, and acceptance criteria are the authoritative work package._";
   const uninitializedProductContext =
     params.productInitializationState === "uninitialized"
       ? "Target product is uninitialized. Implementation must not proceed unless this is an approved foundation slice."

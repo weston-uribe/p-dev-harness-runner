@@ -22,17 +22,11 @@ export default async function WorkflowPage({
     loadWorkspaceHealthSnapshot(),
   ]);
 
-  const showAutomationStrip =
-    workspaceHealth.vercel.automationAggregate !== "verified" ||
-    workspaceHealth.linear.automationAggregate !== "verified";
-
   return (
     <AppShell isWorkflowActive>
-      {showAutomationStrip ? (
-        <div className="mb-4">
-          <AutomationHealthFacts snapshot={workspaceHealth} />
-        </div>
-      ) : null}
+      <div className="mb-4 empty:hidden">
+        <AutomationHealthFacts snapshot={workspaceHealth} />
+      </div>
       <VercelConnectionWarning
         durableBridgeVerified={
           workspaceHealth.vercel.durableBridgeHealth === "verified"

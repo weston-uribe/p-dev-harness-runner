@@ -3,15 +3,29 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("settings navigation performance surfaces", () => {
-  it("provides a Settings console loading shell and Workflow prefetch", () => {
+  it("keeps Settings console loading inside the existing shell", () => {
     const loadingPath = path.join(
       process.cwd(),
       "apps/gui/app/settings/(console)/loading.tsx",
     );
     expect(existsSync(loadingPath)).toBe(true);
     const loading = readFileSync(loadingPath, "utf8");
-    expect(loading).toContain("SettingsShell");
     expect(loading).toContain("Loading settings");
+    expect(loading).toContain('aria-busy="true"');
+    expect(loading).not.toMatch(/from ["']@\/components\/custom\/app-shell["']/);
+    expect(loading).not.toMatch(
+      /from ["']@\/components\/settings\/settings-shell["']/,
+    );
+
+    const layout = readFileSync(
+      path.join(
+        process.cwd(),
+        "apps/gui/app/settings/(console)/layout.tsx",
+      ),
+      "utf8",
+    );
+    expect(layout).toContain("AppShell");
+    expect(layout).toContain("SettingsShell");
 
     const workflowClient = readFileSync(
       path.join(
@@ -22,9 +36,5 @@ describe("settings navigation performance surfaces", () => {
     );
     expect(workflowClient).toContain("SETTINGS_DEFAULT_ROUTE");
     expect(workflowClient).toContain("router.prefetch");
-
-    // Timing note for stop report (dev): shell paints via loading.tsx before
-    // Connections verify-saved-connections; layout still awaits classify +
-    // setup summaries, but no longer blocks the segment behind a blank page.
   });
 });

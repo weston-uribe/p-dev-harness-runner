@@ -156,7 +156,7 @@ Planning is **optional** in the target Linear workflow. Low-risk issues may bypa
 
 **Implemented (Milestone 4):** SDK handoff runner — GitHub PR inspect, Vercel preview capture, PM handoff comment, Linear transition to **PM Review**. See [`docs/milestones/m4-handoff-phase.md`](docs/milestones/m4-handoff-phase.md).
 
-**Inputs:** Linear issue; plan comment if `requires-plan`; otherwise issue body and acceptance criteria.
+**Inputs:** Linear issue body and acceptance criteria (authoritative); optional planning comment as supplemental context when present.
 
 **Outputs:** Code/doc changes in a feature branch; PR opened; no merge without human gate.
 

@@ -16,8 +16,8 @@ export default async function SettingsDeploymentsPage() {
         <h2 className="text-xl font-semibold tracking-tight">Deployments</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {showRunnerUpgrade
-            ? "Update the managed PDev runner and configure Vercel deployment bridge settings."
-            : "Configure Vercel deployment bridge settings."}
+            ? "Review the active Vercel deployment identity and update the managed PDev runner when needed."
+            : "Review the active Vercel team, project, and production URL for this workspace."}
         </p>
       </div>
       {showRunnerUpgrade ? (

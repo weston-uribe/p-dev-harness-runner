@@ -14,6 +14,9 @@ describe("settings repositories page", () => {
     );
 
     expect(page).toContain("Target repositories");
+    expect(page).toContain(
+      "Add, connect, verify, edit branches, and detach repositories that PDev may",
+    );
     expect(page).toContain("RepositoriesSettingsEditor");
     expect(page).not.toContain("TargetRepositoriesOverview");
     expect(page).not.toContain("Repository status");
@@ -39,7 +42,12 @@ describe("settings repositories page", () => {
     expect(editor).not.toContain("production-success-status");
     expect(editor).not.toContain("validation-commands");
     expect(editor).not.toContain("TargetRepoConfigForm");
-    expect(editor).toContain("Settings → Linear");
+    expect(editor).not.toContain(
+      "Add, connect, verify, edit branches, and detach repositories that PDev may modify.",
+    );
+    expect(editor).not.toContain('href="/settings/linear"');
+    expect(editor).not.toContain('href="/settings/deployments"');
+    expect(editor).not.toContain("Deployment settings are managed in");
     expect(editor).toContain("Cannot remove");
   });
 

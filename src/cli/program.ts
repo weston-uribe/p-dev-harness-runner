@@ -13,6 +13,7 @@ import { runReconcileRevisionCommand } from "./commands/reconcile-revision.js";
 import { runReconcileMergeCommand } from "./commands/reconcile-merge.js";
 import { runReconcileWorkflowCommand } from "./commands/reconcile-workflow.js";
 import { runClaimJobRequestCommand } from "./commands/claim-job-request.js";
+import { runFailJobRequestCommand } from "./commands/fail-job-request.js";
 import { runDispatchJobRequestCommand } from "./commands/dispatch-job-request.js";
 import { runPrivateStateCanaryCommand } from "./commands/private-state-canary.js";
 import { runWorkflowStatusReportCommand } from "./commands/workflow-status-report.js";
@@ -173,6 +174,26 @@ export function createProgram(): Command {
     .action(async (opts) => {
       const exitCode = await runClaimJobRequestCommand({
         requestId: opts.requestId,
+        json: opts.json,
+      });
+      process.exitCode = exitCode;
+    });
+
+  program
+    .command("fail-job-request")
+    .description(
+      "Mark a claimed private job-request envelope as failed (operator recovery)",
+    )
+    .requiredOption("--request-id <id>", "Opaque job request id")
+    .requiredOption(
+      "--completion-state <state>",
+      "Durable completion state recorded on the envelope",
+    )
+    .option("--json", "Print public-safe result JSON to stdout", false)
+    .action(async (opts) => {
+      const exitCode = await runFailJobRequestCommand({
+        requestId: opts.requestId,
+        completionState: opts.completionState,
         json: opts.json,
       });
       process.exitCode = exitCode;

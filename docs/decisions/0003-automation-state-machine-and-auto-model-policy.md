@@ -24,7 +24,7 @@ Linear statuses and labels were updated manually ahead of Cursor Automations spi
 
 ## Rationale
 
-1. **Optional planning reduces friction** for narrow, well-scoped work while preserving a path for high-risk or ambiguous issues via `requires-plan`.
+1. **Optional planning reduces friction** for narrow, well-scoped work while preserving a recommended path for high-risk or ambiguous issues via intake triage and `requires-plan` hints. **Ready for Build** remains status-authoritative: the implementation runner does not require a planning comment or labels.
 2. **Removing Plan Review from the default path** avoids an extra human gate before automation spikes; it may return later for high-risk work only.
 3. **Router-first automation** prevents duplicate or conflicting automations when Linear fires status-change triggers broadly; silent no-op is required for self-triggered duplicate runs.
 4. **Document actual model configuration** — prefer `Auto` when supported, but do not misrepresent the configured model during spikes.
@@ -35,7 +35,7 @@ Linear statuses and labels were updated manually ahead of Cursor Automations spi
 ### Positive
 
 - Clear contract for Cursor Automations spikes
-- Labels (`requires-plan`, `skip-plan`) give explicit routing hints
+- Labels (`requires-plan`, `skip-plan`) give explicit human/intake routing hints (not runner gates)
 - Silent early exit on unsupported statuses limits runaway agent actions and Linear comment noise
 - Planning-router behavior validated end-to-end
 

@@ -32,7 +32,7 @@ export function formatValidationReport(result: IssueValidationResult): string {
     `- Passes intended phase: ${formatPassesIntendedPhase(result)}`,
     `- Target repo: ${result.targetRepo ?? "unresolved"}`,
     `- Resolution source: ${result.resolutionSource ?? "—"}`,
-    `- Narrow issue (build-direct heuristic): ${yesNo(result.narrowIssue)}`,
+    `- Narrow issue (advisory heuristic only): ${yesNo(result.narrowIssue)}`,
     `- Planning marker present: ${formatPlanningMarker(result)}`,
     "",
     "## Parser errors",

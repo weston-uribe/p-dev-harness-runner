@@ -139,7 +139,10 @@ describe("gui design-system boundaries", () => {
     );
 
     expect(guidedSelect).toContain("FORM.guidedSelect");
-    expect(deploymentsEditor).toContain("GuidedSelect");
+    expect(deploymentsEditor).toContain("Team:");
+    expect(deploymentsEditor).toContain("Project:");
+    expect(deploymentsEditor).toContain("Production URL:");
+    expect(deploymentsEditor).not.toContain("GuidedSelect");
     expect(dataSharing).toContain("cursor-pointer");
     expect(header).toContain("border border-foreground bg-transparent");
   });

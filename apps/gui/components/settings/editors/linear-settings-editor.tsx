@@ -12,20 +12,20 @@ import {
   linearAssociationKey,
 } from "@harness/config/resolve-linear-workspace";
 import {
-  addProjectsToDraft,
-  buildConfiguredAssociationKeys,
   groupAssociationsByTeam,
   removeDraftAssociation,
   removeDraftTeam,
 } from "@/lib/linear-association-draft";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { GuidedSelect } from "@/components/ui/guided-select";
 import { sanitizeSettingsErrorMessage } from "@/lib/settings/settings-mutation";
 import {
   applyLinearWorkspace,
   previewLinearWorkspace,
+  syncLinearAssociationCloudConfig,
 } from "@/lib/settings/settings-setup-client";
+import { pickDisplayedLinearWorkspaceName } from "@/lib/linear-workspace-identity";
+import { formatLinearEntityHealthLabel } from "@harness/setup/linear-entity-health-label";
+import { LinearProvisionForm } from "@/components/settings/linear-provision-form";
 
 type LinearEditorInitialData = {
   summary: LinearSetupSummary;
@@ -34,7 +34,12 @@ type LinearEditorInitialData = {
   expectedCommittedFingerprint: string;
   workspaceId: string;
   workspaceName: string;
-  driftWarnings: Array<{ code: string; message: string }>;
+  driftWarnings: Array<{
+    code: string;
+    message: string;
+    teamId?: string;
+    projectId?: string;
+  }>;
   workspaceHealth?: import("@harness/setup/workspace-health-snapshot").WorkspaceHealthSnapshot;
 };
 
@@ -51,8 +56,6 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
   const [projects, setProjects] = useState<LinearProjectSummary[]>([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState<string | null>(null);
-  const [addTeamId, setAddTeamId] = useState("");
-  const [addProjectIds, setAddProjectIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -60,14 +63,14 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
 
   const linearApiKeyConfigured = summary.linearApiKeyConfigured;
   const evidence = summary.controlPlane?.linearWorkspace;
-  const workspaceName =
-    initialData.workspaceHealth?.linear.workspaceName?.trim() ||
-    initialData.workspaceName;
+  const workspaceName = pickDisplayedLinearWorkspaceName({
+    bootstrapName: initialData.workspaceName,
+    healthName: initialData.workspaceHealth?.linear.workspaceName,
+  });
   const grouped = useMemo(
     () => groupAssociationsByTeam(associations),
     [associations],
   );
-  const defaultRepo = initialData.repos[0];
 
   useEffect(() => {
     if (!linearApiKeyConfigured) {
@@ -120,20 +123,6 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
     };
   }, [linearApiKeyConfigured]);
 
-  const configuredKeys = useMemo(
-    () => buildConfiguredAssociationKeys(associations),
-    [associations],
-  );
-
-  const projectOptions = useMemo(() => {
-    if (!addTeamId) {
-      return [];
-    }
-    return projects.filter((project) => project.teamIds.includes(addTeamId));
-  }, [projects, addTeamId]);
-
-  const selectedTeam = teams.find((team) => team.id === addTeamId);
-
   const commitAssociations = async (
     next: ResolvedLinearAssociation[],
     successMessage: string,
@@ -162,7 +151,14 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
       setSummary(result.summary as LinearSetupSummary);
       setAssociations(next);
       setExpectedCommittedFingerprint(result.expectedCommittedFingerprint);
-      setActionMessage(successMessage);
+      if (result.cloudSync?.status === "partial_success") {
+        setActionMessage(
+          `${successMessage} Cloud harness config sync still needs attention.`,
+        );
+        setActionError(result.cloudSync.error ?? null);
+      } else {
+        setActionMessage(successMessage);
+      }
     } catch (error) {
       setActionError(
         sanitizeSettingsErrorMessage(
@@ -172,38 +168,6 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
     } finally {
       setBusy(false);
     }
-  };
-
-  const addSelectedProjects = () => {
-    if (!selectedTeam || !defaultRepo || addProjectIds.length === 0) {
-      return;
-    }
-    const selectedProjects = addProjectIds
-      .map((projectId) => projects.find((item) => item.id === projectId))
-      .filter((project): project is LinearProjectSummary => Boolean(project));
-    const confirmedAdd = window.confirm(
-      `Add ${selectedProjects.length} project(s) from "${selectedTeam.name}" to PDev?\n\nThis will write Linear status configuration for required PDev statuses.`,
-    );
-    if (!confirmedAdd) {
-      return;
-    }
-    const next = addProjectsToDraft({
-      draft: associations,
-      workspaceId: initialData.workspaceId,
-      team: {
-        id: selectedTeam.id,
-        key: selectedTeam.key,
-        name: selectedTeam.name,
-      },
-      projects: selectedProjects.map((project) => ({
-        id: project.id,
-        name: project.name,
-      })),
-      targetRepo: defaultRepo.targetRepo,
-      repoConfigId: defaultRepo.id,
-    });
-    setAddProjectIds([]);
-    void commitAssociations(next, "Team and project associations updated.");
   };
 
   const detachProject = (association: ResolvedLinearAssociation) => {
@@ -232,6 +196,30 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
     }
     const next = removeDraftTeam(associations, teamId);
     void commitAssociations(next, "Team removed from PDev.");
+  };
+
+  const retryCloudSync = async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const result = await syncLinearAssociationCloudConfig();
+      if (result.status === "synced") {
+        setActionMessage("Cloud harness config synchronized.");
+        setActionError(null);
+      } else {
+        setActionError(result.error ?? "Cloud harness config sync failed.");
+      }
+    } catch (error) {
+      setActionError(
+        sanitizeSettingsErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Cloud harness config sync failed.",
+        ),
+      );
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -274,6 +262,12 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
               const teamEvidence = evidence?.teams.find(
                 (team) => team.teamId === teamId,
               );
+              const teamDrift = initialData.driftWarnings.some(
+                (warning) =>
+                  warning.teamId === teamId ||
+                  warning.code === "team_id_mismatch" ||
+                  warning.code === "association_count_mismatch",
+              );
               return (
                 <div key={teamId} className="rounded-md border border-border/70 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -285,7 +279,10 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                         })}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Health: {teamEvidence?.health ?? "verification_pending"}
+                        Health:{" "}
+                        {formatLinearEntityHealthLabel(teamEvidence?.health, {
+                          drift: teamDrift && !teamEvidence,
+                        })}
                       </p>
                     </div>
                     <Button
@@ -303,6 +300,11 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                       const projectEvidence = teamEvidence?.projects.find(
                         (project) => project.projectId === association.projectId,
                       );
+                      const projectDrift = initialData.driftWarnings.some(
+                        (warning) =>
+                          warning.projectId === association.projectId ||
+                          warning.code === "project_id_mismatch",
+                      );
                       return (
                         <li
                           key={linearAssociationKey(association)}
@@ -311,7 +313,12 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
                           <div>
                             <p>{association.projectName}</p>
                             <p className="text-xs text-muted-foreground">
-                              {projectEvidence?.health ?? "verification_pending"}
+                              {formatLinearEntityHealthLabel(
+                                projectEvidence?.health,
+                                {
+                                  drift: projectDrift && !projectEvidence,
+                                },
+                              )}
                             </p>
                           </div>
                           <Button
@@ -334,89 +341,51 @@ export function LinearSettingsEditor({ initialData }: LinearSettingsEditorProps)
         )}
       </section>
 
-      <section className="space-y-4 rounded-md border border-border p-4">
-        <h3 className="text-sm font-semibold">Add teams and projects</h3>
-        {!linearApiKeyConfigured ? (
-          <p className="text-sm text-muted-foreground">
-            Configure a Linear API key in Connections before adding associations.
-          </p>
-        ) : null}
-        {optionsError ? (
-          <p className="text-sm text-destructive">{optionsError}</p>
-        ) : null}
-        <div className="space-y-2">
-          <Label htmlFor="settings-linear-add-team">Team</Label>
-          <GuidedSelect
-            id="settings-linear-add-team"
-            value={addTeamId}
-            disabled={optionsLoading || !linearApiKeyConfigured || busy}
-            onChange={(event) => {
-              setAddTeamId(event.target.value);
-              setAddProjectIds([]);
-            }}
-          >
-            <option value="">
-              {optionsLoading ? "Loading teams…" : "Select a team"}
-            </option>
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name} ({team.key})
-              </option>
-            ))}
-          </GuidedSelect>
-        </div>
-        {addTeamId ? (
-          <div className="space-y-2">
-            <Label>Projects on this team</Label>
-            <div className="space-y-2 rounded-md border border-border/70 p-3">
-              {projectOptions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No Linear projects are associated with this team.
-                </p>
-              ) : (
-                projectOptions.map((project) => {
-                  const key = linearAssociationKey({
-                    workspaceId: initialData.workspaceId,
-                    teamId: addTeamId,
-                    projectId: project.id,
-                  });
-                  const alreadyConfigured = configuredKeys.has(key);
-                  return (
-                    <label
-                      key={project.id}
-                      className="flex items-center gap-2 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        disabled={alreadyConfigured || busy}
-                        checked={addProjectIds.includes(project.id)}
-                        onChange={(event) => {
-                          setAddProjectIds((current) =>
-                            event.target.checked
-                              ? [...current, project.id]
-                              : current.filter((id) => id !== project.id),
-                          );
-                        }}
-                      />
-                      <span>
-                        {project.name}
-                        {alreadyConfigured ? " (already configured)" : ""}
-                      </span>
-                    </label>
-                  );
-                })
-              )}
-            </div>
-            <Button
-              type="button"
-              disabled={!addProjectIds.length || !defaultRepo || busy}
-              onClick={addSelectedProjects}
-            >
-              Add selected projects
-            </Button>
-          </div>
-        ) : null}
-      </section>
+      {optionsError ? (
+        <p className="text-sm text-destructive">{optionsError}</p>
+      ) : null}
+
+      <LinearProvisionForm
+        associations={associations}
+        expectedCommittedFingerprint={expectedCommittedFingerprint}
+        workspaceId={initialData.workspaceId}
+        workspaceName={workspaceName}
+        repos={initialData.repos}
+        teams={teams}
+        projects={projects}
+        optionsLoading={optionsLoading}
+        linearApiKeyConfigured={linearApiKeyConfigured}
+        disabled={busy}
+        onError={(message) => setActionError(message || null)}
+        onRetryCloudSync={retryCloudSync}
+        onApplied={(result) => {
+          setSummary(result.summary);
+          setAssociations(result.associations);
+          setExpectedCommittedFingerprint(result.expectedCommittedFingerprint);
+          setActionMessage(result.message);
+          if (result.cloudSync?.status === "partial_success") {
+            setActionError(result.cloudSync.error ?? null);
+          } else {
+            setActionError(null);
+          }
+          // Refresh options so newly created teams/projects appear.
+          requestGenerationRef.current += 1;
+          const generation = requestGenerationRef.current;
+          void (async () => {
+            try {
+              const response = await fetch("/api/setup/linear-options");
+              const data = await response.json();
+              if (generation !== requestGenerationRef.current || !response.ok) {
+                return;
+              }
+              setTeams((data.teams ?? []) as LinearTeamSummary[]);
+              setProjects((data.projects ?? []) as LinearProjectSummary[]);
+            } catch {
+              // Options refresh is best-effort after apply.
+            }
+          })();
+        }}
+      />
     </div>
   );
 }

@@ -29,6 +29,12 @@ import {
   removeDraftTeam,
 } from "@/lib/linear-association-draft";
 import {
+  buildSetupPlanPayload as buildSharedSetupPlanPayload,
+  buildWorkspacePlanPayload as buildSharedWorkspacePlanPayload,
+  describePendingCreate,
+  type PendingLinearCreateEntry,
+} from "@/lib/linear-provisioning";
+import {
   applyLinearSetup,
   applyLinearWorkspace,
   previewLinearSetup,
@@ -70,20 +76,6 @@ type LinearWorkspaceEditorBootstrap = {
   workspaceName: string;
 };
 
-type PendingLinearCreateEntry = {
-  id: string;
-  workspaceId: string;
-  teamMode: "existing" | "create";
-  teamId?: string;
-  teamKey?: string;
-  teamName?: string;
-  projectMode: "existing" | "create";
-  projectId?: string;
-  projectName?: string;
-  targetRepo: string;
-  repoConfigId: string;
-};
-
 interface GuidedLinearWorkspaceCardProps {
   readiness: FirstRunReadiness;
   initialSummary: LinearSetupSummary;
@@ -117,24 +109,6 @@ function formatWorkspacePreviewSummary(preview: LinearWorkspacePreview): string 
     ...preview.impactSummary.explicitNonActions,
   ];
   return lines.join("\n");
-}
-
-function describePendingCreate(entry: PendingLinearCreateEntry): string {
-  const teamLabel =
-    entry.teamMode === "create"
-      ? formatLinearTeamLabel({
-          teamName: entry.teamName,
-          teamKey: entry.teamKey ?? "key",
-        })
-      : formatLinearTeamLabel({
-          teamName: entry.teamName,
-          teamKey: entry.teamKey ?? entry.teamId ?? "Team",
-        });
-  const projectLabel =
-    entry.projectMode === "create"
-      ? entry.projectName ?? "New project"
-      : entry.projectName ?? entry.projectId ?? "Project";
-  return `${teamLabel} · ${projectLabel}`;
 }
 
 export function GuidedLinearWorkspaceCard({
@@ -173,7 +147,7 @@ export function GuidedLinearWorkspaceCard({
   const [teams, setTeams] = useState<LinearTeamSummary[]>([]);
   const [projects, setProjects] = useState<LinearProjectSummary[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
-  const [workspaceName, setWorkspaceName] = useState("Linear workspace");
+  const [workspaceName, setWorkspaceName] = useState("");
   const [optionsLoaded, setOptionsLoaded] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState<string | null>(null);
@@ -436,20 +410,17 @@ export function GuidedLinearWorkspaceCard({
   }, [loadBootstrap, onSummaryUpdated]);
 
   const buildSetupPlanPayload = useCallback(
-    () => ({
-      team: {
-        mode: teamMode,
-        teamId: teamMode === "existing" ? teamId : undefined,
-        teamKey: teamMode === "create" ? teamKey : undefined,
-        teamName: teamMode === "create" ? teamName : undefined,
-      },
-      project: {
-        mode: projectMode,
-        projectId: projectMode === "existing" ? projectId : undefined,
-        projectName: projectMode === "create" ? projectName : undefined,
-        targetRepo: targetRepo || undefined,
-      },
-    }),
+    () =>
+      buildSharedSetupPlanPayload({
+        teamMode,
+        teamId,
+        teamKey,
+        teamName,
+        projectMode,
+        projectId,
+        projectName,
+        targetRepo,
+      }),
     [
       projectId,
       projectMode,
@@ -463,12 +434,14 @@ export function GuidedLinearWorkspaceCard({
   );
 
   const buildWorkspacePlanPayload = useCallback(
-    (requestedAssociations: ResolvedLinearAssociation[]) => ({
-      expectedCommittedFingerprint: bootstrap?.expectedCommittedFingerprint ?? "",
-      workspaceId: workspaceId || bootstrap?.workspaceId || "",
-      workspaceName: workspaceName || bootstrap?.workspaceName || "Linear workspace",
-      requestedAssociations,
-    }),
+    (requestedAssociations: ResolvedLinearAssociation[]) =>
+      buildSharedWorkspacePlanPayload({
+        expectedCommittedFingerprint:
+          bootstrap?.expectedCommittedFingerprint ?? "",
+        workspaceId: workspaceId || bootstrap?.workspaceId || "",
+        workspaceName: workspaceName || bootstrap?.workspaceName || "",
+        requestedAssociations,
+      }),
     [bootstrap, workspaceId, workspaceName],
   );
 

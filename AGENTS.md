@@ -49,7 +49,7 @@ When working on or simulating harness automations:
 - **Preserve state in Linear/GitHub artifacts** — comments, PRs, commits, preview URLs — not hidden session memory.
 - **Do not rely on hidden session memory** as source of truth; a fresh agent must reconstruct context from durable artifacts.
 - **Integration repair is merge-owned** — keep the issue in **Merging**, repair only the PR branch, preserve issue acceptance criteria plus already-merged base behavior, and return directly to merge only after required verification passes (`verified_complete`), including behavioral acceptance verification when acceptance criteria describe observable behavior.
-- **Planning is optional** — respect `requires-plan` and `skip-plan` labels per [`docs/architecture/linear-automation-state-machine.md`](docs/architecture/linear-automation-state-machine.md).
+- **Planning is optional** — **Ready for Build** is status-authoritative and does not require a planning comment. Labels (`requires-plan`, `skip-plan`) are operational hints only; see [`docs/architecture/linear-automation-state-machine.md`](docs/architecture/linear-automation-state-machine.md).
 - **Plan Review is deprecated** in the default workflow — do not route work to it.
 
 ## Agent reporting contract

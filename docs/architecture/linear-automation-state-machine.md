@@ -93,31 +93,25 @@ Automations must **exit without action** when an issue is in one of these status
 
 ## Planning policy
 
-Planning is **optional**, not mandatory for every issue.
+Planning is **optional**, not mandatory for every issue. **Linear status is authoritative:** **Ready for Build** always routes to implementation. The runner does **not** require a planning comment, narrow-size heuristics, or labels before Building.
 
 | Label | Behavior |
 |-------|----------|
-| `requires-plan` | Issue must go through **Ready for Planning** → **Planning** before **Ready for Build** |
-| `skip-plan` | Issue may go directly from **Backlog** to **Ready for Build** |
+| `requires-plan` | Operational hint that humans/intake should prefer **Ready for Planning** first. Not runner-enforced. |
+| `skip-plan` | Operational hint that direct **Ready for Build** is intentional. Not runner-enforced. |
 
-### When to require planning
+### When to recommend planning (intake / human triage)
 
-Require planning (via `requires-plan` or human triage) when the issue is:
+Recommend **Ready for Planning** when the issue is:
 
 - Broad or ambiguous in scope
 - High-risk (security, data, auth, payments, infra)
 - Multi-file or cross-cutting
 - Unclear on acceptance criteria or rollback
 
-### When to bypass planning
+### When Ready for Build is selected
 
-Bypass planning (via `skip-plan` or direct **Ready for Build**) when the issue is:
-
-- Small and low-risk
-- Narrow and well-scoped
-- Has clear acceptance criteria in the Linear issue body
-
-For bypass issues, the **Implementation Agent** may build directly from the Linear issue without a separate plan artifact. The issue description and acceptance criteria are the durable input.
+If the PM sets **Ready for Build**, the **Implementation Agent** builds from the Linear issue body and acceptance criteria. A durable planning comment is **optional supplemental context** when present and valid; absence, malformation, or superseded plan generations do not block the run.
 
 ### Uninitialized product routing
 
@@ -137,7 +131,7 @@ When planning runs:
 2. It posts a **durable plan comment** in Linear (structured per [`templates/implementation-plan.md`](../../templates/implementation-plan.md)).
 3. It moves the issue to **Ready for Build** only after the plan comment exists.
 
-Automations must **not** advance status to **Ready for Build** without a durable plan comment when `requires-plan` is set.
+Planning automations must **not** advance status to **Ready for Build** until they have posted a durable plan comment. A human may still move an issue to **Ready for Build** without a plan; the implementation runner then proceeds without requiring one.
 
 ---
 
@@ -218,18 +212,18 @@ Role maturity varies — see honest maturity table below. Planning Agent behavio
 | Field | Detail |
 |-------|--------|
 | **Trigger / status** | **Ready for Build** (via router) |
-| **Input** | Linear issue, plan comment (if `requires-plan`), repo context |
+| **Input** | Linear issue (authoritative); optional planning comment as supplemental context; repo context |
 | **Output** | Feature branch, commits, PR; readiness summary in Linear comment |
 | **Linear writes** | Progress comments; move to **Building** while working; move to **PR Open** when PR exists |
 | **GitHub writes** | Branch, commits, PR (link back to Linear issue) |
-| **Must not do** | Merge PRs; deploy without human gate; advance past **PR Open** without a PR |
+| **Must not do** | Merge PRs; deploy without human gate; advance past **PR Open** without a PR; require a planning comment |
 
 ### Builder (implementation, revision, repair)
 
 | Field | Detail |
 |-------|--------|
 | **Trigger / status** | **Ready for Build** (create); **Needs Revision** (resume follow-up); **Merging** agent repair (resume follow-up when deterministic repair is insufficient) |
-| **Input** | Linear issue, plan comment (if `requires-plan`), repo context; revision adds PM feedback; repair adds PR/check context |
+| **Input** | Linear issue (authoritative); optional planning comment as supplemental context; repo context; revision adds PM feedback; repair adds PR/check context |
 | **Output** | Feature branch, commits, PR (implementation); additional commits and revision summary (revision); repair commits or summary (agent repair) |
 | **Linear writes** | Hidden metadata: `builder_agent_id`, `builder_thread_generation`, `builder_thread_action`, `builder_origin_run_id`, `builder_thread_idempotency_key`, and replacement fields when applicable; phase-specific `cursor_agent_id` / `cursor_run_id` remain as Cursor evidence |
 | **GitHub writes** | Branch, commits, PR (implementation); commits on existing branch (revision / repair) |

@@ -18,10 +18,24 @@ describe("linear settings immediate operations", () => {
     expect(source).toContain("window.confirm");
     expect(source).toContain("commitAssociations");
     expect(source).toContain("applyLinearWorkspace");
+    expect(source).toContain("LinearProvisionForm");
     expect(source).not.toContain("SettingsMutationPanel");
     expect(source).not.toContain("Credential:");
     expect(source).not.toContain("Configured teams:");
     expect(source).not.toContain("Configured projects:");
     expect(source).not.toContain("settings-linear-target-repo");
+  });
+
+  it("renders human-readable health labels instead of raw enums", () => {
+    const source = readLinearEditor();
+    expect(source).toContain("formatLinearEntityHealthLabel");
+    expect(source).toContain("@harness/setup/linear-entity-health-label");
+    expect(source).not.toContain("@harness/setup/linear-workspace-verify");
+    expect(source).not.toContain(
+      'teamEvidence?.health ?? "verification_pending"',
+    );
+    expect(source).not.toContain(
+      'projectEvidence?.health ?? "verification_pending"',
+    );
   });
 });

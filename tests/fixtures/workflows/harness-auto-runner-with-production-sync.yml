@@ -303,14 +303,16 @@ jobs:
         if: always() && steps.reresolve.outputs.should_run == 'true'
         env:
           EXIT_CODE: ${{ steps.harness.outputs.exit_code }}
+          REQUEST_ID: ${{ needs.gate.outputs.request_id }}
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
           HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
         run: |
-          npm run harness:claim-job-request -- --request-id "${{ needs.gate.outputs.request_id }}" --json
+          npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
           npx tsx src/workflow/finalize-harness-run.ts \
             --json-out harness-run-output.json \
-            --exit-code "${EXIT_CODE:-1}"
+            --exit-code "${EXIT_CODE:-1}" \
+            --request-id "$REQUEST_ID"
 
       - name: Write public run summary file
         if: always()
@@ -464,14 +466,16 @@ jobs:
         if: always()
         env:
           EXIT_CODE: ${{ steps.merge.outputs.exit_code }}
+          REQUEST_ID: ${{ needs.gate.outputs.request_id }}
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
           HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
         run: |
-          npm run harness:claim-job-request -- --request-id "${{ needs.gate.outputs.request_id }}" --json
+          npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
           npx tsx src/workflow/finalize-harness-run.ts \
             --json-out harness-run-output.json \
-            --exit-code "${EXIT_CODE:-1}"
+            --exit-code "${EXIT_CODE:-1}" \
+            --request-id "$REQUEST_ID"
 
       - name: Write public run summary file
         if: always()

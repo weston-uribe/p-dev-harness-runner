@@ -358,7 +358,7 @@ export async function getLinearOrganizationSummary(
   const organization = await client.organization;
   return {
     id: organization.id,
-    name: organization.name?.trim() || "Linear workspace",
+    name: organization.name?.trim() || "",
   };
 }
 

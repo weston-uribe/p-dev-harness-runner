@@ -33,7 +33,7 @@ Product managers draft issues in a **normal ChatGPT thread**—no Custom GPT req
 # Recommended Ready for Planning
 npm run harness:validate-issue -- --file draft.md --intended-phase planning
 
-# Recommended Ready for Build (fails if issue is too broad)
+# Recommended Ready for Build (structural readiness; narrow heuristics are advisory only)
 npm run harness:validate-issue -- --file draft.md --intended-phase implementation
 
 # General check (both routes reported; exit 0 if planning-valid)
@@ -55,20 +55,23 @@ A Custom GPT setup package exists at [`gpt/issue-intake/`](../gpt/issue-intake/)
 
 ## Plan-first vs build-direct
 
-| Route | Linear status | When |
-|-------|---------------|------|
+| Route | Linear status | When to recommend |
+|-------|---------------|-------------------|
 | Plan first | Ready for Planning | Broad, ambiguous, cross-cutting, high-risk, or >7 AC / task >240 chars |
-| Build direct | Ready for Build | Narrow, low-risk, ≤7 AC, task ≤240 chars |
+| Build direct | Ready for Build | Narrow, low-risk work — or whenever the PM chooses to skip planning |
 | Not ready | Backlog | Open questions remain |
 
-**Routing is the Linear status field.** Labels (`requires-plan`, `skip-plan`) are operational hints only — the runner does not read them today.
+**Routing is the Linear status field.** **Ready for Build** is status-authoritative: the harness executes implementation without requiring a planning comment. Labels (`requires-plan`, `skip-plan`) are operational hints only — the runner does not enforce them.
 
-## Narrow-issue thresholds
+Narrow-size thresholds remain **advisory intake guidance**. They do not fail `--intended-phase implementation` and do not block the runner. Uninitialized-product foundation still blocks Ready for Build until foundation planning completes.
 
-Direct implementation without a prior planning comment requires:
+## Narrow-issue thresholds (advisory)
 
-- Task ≤ 240 characters
-- Acceptance criteria ≤ 7 hyphen bullets
+Recommend planning first when:
+
+- Task > 240 characters
+- Acceptance criteria > 7 hyphen bullets
+- Scope is broad, ambiguous, or high-risk
 
 Constants: [`src/validate/constants.ts`](../src/validate/constants.ts)
 
@@ -76,12 +79,12 @@ Full contract: [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatg
 
 ## File vs Linear validation
 
-| Mode | Planning marker check |
-|------|----------------------|
-| `--file` | No — only narrow heuristic for build-direct |
-| `--issue` | Yes — durable planning comment can satisfy build-direct for broad issues |
+| Mode | Planning marker |
+|------|-----------------|
+| `--file` | Not required for Ready for Build eligibility |
+| `--issue` | Optional — a durable planning comment is supplemental context if present |
 
-After a planning run completes, re-validate broad issues with `--issue` and `--intended-phase implementation`.
+If the PM selects **Ready for Build**, validate structural readiness (`--intended-phase implementation`); do not treat missing planning markers as a hard failure.
 
 ## Parser contract
 
