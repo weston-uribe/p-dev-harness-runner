@@ -12,6 +12,18 @@ import {
 } from "../../provenance/rollout.js";
 import type { ProvenanceWriterMode } from "../../provenance/mode.js";
 import {
+  canaryCreateOrAdopt,
+  canaryTrigger,
+  canaryValidate,
+} from "../../provenance/canary-issue.js";
+import { observeProvenanceCanary } from "../../provenance/canary-observe.js";
+import {
+  decideKeyRecoverability,
+  ensureKeyRecoverability,
+  enumerateProvenanceHistory,
+  inspectLocalRecoveryStore,
+} from "../../provenance/key-recoverability.js";
+import {
   activateEpoch,
   createOperatorCoverageContext,
   enumeratePostSeal,
@@ -41,6 +53,10 @@ async function readStdinIfPiped(): Promise<string | undefined> {
 
 export async function runProvenanceRolloutCommand(options: {
   action: string;
+  configPath?: string;
+  issue?: string;
+  canaryOperationId?: string;
+  replacementFor?: string;
   mode?: string;
   keyFile?: string;
   runnerRepo?: string;
@@ -322,8 +338,188 @@ export async function runProvenanceRolloutCommand(options: {
       return 0;
     }
 
+    if (action === "canary-create") {
+      const apiKey = process.env.LINEAR_API_KEY?.trim();
+      if (!apiKey) {
+        throw new Error("LINEAR_API_KEY is required for canary-create.");
+      }
+      const result = await canaryCreateOrAdopt({
+        linearApiKey: apiKey,
+        operationId: options.canaryOperationId,
+        replacementForIssueKey: options.replacementFor,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(
+          `canary issue=${result.issueKey} adopted=${result.adopted} op=${result.operationId}`,
+        );
+        console.log(`evidenceFile=${result.evidenceFile}`);
+      }
+      return 0;
+    }
+
+    if (action === "canary-validate") {
+      const apiKey = process.env.LINEAR_API_KEY?.trim();
+      if (!apiKey) {
+        throw new Error("LINEAR_API_KEY is required for canary-validate.");
+      }
+      const issueKey = options.issue?.trim();
+      if (!issueKey) {
+        throw new Error("--issue is required for canary-validate.");
+      }
+      const configPath = options.configPath?.trim() || "harness.config.json";
+      const { events, inspection } = await enumerateProvenanceHistory();
+      const priorCount = events.filter((event) => {
+        if (event.eventType === "launch_intent") {
+          return event.launchContext.linearIssueKey === issueKey;
+        }
+        if (event.eventType === "provider_run_bound") {
+          return event.linearIssueKey === issueKey;
+        }
+        return false;
+      }).length;
+
+      const result = await canaryValidate({
+        configPath,
+        linearApiKey: apiKey,
+        issueKey,
+        priorProvenanceEventCount: priorCount,
+      });
+      const output = {
+        ...result,
+        provenanceTipCommitPrefix: inspection.tipCommitSha
+          ? inspection.tipCommitSha.slice(0, 12)
+          : null,
+        priorProvenanceEventCount: priorCount,
+      };
+      if (options.json) {
+        console.log(JSON.stringify(output, null, 2));
+      } else {
+        console.log(
+          `ok=${result.ok} issue=${result.issueKey} status=${result.statusName ?? "unknown"} priorEvents=${priorCount}`,
+        );
+        if (!result.ok) {
+          console.log(`failClosedReason=${result.failClosedReason ?? "unknown"}`);
+        }
+      }
+      return result.ok ? 0 : 1;
+    }
+
+    if (action === "canary-trigger") {
+      const apiKey = process.env.LINEAR_API_KEY?.trim();
+      if (!apiKey) {
+        throw new Error("LINEAR_API_KEY is required for canary-trigger.");
+      }
+      const issueKey = options.issue?.trim();
+      if (!issueKey) {
+        throw new Error("--issue is required for canary-trigger.");
+      }
+      const configPath = options.configPath?.trim() || "harness.config.json";
+      const { events } = await enumerateProvenanceHistory();
+      const priorCount = events.filter((event) => {
+        if (event.eventType === "launch_intent") {
+          return event.launchContext.linearIssueKey === issueKey;
+        }
+        if (event.eventType === "provider_run_bound") {
+          return event.linearIssueKey === issueKey;
+        }
+        return false;
+      }).length;
+
+      const result = await canaryTrigger({
+        configPath,
+        linearApiKey: apiKey,
+        issueKey,
+        priorProvenanceEventCount: priorCount,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(
+          `ok=${result.ok} transitioned=${result.transitioned} issue=${result.issueKey} ${result.fromStatus ?? "?"} -> ${result.toStatus}`,
+        );
+        if (!result.ok) {
+          console.log(`failClosedReason=${result.failClosedReason ?? "unknown"}`);
+        }
+      }
+      return result.ok ? 0 : 1;
+    }
+
+    if (action === "canary-observe") {
+      const apiKey = process.env.LINEAR_API_KEY?.trim();
+      if (!apiKey) {
+        throw new Error("LINEAR_API_KEY is required for canary-observe.");
+      }
+      const issueKey = options.issue?.trim();
+      if (!issueKey) {
+        throw new Error("--issue is required for canary-observe.");
+      }
+      const result = await observeProvenanceCanary({
+        issueKey,
+        linearApiKey: apiKey,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(
+          `ok=${result.ok} issue=${result.issue.key} status=${result.issue.status ?? "unknown"} attempts=${result.provenance.matchingAttempts} tip=${result.provenance.tipCommitPrefix ?? "unknown"}`,
+        );
+        if (result.committedEnvelopeValidation.attempted) {
+          console.log(
+            `envelopes ok=${result.committedEnvelopeValidation.summary.ok} count=${result.committedEnvelopeValidation.summary.envelopeCount}`,
+          );
+        } else {
+          console.log(
+            `envelopes attempted=false reason=${result.committedEnvelopeValidation.reason}`,
+          );
+        }
+      }
+      return result.ok ? 0 : 1;
+    }
+
+    if (action === "key-recoverability") {
+      const { inspection: history } = await enumerateProvenanceHistory();
+      const local = inspectLocalRecoveryStore();
+      const decision = await decideKeyRecoverability({ history, local });
+      const output = {
+        ok: decision.kind === "recoverable",
+        decision: decision.kind,
+        local,
+        history,
+        replacementMarkerPath: decision.replacementMarkerPath,
+        keyMaterialPrinted: false,
+      };
+      if (options.json) {
+        console.log(JSON.stringify(output, null, 2));
+      } else {
+        console.log(
+          `decision=${decision.kind} localPresent=${local.present} valid=${local.validFormat} envelopes=${history.envelopeCount}`,
+        );
+      }
+      return decision.kind === "recoverable" ? 0 : 1;
+    }
+
+    if (action === "ensure-key") {
+      const result = await ensureKeyRecoverability({
+        runnerRepository: options.runnerRepo ?? "weston-uribe/p-dev-harness-runner",
+        pollGapSeconds: options.pollGapSeconds,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(
+          `ok=${result.ok} kind=${result.kind} localPresent=${result.local.present} valid=${result.local.validFormat} envelopes=${result.history.envelopeCount}`,
+        );
+        if (result.failClosedReason) {
+          console.log(`failClosedReason=${result.failClosedReason}`);
+        }
+      }
+      return result.ok ? 0 : 1;
+    }
+
     console.error(
-      "Unknown action. Use: readiness | quiet-window | activate | inspect-coverage | finalize | enumerate-seal-to-tip | generate-key | install-key | set-mode | shred-local-key-dir",
+      "Unknown action. Use: readiness | quiet-window | activate | inspect-coverage | finalize | enumerate-seal-to-tip | generate-key | install-key | set-mode | shred-local-key-dir | canary-create | canary-validate | canary-trigger | canary-observe | key-recoverability | ensure-key",
     );
     return 1;
   } catch (error) {

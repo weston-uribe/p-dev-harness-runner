@@ -70,14 +70,17 @@ export function createProgram(): Command {
     .description("Validate config, allowlist, and optional Linear auth")
     .option(
       "--profile <profile>",
-      "Validation profile: full (default phase), merge (GitHub/Linear), reconciler (strict heartbeat/schedule health), or production (production-sync / Vercel deploy credential)",
+      "Validation profile: full (default), agent (Cursor agent phases; skips Vercel production credential), merge (GitHub/Linear), reconciler (strict heartbeat/schedule health), or production (production-sync / Vercel deploy credential)",
       "full",
     )
     .action(async (options: { profile?: string }) => {
       const configPath = program.opts<{ config: string }>().config;
       const raw = options.profile?.trim().toLowerCase();
       const profile =
-        raw === "merge" || raw === "reconciler" || raw === "production"
+        raw === "merge" ||
+        raw === "reconciler" ||
+        raw === "production" ||
+        raw === "agent"
           ? raw
           : "full";
       const exitCode = await runDoctor({ configPath, profile });
@@ -243,7 +246,16 @@ export function createProgram(): Command {
     )
     .argument(
       "<action>",
-      "readiness | quiet-window | activate | inspect-coverage | finalize | enumerate-seal-to-tip | generate-key | install-key | set-mode | shred-local-key-dir",
+      "readiness | quiet-window | activate | inspect-coverage | finalize | enumerate-seal-to-tip | generate-key | install-key | set-mode | shred-local-key-dir | canary-create | canary-validate | canary-trigger | canary-observe | key-recoverability | ensure-key",
+    )
+    .option("--issue <key>", "Linear issue key for canary/observe actions")
+    .option(
+      "--canary-operation-id <uuid>",
+      "Optional operation UUID for canary-create adoption/retry",
+    )
+    .option(
+      "--replacement-for <key>",
+      "Optional prior canary issue key (replacement canary relation)",
     )
     .option("--mode <mode>", "disabled | shadow | required (for set-mode)")
     .option("--key-file <path>", "Restricted key file for install-key / shred")
@@ -283,12 +295,17 @@ export function createProgram(): Command {
     )
     .option("--json", "Print public-safe JSON", false)
     .action(async (action, opts) => {
+      const configPath = program.opts<{ config: string }>().config;
       const pollGapSeconds =
         opts.pollGapSeconds != null && opts.pollGapSeconds !== ""
           ? Number(opts.pollGapSeconds)
           : undefined;
       const exitCode = await runProvenanceRolloutCommand({
         action,
+        configPath,
+        issue: opts.issue,
+        canaryOperationId: opts.canaryOperationId,
+        replacementFor: opts.replacementFor,
         mode: opts.mode,
         keyFile: opts.keyFile,
         runnerRepo: opts.runnerRepo,

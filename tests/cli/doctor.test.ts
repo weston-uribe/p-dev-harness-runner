@@ -240,4 +240,124 @@ describe("runDoctor", () => {
     const code = await runDoctor({ configPath, profile: "production" });
     expect(code).toBe(EXIT_CONFIG);
   });
+
+  it("agent profile passes without VERCEL_TOKEN on vercel-qualified repo", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        orchestratorMarker: "harness-orchestrator-v1",
+        logDirectory: path.join(tempRoot, "runs"),
+        repos: [
+          {
+            id: "portfolio",
+            linearProjects: ["Portfolio"],
+            targetRepo: "https://github.com/owner/portfolio",
+            baseBranch: "dev",
+            productionBranch: "main",
+            previewProvider: "vercel",
+            validation: { commands: ["npm test"] },
+          },
+        ],
+        allowedTargetRepos: ["https://github.com/owner/portfolio"],
+      }),
+      "utf8",
+    );
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.GITHUB_DISPATCH_TOKEN = "test-dispatch";
+    delete process.env.VERCEL_TOKEN;
+
+    const code = await runDoctor({ configPath, profile: "agent" });
+    expect(code).toBe(EXIT_SUCCESS);
+  });
+
+  it("agent profile does not call Vercel credential authentication", async () => {
+    const vercelAuth = vi.spyOn(
+      await import("../../src/setup/vercel-production-credential.js"),
+      "verifyVercelProductionCredentialAuth",
+    );
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        orchestratorMarker: "harness-orchestrator-v1",
+        logDirectory: path.join(tempRoot, "runs"),
+        repos: [
+          {
+            id: "portfolio",
+            linearProjects: ["Portfolio"],
+            targetRepo: "https://github.com/owner/portfolio",
+            baseBranch: "dev",
+            productionBranch: "main",
+            previewProvider: "vercel",
+            validation: { commands: ["npm test"] },
+          },
+        ],
+        allowedTargetRepos: ["https://github.com/owner/portfolio"],
+      }),
+      "utf8",
+    );
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.GITHUB_DISPATCH_TOKEN = "test-dispatch";
+    process.env.VERCEL_TOKEN = "should-not-be-used";
+
+    const code = await runDoctor({ configPath, profile: "agent" });
+    expect(code).toBe(EXIT_SUCCESS);
+    expect(vercelAuth).not.toHaveBeenCalled();
+    vercelAuth.mockRestore();
+  });
+
+  it("agent profile fails without LINEAR_API_KEY", async () => {
+    delete process.env.LINEAR_API_KEY;
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.GITHUB_DISPATCH_TOKEN = "test-dispatch";
+    const code = await runDoctor({ configPath, profile: "agent" });
+    expect(code).toBe(EXIT_CONFIG);
+  });
+
+  it("agent profile fails without CURSOR_API_KEY", async () => {
+    delete process.env.CURSOR_API_KEY;
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.GITHUB_DISPATCH_TOKEN = "test-dispatch";
+    const code = await runDoctor({ configPath, profile: "agent" });
+    expect(code).toBe(EXIT_CONFIG);
+  });
+
+  it("agent profile fails without GitHub dispatch credentials", async () => {
+    process.env.GITHUB_TOKEN = "test-github";
+    delete process.env.HARNESS_GITHUB_TOKEN;
+    delete process.env.GITHUB_DISPATCH_TOKEN;
+    const code = await runDoctor({ configPath, profile: "agent" });
+    expect(code).toBe(EXIT_CONFIG);
+  });
+
+  it("full profile still documents Vercel as critical when token missing on qualified repo", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        orchestratorMarker: "harness-orchestrator-v1",
+        logDirectory: path.join(tempRoot, "runs"),
+        repos: [
+          {
+            id: "portfolio",
+            linearProjects: ["Portfolio"],
+            targetRepo: "https://github.com/owner/portfolio",
+            baseBranch: "dev",
+            productionBranch: "main",
+            previewProvider: "vercel",
+            validation: { commands: ["npm test"] },
+          },
+        ],
+        allowedTargetRepos: ["https://github.com/owner/portfolio"],
+      }),
+      "utf8",
+    );
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.GITHUB_DISPATCH_TOKEN = "test-dispatch";
+    delete process.env.VERCEL_TOKEN;
+
+    const code = await runDoctor({ configPath, profile: "full" });
+    expect(code).toBe(EXIT_CONFIG);
+  });
 });

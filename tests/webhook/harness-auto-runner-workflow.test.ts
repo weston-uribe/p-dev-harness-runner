@@ -112,7 +112,7 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
         "GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}",
       ];
       const doctorJobs = [
-        { name: "run-harness", profile: "harness:doctor" },
+        { name: "run-harness", profile: "harness:doctor -- --profile agent" },
         { name: "run-merge", profile: "harness:doctor -- --profile merge" },
       ] as const;
       for (const job of doctorJobs) {
@@ -328,6 +328,18 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       expect(syncSection).toContain("P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github");
 
       expect(gate).not.toContain("LANGFUSE_SECRET_KEY");
+    });
+
+    it("run-harness Doctor uses agent profile and does not expose VERCEL_TOKEN", () => {
+      const runHarness = extractJobSection(workflow, "run-harness");
+      const runMerge = extractJobSection(workflow, "run-merge");
+      const syncSection = extractJobSection(workflow, "sync-production");
+      expect(runHarness).toContain("harness:doctor -- --profile agent");
+      expect(runHarness).not.toContain("VERCEL_TOKEN");
+      expect(runMerge).toContain("harness:doctor -- --profile merge");
+      expect(runMerge).not.toContain("VERCEL_TOKEN");
+      expect(syncSection).toContain("VERCEL_TOKEN");
+      expect(syncSection).not.toContain("harness:doctor");
     });
 
     it("resolves dual-commit provenance before harness jobs via GITHUB_ENV", () => {
