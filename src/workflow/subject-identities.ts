@@ -4,6 +4,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { normalizeRepoUrl } from "../resolver/normalize-repo.js";
 
 function hashIdentity(parts: string[]): string {
   return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32);
@@ -57,6 +58,32 @@ export function buildCodeReviewSubjectIdentity(input: {
     input.headSha.trim().toLowerCase(),
     input.diffHash.trim().toLowerCase(),
     String(input.reviewCycle),
+  ]);
+}
+
+/**
+ * Deterministic implementation (build) subject — shared by webhook and reconcile.
+ * Must not include Linear status, webhook delivery id, trigger source, or state revision.
+ */
+export function buildImplementationSubjectIdentity(input: {
+  issueKey: string;
+  targetRepo: string;
+  baseBranch: string;
+  planGenerationId?: string | null;
+  planArtifactHash?: string | null;
+  implementationCycle: number;
+}): string {
+  const planGenerationId = input.planGenerationId?.trim() || "direct";
+  const planArtifactHash = input.planArtifactHash?.trim().toLowerCase() || "none";
+  const targetRepo = normalizeRepoUrl(input.targetRepo).replace(/\.git$/i, "");
+  return hashIdentity([
+    "implementation_subject",
+    input.issueKey.trim(),
+    targetRepo,
+    input.baseBranch.trim(),
+    planGenerationId,
+    planArtifactHash,
+    String(input.implementationCycle),
   ]);
 }
 

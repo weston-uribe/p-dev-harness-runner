@@ -81,7 +81,8 @@ export type WorkflowSideEffectKind =
   | "build_complete_marker"
   | "pm_handoff_marker"
   | "code_review_dispatch"
-  | "plan_review_dispatch";
+  | "plan_review_dispatch"
+  | "implementation_dispatch";
 
 export type WorkflowSideEffectStatus =
   | "pending"
@@ -147,6 +148,15 @@ export interface WorkflowStateRecord {
   planReviewerAgentId?: string | null;
   /** Harness run id that owns the Plan Reviewer agent prompt. */
   planReviewerRunId?: string | null;
+  /**
+   * Implementation (build) subject selected for Ready-for-Build dispatch.
+   * Distinct from post-build implementationGenerationId on the artifact.
+   */
+  implementationSubjectIdentity?: string | null;
+  /** Cursor builder agent id when created (null until agent create persists). */
+  builderAgentId?: string | null;
+  /** Harness run id that owns the builder agent prompt. */
+  builderRunId?: string | null;
   /** Accepted decision identities keyed by review subject (subject → decisionIdentity). */
   acceptedReviewSubjects?: Record<string, string>;
   /** Current handoff subject identity for idempotent handoff. */
@@ -193,6 +203,7 @@ export function createEmptyWorkflowState(input: {
     cycleCounters: {
       plan_review_cycles: 0,
       code_review_cycles: 0,
+      implementation_cycles: 0,
     },
     lastAcceptedReviewDecision: null,
     returnDestination: null,
@@ -209,6 +220,9 @@ export function createEmptyWorkflowState(input: {
     planReviewSubjectIdentity: null,
     planReviewerAgentId: null,
     planReviewerRunId: null,
+    implementationSubjectIdentity: null,
+    builderAgentId: null,
+    builderRunId: null,
     acceptedReviewSubjects: {},
     handoffSubjectIdentity: null,
     sideEffects: [],

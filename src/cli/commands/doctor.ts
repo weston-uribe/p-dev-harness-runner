@@ -398,14 +398,36 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
 
     const heartbeat = await loadReconcileHeartbeat();
     const heartbeatHealth = evaluateReconcileHeartbeatHealth(heartbeat);
+    const ageMinutes =
+      heartbeatHealth.ageMs != null
+        ? Math.round(heartbeatHealth.ageMs / 60000)
+        : null;
     checks.push({
       label: "Reconcile heartbeat fresh",
       ok: heartbeatHealth.ok,
       skipped: !process.env.P_DEV_STATE_GITHUB_TOKEN && !heartbeat,
       detail: heartbeatHealth.ok
-        ? `Heartbeat age ${Math.round((heartbeatHealth.ageMs ?? 0) / 60000)}m`
-        : heartbeatHealth.detail,
+        ? `Heartbeat age ${ageMinutes}m; lastSuccessfulScanAt=${heartbeat?.lastSuccessfulScanAt ?? heartbeat?.finishedAt}; dispatchEnabled=${heartbeat?.dispatchEnabled ?? "?"}; outcome=${heartbeat?.outcome ?? "success"}`
+        : `${heartbeatHealth.detail}${heartbeat?.lastFailure ? ` lastFailure=${heartbeat.lastFailure}` : ""}${heartbeat?.lastSuccessfulScanAt ? ` lastSuccessfulScanAt=${heartbeat.lastSuccessfulScanAt}` : ""}`,
     });
+    if (config) {
+      const { resolveAuthoritativeLinearTeamIdFromConfig, resolveAuthoritativeLinearTeamIds } =
+        await import("../../config/resolve-linear-team.js");
+      const { resolveLinearAssociationsFromConfig } = await import(
+        "../../config/resolve-linear-workspace.js"
+      );
+      const associations = resolveLinearAssociationsFromConfig(config);
+      const authoritative = resolveAuthoritativeLinearTeamIdFromConfig(config);
+      const allTeams = resolveAuthoritativeLinearTeamIds(config);
+      if (associations.length > 1 && authoritative) {
+        const first = associations[0];
+        checks.push({
+          label: "Multi-team workflow-state association path",
+          ok: true,
+          detail: `Writers use config-authoritative team path first (${authoritative}${first?.teamKey ? ` / ${first.teamKey}` : ""}). Issues on other configured teams (${allTeams.filter((t) => t !== authoritative).join(", ") || "none"}) reuse that path via candidate search; do not expect a per-issue-team duplicate record.`,
+        });
+      }
+    }
   } catch (error) {
     checks.push({
       label: "Reconcile health checks",

@@ -21,6 +21,12 @@ export const AUTOMATED_PHASE_STALE_BLOCKED_MS = 180 * 60 * 1000;
 /** Max opaque HTTP dispatch attempts per plan_review_dispatch effect. */
 export const PLAN_REVIEW_DISPATCH_MAX_ATTEMPTS = 3;
 
+/** Max opaque HTTP dispatch attempts per implementation_dispatch effect. */
+export const IMPLEMENTATION_DISPATCH_MAX_ATTEMPTS = 3;
+
+/** Max claim_lost reload/retries for code_review_dispatch CAS races. */
+export const CODE_REVIEW_DISPATCH_MAX_CLAIM_RETRIES = 3;
+
 export const RECONCILE_WORKFLOW_RELATIVE_PATH =
   ".github/workflows/harness-reconcile-revisions.yml";
 
@@ -37,6 +43,14 @@ export interface ReconcileHeartbeatRecord {
   opaqueDispatches: number;
   legacyDispatchForbidden: true;
   statusesScanned: string[];
+  /** Whether this scan requested repository_dispatch. */
+  dispatchEnabled?: boolean;
+  /** Terminal scan outcome for doctor/ops. */
+  outcome?: "success" | "failure" | "dry_run";
+  /** Last failure message when outcome=failure (bounded). */
+  lastFailure?: string | null;
+  /** ISO timestamp of the last successful (non-failure) scan. */
+  lastSuccessfulScanAt?: string | null;
 }
 
 export type ReconcileHeartbeatHealth =
@@ -55,15 +69,27 @@ export function buildReconcileHeartbeat(input: {
   candidatesFound: number;
   opaqueDispatches: number;
   statusesScanned: string[];
+  dispatchEnabled?: boolean;
+  outcome?: "success" | "failure" | "dry_run";
+  lastFailure?: string | null;
+  lastSuccessfulScanAt?: string | null;
 }): ReconcileHeartbeatRecord {
+  const finishedAt = input.finishedAt ?? new Date().toISOString();
+  const outcome = input.outcome ?? "success";
   return {
     kind: RECONCILE_HEARTBEAT_KIND,
-    finishedAt: input.finishedAt ?? new Date().toISOString(),
+    finishedAt,
     workflowRunId: input.workflowRunId ?? process.env.GITHUB_RUN_ID ?? null,
     candidatesFound: input.candidatesFound,
     opaqueDispatches: input.opaqueDispatches,
     legacyDispatchForbidden: true,
     statusesScanned: [...input.statusesScanned],
+    dispatchEnabled: input.dispatchEnabled ?? false,
+    outcome,
+    lastFailure: input.lastFailure ?? null,
+    lastSuccessfulScanAt:
+      input.lastSuccessfulScanAt ??
+      (outcome === "failure" ? null : finishedAt),
   };
 }
 
@@ -78,6 +104,12 @@ export function parseReconcileHeartbeat(
   if (typeof obj.opaqueDispatches !== "number") return null;
   if (obj.legacyDispatchForbidden !== true) return null;
   if (!Array.isArray(obj.statusesScanned)) return null;
+  const outcome =
+    obj.outcome === "success" ||
+    obj.outcome === "failure" ||
+    obj.outcome === "dry_run"
+      ? obj.outcome
+      : undefined;
   return {
     kind: RECONCILE_HEARTBEAT_KIND,
     finishedAt: obj.finishedAt,
@@ -91,6 +123,17 @@ export function parseReconcileHeartbeat(
     statusesScanned: obj.statusesScanned.filter(
       (s): s is string => typeof s === "string",
     ),
+    ...(typeof obj.dispatchEnabled === "boolean"
+      ? { dispatchEnabled: obj.dispatchEnabled }
+      : {}),
+    ...(outcome ? { outcome } : {}),
+    ...(obj.lastFailure === null || typeof obj.lastFailure === "string"
+      ? { lastFailure: obj.lastFailure as string | null }
+      : {}),
+    ...(obj.lastSuccessfulScanAt === null ||
+    typeof obj.lastSuccessfulScanAt === "string"
+      ? { lastSuccessfulScanAt: obj.lastSuccessfulScanAt as string | null }
+      : {}),
   };
 }
 
@@ -187,7 +230,9 @@ export function evaluateAutomatedPhaseStaleness(input: {
   const anchor =
     input.state.sideEffects?.find(
       (e) =>
-        e.kind === "plan_review_dispatch" || e.kind === "code_review_dispatch",
+        e.kind === "plan_review_dispatch" ||
+        e.kind === "code_review_dispatch" ||
+        e.kind === "implementation_dispatch",
     )?.createdAt ??
     input.state.lastTransitionAt;
 

@@ -1,9 +1,14 @@
 import { loadHarnessConfig } from "../config/load-config.js";
+import { getTransitionalStatus } from "../config/status-names.js";
 import {
   createEnvelopeAndDispatch,
+  createImplementationJobAndDispatch,
   type CreateEnvelopeAndDispatchInput,
   type CreateEnvelopeAndDispatchResult,
 } from "../workflow/job-request/dispatch-opaque.js";
+import { ensureImplementationJobDispatched } from "../workflow/implementation-dispatch-effect.js";
+import { resolveImplementationSubject } from "../workflow/resolve-implementation-subject.js";
+import { createEmptyWorkflowState } from "../workflow/state/types.js";
 import {
   shouldDispatchLinearCommentEvent,
   shouldDispatchLinearIssueEvent,
@@ -39,6 +44,13 @@ export interface HandleLinearWebhookOptions {
   envelopeDispatch?: (
     input: CreateEnvelopeAndDispatchInput,
   ) => Promise<CreateEnvelopeAndDispatchResult>;
+  /** Test injection for Ready-for-Build subject dispatch. */
+  implementationSubjectDispatch?: (input: {
+    issueKey: string;
+    implementationSubjectIdentity: string;
+    dispatchToken: string;
+    fetchImpl?: typeof fetch;
+  }) => Promise<CreateEnvelopeAndDispatchResult>;
 }
 
 type WebhookResponseBody =
@@ -143,6 +155,7 @@ export async function handleLinearWebhook(
   let linearDeliveryId: string | null = null;
   let triggerSource = "linear_webhook";
   let phase = "auto";
+  let statusName: string | null = null;
 
   if (eventType === "Comment") {
     const parsed = parseLinearCommentEvent(payload, headers, teamKey);
@@ -231,6 +244,7 @@ export async function handleLinearWebhook(
     issueKey = parsed.issueKey;
     linearDeliveryId = parsed.linearDeliveryId;
     triggerSource = "linear_issue_status";
+    statusName = parsed.statusName ?? null;
   }
 
   const dispatchToken =
@@ -241,6 +255,106 @@ export async function handleLinearWebhook(
       error: "dispatch_failed",
     });
     return jsonResponse(500, { error: "dispatch_failed" });
+  }
+
+  const readyForBuild =
+    config &&
+    statusName &&
+    statusName.trim().toLowerCase() ===
+      getTransitionalStatus(config, "readyForBuild").trim().toLowerCase();
+
+  // Ready for Build must use impl-subject delivery so webhook + reconcile converge.
+  if (readyForBuild && config) {
+    const linearApiKey = process.env.LINEAR_API_KEY?.trim();
+    if (!linearApiKey) {
+      logWebhookEvent({
+        linearDeliveryId,
+        accepted: false,
+        reason: "missing_linear_api_key_for_implementation_subject",
+      });
+      return jsonResponse(200, {
+        accepted: false,
+        reason: "missing_linear_api_key_for_implementation_subject",
+      });
+    }
+    try {
+      const resolved = await resolveImplementationSubject({
+        config,
+        issueKey,
+        linearApiKey,
+      });
+      const subjectDispatch =
+        options.implementationSubjectDispatch ??
+        (async (input) =>
+          createImplementationJobAndDispatch({
+            issueKey: input.issueKey,
+            implementationSubjectIdentity: input.implementationSubjectIdentity,
+            dispatchToken: input.dispatchToken,
+            fetchImpl: input.fetchImpl,
+          }));
+
+      // Prefer durable effect path when a state store is available.
+      if (resolved.stateStore) {
+        const baseState =
+          resolved.state ??
+          createEmptyWorkflowState({
+            issueKey,
+            workflowSchemaVersion: "product-development-v2",
+          });
+        const effectResult = await ensureImplementationJobDispatched({
+          store: resolved.stateStore,
+          issueKey,
+          implementationSubjectIdentity: resolved.subjectIdentity,
+          ownerGeneration: `webhook:${linearDeliveryId ?? Date.now()}`,
+          state: baseState,
+          fetchImpl: options.fetchImpl,
+        });
+        const httpDispatched = effectResult.httpDispatched;
+        const duplicate =
+          effectResult.outcome === "already_dispatched" ||
+          effectResult.outcome === "request_already_present" ||
+          effectResult.outcome === "subject_already_complete";
+        logWebhookEvent({
+          linearDeliveryId,
+          accepted: true,
+          dispatched: httpDispatched,
+          duplicate,
+          requestId: effectResult.reviewRequestId,
+        });
+        return jsonResponse(200, {
+          accepted: true,
+          dispatched: httpDispatched,
+          ...(duplicate ? { duplicate: true } : {}),
+          requestId: effectResult.reviewRequestId,
+        });
+      }
+
+      const dispatched = await subjectDispatch({
+        issueKey,
+        implementationSubjectIdentity: resolved.subjectIdentity,
+        dispatchToken,
+        fetchImpl: options.fetchImpl,
+      });
+      logWebhookEvent({
+        linearDeliveryId,
+        accepted: true,
+        dispatched: dispatched.dispatched,
+        duplicate: dispatched.duplicate,
+        requestId: dispatched.requestId,
+      });
+      return jsonResponse(200, {
+        accepted: true,
+        dispatched: dispatched.dispatched,
+        ...(dispatched.duplicate ? { duplicate: true } : {}),
+        requestId: dispatched.requestId,
+      });
+    } catch {
+      logWebhookEvent({
+        accepted: false,
+        error: "dispatch_failed",
+      });
+      return jsonResponse(500, { error: "dispatch_failed" });
+    }
   }
 
   const envelopeDispatch = options.envelopeDispatch ?? createEnvelopeAndDispatch;

@@ -25,6 +25,7 @@ import {
 } from "../../linear/comments.js";
 import {
   ensureCodeReviewJobDispatched,
+  isCodeReviewDispatchProven,
   MISSING_DISPATCH_TOKEN_MESSAGE,
 } from "../../workflow/code-review-dispatch-effect.js";
 import { buildCodeReviewSubjectIdentity } from "../../workflow/subject-identities.js";
@@ -659,14 +660,16 @@ export async function executeHandoffPhase(
       linearStatuses,
       issueKey: options.issueKey,
     });
+    // Build-complete ("Code Review is starting") is deferred until durable CR
+    // dispatch is proven. PM handoff body may be posted before transition.
     const handoffBody = codeReadiness.configuredReady
       ? buildBuildCompleteCommentBody(handoffCommentInput)
       : buildHandoffCommentBody(handoffCommentInput);
     const logDirectory = config.logDirectory ?? "runs";
     const store = await resolvePhaseWorkflowStateStore({
-    config,
-    logDirectory,
-  });
+      config,
+      logDirectory,
+    });
     const workflowState = await loadOrBootstrapWorkflowState({
       store,
       issueKey: options.issueKey,
@@ -786,6 +789,14 @@ export async function executeHandoffPhase(
         ...workflowState,
         handoffSubjectIdentity,
         latestImplementationArtifact: implementationArtifact,
+        enabledOptionalPhases: {
+          ...workflowState.enabledOptionalPhases,
+          codeReview: codeReadiness.requestedEnabled,
+        },
+        effectiveOptionalPhases: {
+          ...workflowState.effectiveOptionalPhases,
+          codeReview: codeReadiness.configuredReady,
+        },
       },
       { identity: commentEffectId, kind: commentEffectKind },
     );
@@ -807,29 +818,33 @@ export async function executeHandoffPhase(
       );
     }
 
-    let handoffCommentId: string | null = null;
-    if (!isSideEffectCompleted(durable, commentEffectId)) {
-      handoffCommentId = await postHandoffComment(client, issue.id, handoffBody, {
-      ...footerBase,
-      phase: codeReadiness.configuredReady ? "build_complete" : "handoff",
-      branch: branch ?? undefined,
-      prUrl: prUrl ?? undefined,
-      previewUrl: previewUrl ?? undefined,
-      previousImplementationRunId: previousImplementationRunId ?? undefined,
-      builderAgentId: builderEvidence.builderAgentId,
-      builderThreadGeneration: builderEvidence.builderThreadGeneration,
-      builderThreadAction: builderEvidence.builderThreadAction,
-      builderOriginRunId: builderEvidence.builderOriginRunId,
-      builderThreadIdempotencyKey: builderEvidence.builderThreadIdempotencyKey,
-      previousBuilderAgentId: builderEvidence.previousBuilderAgentId,
-      builderThreadReplacementReason: builderEvidence.builderThreadReplacementReason,
-      implementationGenerationId: implementationArtifact.implementationGenerationId,
-      prNumber: String(implementationArtifact.prNumber),
-      prHeadSha: implementationArtifact.headSha,
-      prBaseSha: implementationArtifact.baseSha,
-      diffHash: implementationArtifact.diffHash,
-      handoffSubjectIdentity,
-    });
+    const postHandoffLinearComment = async (): Promise<string | null> => {
+      if (isSideEffectCompleted(durable, commentEffectId)) {
+        return null;
+      }
+      const commentId = await postHandoffComment(client, issue.id, handoffBody, {
+        ...footerBase,
+        phase: codeReadiness.configuredReady ? "build_complete" : "handoff",
+        branch: branch ?? undefined,
+        prUrl: prUrl ?? undefined,
+        previewUrl: previewUrl ?? undefined,
+        previousImplementationRunId: previousImplementationRunId ?? undefined,
+        builderAgentId: builderEvidence.builderAgentId,
+        builderThreadGeneration: builderEvidence.builderThreadGeneration,
+        builderThreadAction: builderEvidence.builderThreadAction,
+        builderOriginRunId: builderEvidence.builderOriginRunId,
+        builderThreadIdempotencyKey: builderEvidence.builderThreadIdempotencyKey,
+        previousBuilderAgentId: builderEvidence.previousBuilderAgentId,
+        builderThreadReplacementReason:
+          builderEvidence.builderThreadReplacementReason,
+        implementationGenerationId:
+          implementationArtifact.implementationGenerationId,
+        prNumber: String(implementationArtifact.prNumber),
+        prHeadSha: implementationArtifact.headSha,
+        prBaseSha: implementationArtifact.baseSha,
+        diffHash: implementationArtifact.diffHash,
+        handoffSubjectIdentity,
+      });
       durable = markSideEffectCompleted(durable, commentEffectId);
       durable = {
         ...durable,
@@ -840,71 +855,73 @@ export async function executeHandoffPhase(
         expectedRevision: durable.stateRevision - 1,
         next: durable,
       });
+      commentsWritten.push(handoffBody);
+      await mkdir(`${runDirectory}/linear`, { recursive: true });
+      await writeFile(
+        getHandoffCommentPath(runDirectory),
+        `${handoffBody}\n`,
+        "utf8",
+      );
+      await events.log("handoff_comment_posted", "info", {
+        commentId,
+        implementationGenerationId:
+          implementationArtifact.implementationGenerationId,
+      });
+      await events.log("linear_comment_posted", "info", {
+        phase: "handoff",
+        commentId,
+      });
+      return commentId;
+    };
+
+    // PM handoff path: comment may precede transition. Code Review path must
+    // not claim "Code Review is starting" until opaque dispatch is proven.
+    if (!codeReadiness.configuredReady) {
+      await postHandoffLinearComment();
+      publishObs?.end({
+        changedFileCount: changedFiles?.length ?? null,
+        previewAvailable: Boolean(previewUrl),
+        checkResultCategory: categorizeCheckResult(checkSummary),
+      });
     }
-    commentsWritten.push(handoffBody);
-    await mkdir(`${runDirectory}/linear`, { recursive: true });
-    await writeFile(getHandoffCommentPath(runDirectory), `${handoffBody}\n`, "utf8");
-    await events.log("handoff_comment_posted", "info", {
-      commentId: handoffCommentId,
-      implementationGenerationId: implementationArtifact.implementationGenerationId,
-    });
-    await events.log("linear_comment_posted", "info", {
-      phase: "handoff",
-      commentId: handoffCommentId,
-    });
-    publishObs?.end({
-      changedFileCount: changedFiles?.length ?? null,
-      previewAvailable: Boolean(previewUrl),
-      checkResultCategory: categorizeCheckResult(checkSummary),
+
+    const applied = await applyPhaseTransition({
+      store,
+      issueKey: options.issueKey,
+      config,
+      expectedStateRevision: durable.stateRevision,
+      currentPhaseId: "handoff",
+      outcome: {
+        kind: "success",
+        phaseId: "handoff",
+        attemptIdentity: runId,
+      },
+      evidence: { linearStatusName: linearStatusBefore ?? "" },
+      codeReviewEffectiveEnabled: codeReadiness.configuredReady,
+      linearStatuses,
+      latestImplementationArtifact: implementationArtifact,
+      clearActiveRunId: runId,
     });
 
-    const handoffSuccess = await (async () => {
-      const applied = await applyPhaseTransition({
-        store,
-        issueKey: options.issueKey,
-        config,
-        expectedStateRevision: durable.stateRevision,
-        currentPhaseId: "handoff",
-        outcome: {
-          kind: "success",
-          phaseId: "handoff",
-          attemptIdentity: runId,
-        },
-        evidence: { linearStatusName: linearStatusBefore ?? "" },
-        codeReviewEffectiveEnabled: codeReadiness.configuredReady,
-        linearStatuses,
-        latestImplementationArtifact: implementationArtifact,
-        clearActiveRunId: runId,
-      });
+    if (!applied.applyOk || !applied.statusName) {
+      throw new HandoffError(
+        "linear_write_failure",
+        `Handoff transition rejected: ${applied.reason}`,
+      );
+    }
 
-      if (!applied.applyOk || !applied.statusName) {
-        throw new HandoffError(
-          "linear_write_failure",
-          `Handoff transition rejected: ${applied.reason}`,
-        );
-      }
-
-      return {
-        statusName: applied.statusName,
-        result: applied.result!,
-        bypass: applied.result?.bypass ?? null,
-      };
-    })();
-    const nextStatus = handoffSuccess.statusName;
-    await transitionIssueStatus(client, issue, nextStatus);
-    linearStatusAfter = nextStatus;
-    await events.log("linear_status_changed", "info", {
-      from: linearStatusBefore,
-      to: nextStatus,
-      transitionReason: handoffSuccess.result.reason,
-      bypass: handoffSuccess.bypass?.event ?? null,
-    });
-    phaseTrace
-      ?.startChild("p-dev.linear.status-transition", "event")
-      ?.end({
-        linearStatusBefore,
-        linearStatusAfter: nextStatus,
-      });
+    // Critical: always dispatch from the post-transition authoritative revision.
+    durable =
+      applied.state ??
+      (await store.load(options.issueKey)) ??
+      durable;
+    durable = {
+      ...durable,
+      effectiveOptionalPhases: {
+        ...durable.effectiveOptionalPhases,
+        codeReview: codeReadiness.configuredReady,
+      },
+    };
 
     if (codeReadiness.configuredReady) {
       const reviewCycle = durable.cycleCounters.code_review_cycles ?? 0;
@@ -923,24 +940,68 @@ export async function executeHandoffPhase(
         state: durable,
       });
       durable = dispatchResult.state;
+      phaseTrace
+        ?.startChild("p-dev.code-review.dispatch", "event")
+        ?.end({
+          outcome: dispatchResult.outcome,
+          reviewSubjectIdentity,
+          reviewRequestId: dispatchResult.reviewRequestId,
+          httpDispatched: dispatchResult.httpDispatched,
+          claimLostRecoveries: dispatchResult.claimLostRecoveries,
+          stateRevision: durable.stateRevision,
+        });
+      await events.log("code_review_dispatch_attempt", "info", {
+        reviewSubjectIdentity,
+        reviewRequestId: dispatchResult.reviewRequestId,
+        outcome: dispatchResult.outcome,
+        httpDispatched: dispatchResult.httpDispatched,
+        claimLostRecoveries: dispatchResult.claimLostRecoveries,
+        prNumber: implementationArtifact.prNumber,
+        headSha: implementationArtifact.headSha,
+        stateRevision: durable.stateRevision,
+      });
       if (dispatchResult.outcome === "missing_dispatch_token") {
         throw new Error(MISSING_DISPATCH_TOKEN_MESSAGE);
       }
-      if (
-        dispatchResult.outcome === "dispatched" ||
-        dispatchResult.outcome === "request_already_present" ||
-        dispatchResult.outcome === "already_dispatched"
-      ) {
-        await events.log("code_review_job_dispatched", "info", {
-          reviewSubjectIdentity,
-          reviewRequestId: dispatchResult.reviewRequestId,
-          outcome: dispatchResult.outcome,
-          httpDispatched: dispatchResult.httpDispatched,
-          prNumber: implementationArtifact.prNumber,
-          headSha: implementationArtifact.headSha,
-        });
+      if (!isCodeReviewDispatchProven(dispatchResult.outcome)) {
+        throw new HandoffError(
+          "configuration_error",
+          `code_review_dispatch_${dispatchResult.outcome}: durable Code Review request was not proven after handoff transition (subject=${reviewSubjectIdentity}, request=${dispatchResult.reviewRequestId}, recoveries=${dispatchResult.claimLostRecoveries}). Resume with harness:reconcile-workflow --issue ${options.issueKey} --phase code_review --subject ${reviewSubjectIdentity} --dispatch.`,
+        );
       }
+      await events.log("code_review_job_dispatched", "info", {
+        reviewSubjectIdentity,
+        reviewRequestId: dispatchResult.reviewRequestId,
+        outcome: dispatchResult.outcome,
+        httpDispatched: dispatchResult.httpDispatched,
+        claimLostRecoveries: dispatchResult.claimLostRecoveries,
+        prNumber: implementationArtifact.prNumber,
+        headSha: implementationArtifact.headSha,
+      });
+      // Only now is it truthful to say Code Review is starting.
+      await postHandoffLinearComment();
+      publishObs?.end({
+        changedFileCount: changedFiles?.length ?? null,
+        previewAvailable: Boolean(previewUrl),
+        checkResultCategory: categorizeCheckResult(checkSummary),
+      });
     }
+
+    const nextStatus = applied.statusName;
+    await transitionIssueStatus(client, issue, nextStatus);
+    linearStatusAfter = nextStatus;
+    await events.log("linear_status_changed", "info", {
+      from: linearStatusBefore,
+      to: nextStatus,
+      transitionReason: applied.result?.reason ?? null,
+      bypass: applied.result?.bypass?.event ?? null,
+    });
+    phaseTrace
+      ?.startChild("p-dev.linear.status-transition", "event")
+      ?.end({
+        linearStatusBefore,
+        linearStatusAfter: nextStatus,
+      });
 
     const afterIssue = await fetchLinearIssue(options.issueKey, linearApiKey);
     await writeFile(

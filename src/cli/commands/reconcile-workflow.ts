@@ -12,6 +12,9 @@ export interface ReconcileWorkflowCommandOptions {
   dryRun?: boolean;
   dispatch?: boolean;
   force?: boolean;
+  phase?: string;
+  subject?: string;
+  requestId?: string;
 }
 
 export async function runReconcileWorkflowCommand(
@@ -27,15 +30,57 @@ export async function runReconcileWorkflowCommand(
     const { config } = await loadHarnessConfig({ configPath: options.configPath });
     const issueKey =
       options.issueKey?.trim() || readPrivateIssueKey()?.trim() || undefined;
-    const summary = await runWorkflowReconcile({
-      config,
-      configPath: options.configPath,
-      linearApiKey: apiKey,
-      issueKey,
-      dryRun: options.dryRun,
-      dispatch: options.dispatch,
-      force: options.force,
-    });
+    if ((options.phase || options.subject || options.requestId) && !issueKey) {
+      console.error(
+        "--issue is required when using --phase, --subject, or --request-id",
+      );
+      return EXIT_PLANNING_FAILURE;
+    }
+    let summary;
+    try {
+      summary = await runWorkflowReconcile({
+        config,
+        configPath: options.configPath,
+        linearApiKey: apiKey,
+        issueKey,
+        dryRun: options.dryRun,
+        dispatch: options.dispatch,
+        force: options.force,
+        phase: options.phase,
+        subject: options.subject,
+        requestId: options.requestId,
+      });
+    } catch (error) {
+      // Persist failure heartbeat so doctor surfaces schedule/run failures.
+      try {
+        const { buildReconcileHeartbeat } = await import(
+          "../../workflow/reconcile-health.js"
+        );
+        const { writeReconcileHeartbeat } = await import(
+          "../../workflow/reconcile-heartbeat-store.js"
+        );
+        const { resolveWorkflowReconcileStatusNames } = await import(
+          "../../runner/workflow-reconcile.js"
+        );
+        await writeReconcileHeartbeat({
+          heartbeat: buildReconcileHeartbeat({
+            candidatesFound: 0,
+            opaqueDispatches: 0,
+            statusesScanned: resolveWorkflowReconcileStatusNames(config),
+            dispatchEnabled: Boolean(options.dispatch) && !options.dryRun,
+            outcome: "failure",
+            lastFailure: (error instanceof Error ? error.message : String(error)).slice(
+              0,
+              240,
+            ),
+            lastSuccessfulScanAt: null,
+          }),
+        });
+      } catch {
+        // best-effort
+      }
+      throw error;
+    }
 
     if (isPublicRunnerMode()) {
       const dispatched = summary.results.filter((entry) => entry.dispatched).length;
