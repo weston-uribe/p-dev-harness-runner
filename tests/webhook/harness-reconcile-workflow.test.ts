@@ -25,7 +25,7 @@ describe("harness reconcile revisions workflow", () => {
 
   it("loads managed GitHub workflow state and public runner env during reconciliation", () => {
     expect(workflow).toContain("P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github");
-    expect(workflow).toContain("P_DEV_PUBLIC_RUNNER_MODE: \"1\"");
+    expect(workflow).toContain('P_DEV_PUBLIC_RUNNER_MODE: "1"');
     expect(workflow).toContain("P_DEV_STATE_GITHUB_TOKEN:");
   });
 
@@ -50,40 +50,58 @@ describe("evaluation inspect langfuse workflow", () => {
   });
 
   it("enables public runner mode and managed state env", () => {
-    expect(workflow).toContain("P_DEV_PUBLIC_RUNNER_MODE: \"1\"");
+    expect(workflow).toContain('P_DEV_PUBLIC_RUNNER_MODE: "1"');
     expect(workflow).toContain("P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github");
     expect(workflow).toContain("P_DEV_STATE_GITHUB_TOKEN:");
   });
 
   it("does not hard-code weston-uribe/p-dev-harness", () => {
     expect(workflow).not.toContain("weston-uribe/p-dev-harness");
-    expect(workflow).toContain('github.repository');
+    expect(workflow).not.toContain("weston-uribe/p-dev-harness-runner");
   });
 
   it("does not silently ignore inspect CLI failures", () => {
     expect(workflow).not.toMatch(/evaluation:inspect-langfuse[^\n]*\|\| true/);
-    expect(workflow).not.toMatch(/evaluation:reproject-langfuse[^\n]*\|\| true/);
     const inspectStep =
       workflow.match(
         /- name: Run Langfuse inspect[\s\S]*?(?=\n      - name:)/,
       )?.[0] ?? "";
-    const postInspectStep =
-      workflow.match(
-        /- name: Run Langfuse reproject apply \+ post inspect[\s\S]*?(?=\n      - name:)/,
-      )?.[0] ?? "";
     expect(inspectStep).not.toContain("|| true");
-    expect(postInspectStep).not.toContain("|| true");
   });
 
-  it("asserts inspect acceptance explicitly", () => {
+  it("is inspect-only with no reprojection or artifact-cache download", () => {
+    expect(workflow).not.toContain("reproject-dry-run");
+    expect(workflow).not.toContain("reproject-apply");
+    expect(workflow).not.toContain("evaluation:reproject-langfuse");
+    expect(workflow).not.toContain("runs/.artifact-cache");
+    expect(workflow).not.toContain("Download run artifacts");
+    expect(workflow).not.toContain("gh run download");
+    expect(workflow).not.toMatch(/^\s*mode:/m);
+    expect(workflow).not.toContain("tee ");
+    expect(workflow).not.toContain(".stdout.json");
+  });
+
+  it("asserts public-summary acceptance gates", () => {
     expect(workflow).toContain("Assert Langfuse inspect acceptance");
     expect(workflow).toContain("acceptance.complete");
+    expect(workflow).toContain("generationCostComplete");
+    expect(workflow).toContain("requiredGenerationCount");
+    expect(workflow).toContain("incompleteRequiredGenerationCount");
+    expect(workflow).toContain("privacyValidationPassed");
+    expect(workflow).toContain("assertPublicSafe");
     expect(workflow).toContain("Malformed Langfuse inspect report JSON");
   });
 
-  it("always uploads redacted reports with run-scoped artifact name", () => {
+  it("uploads a single public-safe summary with one-day retention", () => {
     expect(workflow).toContain("if: always()");
-    expect(workflow).toContain("Upload redacted report");
-    expect(workflow).toContain("langfuse-inspect-${{ github.run_id }}");
+    expect(workflow).toContain("Upload public-safe summary");
+    expect(workflow).toContain("eval-inspect-${{ github.run_id }}");
+    expect(workflow).toContain(
+      "runs/evaluation-reports/public-inspect-${{ github.run_id }}.json",
+    );
+    expect(workflow).toContain("retention-days: 1");
+    expect(workflow).not.toMatch(/path:\s*runs\/evaluation-reports\/\s*$/m);
+    expect(workflow).not.toContain("Upload redacted report");
+    expect(workflow).not.toContain("langfuse-inspect-${{ github.run_id }}");
   });
 });

@@ -14,6 +14,7 @@ export async function runEvaluationInspectLangfuse(options: {
   out?: string;
   safeContent?: boolean;
   json?: boolean;
+  expectedPhases?: string;
 }): Promise<number> {
   try {
     const issueKey =
@@ -36,27 +37,35 @@ export async function runEvaluationInspectLangfuse(options: {
         logDirectory,
         "evaluation-reports",
         isPublicRunnerMode()
-          ? `langfuse-inspect-${process.env.GITHUB_RUN_ID ?? "local"}.json`
+          ? `public-inspect-${process.env.GITHUB_RUN_ID ?? "local"}.json`
           : `${issueKey}-langfuse-inspect.json`,
       );
 
-    const { report, exitCode } = await runLangfuseInspect({
+    const expectedPhases = options.expectedPhases
+      ?.split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    const { report, publicSummary, exitCode } = await runLangfuseInspect({
       issueKey,
       namespace,
       logDirectory,
       outPath,
       safeContent: options.safeContent === true,
+      expectedPhases,
     });
 
     if (isPublicRunnerMode()) {
       new PublicSafeLogger().log({
         phase: "langfuse_inspect",
-        outcome: report.acceptance.complete ? "success" : "failure",
-        errorCode: report.acceptance.complete
-          ? undefined
-          : "langfuse_incomplete",
+        outcome:
+          publicSummary?.acceptance.complete === true ? "success" : "failure",
+        errorCode:
+          publicSummary?.acceptance.complete === true
+            ? undefined
+            : "langfuse_incomplete",
         publicEventType: "langfuse_inspect",
-        blockers: report.gaps.length,
+        blockers: report.acceptance.errorGapCount,
       });
     } else if (options.json) {
       process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -68,9 +77,13 @@ export async function runEvaluationInspectLangfuse(options: {
           `traces: ${report.traces.length}`,
           `scores: ${report.scores.length}`,
           `gaps: ${report.gaps.length}`,
-          `complete: ${report.acceptance.complete}`,
+          `coreComplete: ${report.acceptance.coreComplete}`,
+          `generationCostComplete: ${report.acceptance.generationCostComplete}`,
+          `requiredGenerations: ${report.acceptance.requiredGenerationCount}`,
           `planningTrace: ${report.acceptance.hasPlanningTrace}`,
           `plannerAgent: ${report.acceptance.hasPlannerAgent}`,
+          `planReviewTrace: ${report.acceptance.hasPlanReviewTrace}`,
+          `planReviewerAgent: ${report.acceptance.hasPlanReviewerAgent}`,
           `report: ${outPath}`,
           "",
         ].join("\n"),

@@ -292,8 +292,10 @@ export async function runSyntheticProjectionCanary(options: {
       traces: bundle.traces,
       observations: bundle.observations,
       scores: bundle.scores,
+      // Synthetic canary projects planning only.
+      expectedPhases: ["planning"],
     });
-    acceptanceComplete = inspect.acceptance.complete;
+    acceptanceComplete = inspect.acceptance.coreComplete;
   }
 
   const report: SyntheticProjectionCanaryReport = {
