@@ -124,6 +124,33 @@ Explicit:
 
 Snapshot includes `src/provenance/**` via existing `src/` include. Default mode remains `disabled`. Runner PR must pin final source SHA, snapshot digest, writer version, and launch-surface manifest digest — and remain unmerged until operator authorization.
 
+### Production workflow wiring (operator config)
+
+| Name | Kind | Purpose |
+|------|------|---------|
+| `P_DEV_CURSOR_PROVENANCE_MODE` | repository **variable** | `disabled` (default when unset/empty), `shadow`, or `required` |
+| `P_DEV_PROVENANCE_KEY_V1` | repository **secret** | AES-256-GCM key material (32 bytes hex or base64url) |
+
+Do **not** use `P_DEV_PROVENANCE_MODE` (obsolete / unused).
+
+Wiring is **step-level only** on production Cursor validation/execution steps in [`.github/workflows/harness-auto-runner.yml`](../../.github/workflows/harness-auto-runner.yml):
+
+- `run-harness` → `Doctor`, `Run harness`
+- `run-merge` → `Doctor`, `Run merge` (merge may invoke Cursor via integration-repair)
+
+Checkout, setup, install, build, gate, sync-production, reconcile-only, and evaluation/canary/probe workflows must not receive the encryption key.
+
+Unset or empty mode resolves to `disabled`: no provenance state client, no encryption key required, no provenance network I/O. Workflow references may exist while the variable and secret remain absent.
+
+**Later authorized rollout order (do not perform without explicit approval):**
+
+1. Deploy/sync runner code with mode still unset/`disabled`
+2. Add `P_DEV_PROVENANCE_KEY_V1` secret
+3. Verify production runs remain `disabled` (doctor + no provenance writes)
+4. Set `P_DEV_CURSOR_PROVENANCE_MODE=shadow` last
+
+`required` mode, coverage-epoch activation, and importer registry consumption remain prohibited until separate authorization. State-token write permission for provenance paths is not proven until an authorized shadow write. Rollback is setting or deleting the mode variable back to disabled — do not rewrite state-repository history.
+
 ## Consequences
 
 - Production phases cannot bypass the provenance wrapper (structural tests).

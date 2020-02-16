@@ -239,6 +239,9 @@ jobs:
 
       - name: Doctor
         id: doctor
+        env:
+          P_DEV_CURSOR_PROVENANCE_MODE: ${{ vars.P_DEV_CURSOR_PROVENANCE_MODE }}
+          P_DEV_PROVENANCE_KEY_V1: ${{ secrets.P_DEV_PROVENANCE_KEY_V1 }}
         run: npm run harness:doctor
 
       # Pre-phase Doctor failure must terminalize the claim (not leave it indefinitely claimed).
@@ -298,6 +301,8 @@ jobs:
           INPUT_PHASE: ${{ needs.gate.outputs.input_phase }}
           RESOLVED_PHASE: ${{ steps.reresolve.outputs.phase || needs.gate.outputs.phase }}
           FORCE_FLAG_INPUT: ${{ needs.gate.outputs.force }}
+          P_DEV_CURSOR_PROVENANCE_MODE: ${{ vars.P_DEV_CURSOR_PROVENANCE_MODE }}
+          P_DEV_PROVENANCE_KEY_V1: ${{ secrets.P_DEV_PROVENANCE_KEY_V1 }}
         run: |
           set +e
           PHASE="$INPUT_PHASE"
@@ -457,6 +462,9 @@ jobs:
 
       - name: Doctor
         id: doctor
+        env:
+          P_DEV_CURSOR_PROVENANCE_MODE: ${{ vars.P_DEV_CURSOR_PROVENANCE_MODE }}
+          P_DEV_PROVENANCE_KEY_V1: ${{ secrets.P_DEV_PROVENANCE_KEY_V1 }}
         run: npm run harness:doctor -- --profile merge
 
       - name: Finalize pre-phase doctor failure
@@ -491,6 +499,8 @@ jobs:
         env:
           REQUEST_ID: ${{ needs.gate.outputs.request_id }}
           FORCE_FLAG_INPUT: ${{ needs.gate.outputs.force }}
+          P_DEV_CURSOR_PROVENANCE_MODE: ${{ vars.P_DEV_CURSOR_PROVENANCE_MODE }}
+          P_DEV_PROVENANCE_KEY_V1: ${{ secrets.P_DEV_PROVENANCE_KEY_V1 }}
         run: |
           set +e
           FORCE_FLAG=""
