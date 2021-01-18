@@ -1406,6 +1406,7 @@ export async function runWorkflowReconcile(input: {
   subject?: string;
   requestId?: string;
 }): Promise<WorkflowReconcileSummary> {
+  const attemptStartedAt = new Date().toISOString();
   const candidates = await listWorkflowReconcileCandidates({
     config: input.config,
     linearApiKey: input.linearApiKey,
@@ -1432,6 +1433,7 @@ export async function runWorkflowReconcile(input: {
 
   const statusesScanned = resolveWorkflowReconcileStatusNames(input.config);
   const opaqueDispatches = results.filter((r) => r.dispatched).length;
+  const attemptFinishedAt = new Date().toISOString();
   // Always write a heartbeat (including zero-candidate and dry-run scans) so
   // doctor can detect schedule starvation. GitHub Actions schedule is best-effort.
   try {
@@ -1442,6 +1444,8 @@ export async function runWorkflowReconcile(input: {
         statusesScanned,
         dispatchEnabled: Boolean(input.dispatch) && !input.dryRun,
         outcome: input.dryRun ? "dry_run" : "success",
+        lastAttemptStartedAt: attemptStartedAt,
+        lastAttemptFinishedAt: attemptFinishedAt,
       }),
     });
   } catch {

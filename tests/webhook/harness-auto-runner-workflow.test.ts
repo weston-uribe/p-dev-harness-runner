@@ -53,18 +53,25 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       expect(runHarness).not.toContain("harness-merge-");
     });
 
-    it("run-harness aliases HARNESS_GITHUB_TOKEN as GITHUB_DISPATCH_TOKEN for code-review dispatch", () => {
-      const runHarness = extractJobSection(workflow, "run-harness");
-      expect(runHarness).toContain(
+    it("Doctor-running jobs share GITHUB_DISPATCH_* env parity with run-harness", () => {
+      const requiredDispatchEnv = [
         "GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}",
-      );
-      expect(runHarness).toContain(
         "GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}",
-      );
+      ];
+      const doctorJobs = [
+        { name: "run-harness", profile: "harness:doctor" },
+        { name: "run-merge", profile: "harness:doctor -- --profile merge" },
+      ] as const;
+      for (const job of doctorJobs) {
+        const section = extractJobSection(workflow, job.name);
+        for (const envLine of requiredDispatchEnv) {
+          expect(section).toContain(envLine);
+        }
+        expect(section).toContain(job.profile);
+      }
       const gate = extractJobSection(workflow, "gate");
-      const runMerge = extractJobSection(workflow, "run-merge");
       const syncSection = extractJobSection(workflow, "sync-production");
-      for (const section of [gate, runMerge, syncSection]) {
+      for (const section of [gate, syncSection]) {
         expect(section).not.toContain(
           "GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}",
         );
@@ -79,6 +86,10 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
         expect(section).toMatch(
           /finalize-harness-run\.ts[\s\S]*--request-id "\$REQUEST_ID"/,
         );
+        expect(section).toContain("id: doctor");
+        expect(section).toContain("Finalize pre-phase doctor failure");
+        expect(section).toContain("--completion-state doctor_checks_failed");
+        expect(section).toContain("harness:fail-job-request");
       }
     });
 

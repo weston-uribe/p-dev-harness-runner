@@ -238,7 +238,25 @@ jobs:
           npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
 
       - name: Doctor
+        id: doctor
         run: npm run harness:doctor
+
+      - name: Finalize pre-phase doctor failure
+        if: failure() && steps.doctor.outcome == 'failure'
+        env:
+          REQUEST_ID: ${{ needs.gate.outputs.request_id }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
+          HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
+        run: |
+          npm run harness:fail-job-request -- \
+            --request-id "$REQUEST_ID" \
+            --completion-state doctor_checks_failed \
+            --json
+          npx tsx src/workflow/finalize-harness-run.ts \
+            --json-out harness-run-output.json \
+            --exit-code 1 \
+            --request-id "$REQUEST_ID" || true
 
       - name: Write dispatch metadata
         env:
@@ -393,6 +411,8 @@ jobs:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
       GITHUB_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}
+      GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}
+      GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}
       HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
       HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
       P_DEV_PUBLIC_RUNNER_MODE: "1"
@@ -435,7 +455,25 @@ jobs:
           npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
 
       - name: Doctor
+        id: doctor
         run: npm run harness:doctor -- --profile merge
+
+      - name: Finalize pre-phase doctor failure
+        if: failure() && steps.doctor.outcome == 'failure'
+        env:
+          REQUEST_ID: ${{ needs.gate.outputs.request_id }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
+          HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
+        run: |
+          npm run harness:fail-job-request -- \
+            --request-id "$REQUEST_ID" \
+            --completion-state doctor_checks_failed \
+            --json
+          npx tsx src/workflow/finalize-harness-run.ts \
+            --json-out harness-run-output.json \
+            --exit-code 1 \
+            --request-id "$REQUEST_ID" || true
 
       - name: Write dispatch metadata
         env:
@@ -465,7 +503,7 @@ jobs:
           exit $EXIT_CODE
 
       - name: Finalize merge run
-        if: always()
+        if: always() && steps.doctor.outcome != 'failure'
         env:
           EXIT_CODE: ${{ steps.merge.outputs.exit_code }}
           REQUEST_ID: ${{ needs.gate.outputs.request_id }}

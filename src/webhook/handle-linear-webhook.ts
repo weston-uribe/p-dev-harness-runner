@@ -367,6 +367,8 @@ export async function handleLinearWebhook(
       linearDeliveryId,
       dispatchToken,
       fetchImpl: options.fetchImpl,
+      // Linear delivery ack is optional observability after successful dispatch.
+      ackRequired: false,
     });
 
     logWebhookEvent({

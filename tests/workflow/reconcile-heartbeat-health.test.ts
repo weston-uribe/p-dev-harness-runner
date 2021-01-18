@@ -51,6 +51,31 @@ describe("reconcile heartbeat health", () => {
     const health = evaluateReconcileHeartbeatHealth(stale);
     expect(health.ok).toBe(false);
     expect(health.reason).toBe("stale");
+    expect(health.ok === false && health.heartbeat?.lastFailureClassification).toBe(
+      "schedule_gap",
+    );
+    expect(health.ok === false && health.detail).toContain("schedule_gap");
+  });
+
+  it("preserves command_failure classification on stale heartbeats", () => {
+    const stale = buildReconcileHeartbeat({
+      finishedAt: new Date(Date.now() - RECONCILE_HEARTBEAT_STALE_MS - 1000).toISOString(),
+      candidatesFound: 0,
+      opaqueDispatches: 0,
+      statusesScanned: ["Code Review"],
+      outcome: "failure",
+      lastFailure: "boom",
+      lastFailureClassification: "command_failure",
+      lastAttemptStartedAt: new Date(Date.now() - RECONCILE_HEARTBEAT_STALE_MS - 2000).toISOString(),
+      workflowRunId: "run-1",
+    });
+    expect(stale.lastAttemptFinishedAt).toBe(stale.finishedAt);
+    expect(stale.lastWorkflowRunId).toBe("run-1");
+    const health = evaluateReconcileHeartbeatHealth(stale);
+    expect(health.ok).toBe(false);
+    expect(health.ok === false && health.heartbeat?.lastFailureClassification).toBe(
+      "command_failure",
+    );
   });
 
   it("repo workflow declares required cron and reconcile command", () => {

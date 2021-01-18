@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   pingLinear: vi.fn(),
   pingGitHub: vi.fn(),
+  loadReconcileHeartbeat: vi.fn(),
 }));
 
 vi.mock("../../src/linear/client.js", async (importOriginal) => {
@@ -35,8 +36,21 @@ vi.mock("@cursor/sdk", () => ({
   },
 }));
 
+vi.mock("../../src/workflow/reconcile-heartbeat-store.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/workflow/reconcile-heartbeat-store.js")>();
+  return {
+    ...actual,
+    loadReconcileHeartbeat: mocks.loadReconcileHeartbeat,
+  };
+});
+
 import { runDoctor } from "../../src/cli/commands/doctor.js";
 import { EXIT_CONFIG, EXIT_SUCCESS } from "../../src/cli/exit-codes.js";
+import {
+  buildReconcileHeartbeat,
+  RECONCILE_HEARTBEAT_STALE_MS,
+} from "../../src/workflow/reconcile-health.js";
 
 describe("runDoctor", () => {
   let tempRoot = "";
@@ -72,6 +86,8 @@ describe("runDoctor", () => {
     process.env.CURSOR_API_KEY = "test-cursor";
     mocks.pingLinear.mockResolvedValue("Weston");
     mocks.pingGitHub.mockResolvedValue("weston-uribe");
+    // Missing heartbeat without state token is skipped (not a phase blocker).
+    mocks.loadReconcileHeartbeat.mockResolvedValue(null);
   });
 
   afterEach(async () => {
@@ -80,6 +96,7 @@ describe("runDoctor", () => {
     delete process.env.GITHUB_TOKEN;
     delete process.env.GITHUB_DISPATCH_TOKEN;
     delete process.env.HARNESS_GITHUB_TOKEN;
+    delete process.env.P_DEV_STATE_GITHUB_TOKEN;
     vi.clearAllMocks();
     await rm(tempRoot, { recursive: true, force: true });
   });
@@ -121,6 +138,76 @@ describe("runDoctor", () => {
 
     const code = await runDoctor({ configPath, profile: "merge" });
 
+    expect(code).toBe(EXIT_CONFIG);
+  });
+
+  it("FRE-7 shaped: full profile proceeds with stale reconcile heartbeat when critical deps healthy", async () => {
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.HARNESS_GITHUB_TOKEN = "test-dispatch";
+    process.env.P_DEV_STATE_GITHUB_TOKEN = "test-state";
+    mocks.loadReconcileHeartbeat.mockResolvedValue(
+      buildReconcileHeartbeat({
+        finishedAt: new Date(
+          Date.now() - RECONCILE_HEARTBEAT_STALE_MS - 60_000,
+        ).toISOString(),
+        candidatesFound: 0,
+        opaqueDispatches: 0,
+        statusesScanned: ["Plan Review", "Code Review"],
+        outcome: "success",
+        workflowRunId: "29800000000",
+      }),
+    );
+
+    const code = await runDoctor({ configPath, profile: "full" });
+    expect(code).toBe(EXIT_SUCCESS);
+  });
+
+  it("FRE-6 shaped: merge profile proceeds with stale heartbeat when dispatch token present", async () => {
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.HARNESS_GITHUB_TOKEN = "test-dispatch";
+    process.env.P_DEV_STATE_GITHUB_TOKEN = "test-state";
+    mocks.loadReconcileHeartbeat.mockResolvedValue(
+      buildReconcileHeartbeat({
+        finishedAt: new Date(
+          Date.now() - RECONCILE_HEARTBEAT_STALE_MS - 60_000,
+        ).toISOString(),
+        candidatesFound: 0,
+        opaqueDispatches: 0,
+        statusesScanned: ["Ready to Merge"],
+        outcome: "success",
+      }),
+    );
+
+    const code = await runDoctor({ configPath, profile: "merge" });
+    expect(code).toBe(EXIT_SUCCESS);
+  });
+
+  it("reconciler profile fails on stale heartbeat", async () => {
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.HARNESS_GITHUB_TOKEN = "test-dispatch";
+    process.env.P_DEV_STATE_GITHUB_TOKEN = "test-state";
+    mocks.loadReconcileHeartbeat.mockResolvedValue(
+      buildReconcileHeartbeat({
+        finishedAt: new Date(
+          Date.now() - RECONCILE_HEARTBEAT_STALE_MS - 60_000,
+        ).toISOString(),
+        candidatesFound: 0,
+        opaqueDispatches: 0,
+        statusesScanned: ["Code Review"],
+        outcome: "success",
+      }),
+    );
+
+    const code = await runDoctor({ configPath, profile: "reconciler" });
+    expect(code).toBe(EXIT_CONFIG);
+  });
+
+  it("merge profile still fails when dispatch token is missing", async () => {
+    process.env.GITHUB_TOKEN = "test-github";
+    delete process.env.HARNESS_GITHUB_TOKEN;
+    delete process.env.GITHUB_DISPATCH_TOKEN;
+
+    const code = await runDoctor({ configPath, profile: "merge" });
     expect(code).toBe(EXIT_CONFIG);
   });
 });

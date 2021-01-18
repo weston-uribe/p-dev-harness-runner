@@ -155,6 +155,7 @@ describe("handleLinearWebhook integration", () => {
     expect(envelopeDispatch.mock.calls[0]?.[0]).toMatchObject({
       issueKey: "WES-20",
       dispatchToken: TOKEN,
+      ackRequired: false,
     });
   });
 

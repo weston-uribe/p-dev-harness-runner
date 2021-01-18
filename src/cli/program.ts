@@ -67,12 +67,14 @@ export function createProgram(): Command {
     .description("Validate config, allowlist, and optional Linear auth")
     .option(
       "--profile <profile>",
-      "Validation profile: full (default) or merge (GitHub/Linear only)",
+      "Validation profile: full (default phase), merge (GitHub/Linear), or reconciler (strict heartbeat/schedule health)",
       "full",
     )
     .action(async (options: { profile?: string }) => {
       const configPath = program.opts<{ config: string }>().config;
-      const profile = options.profile === "merge" ? "merge" : "full";
+      const raw = options.profile?.trim().toLowerCase();
+      const profile =
+        raw === "merge" || raw === "reconciler" ? raw : "full";
       const exitCode = await runDoctor({ configPath, profile });
       process.exitCode = exitCode;
     });
