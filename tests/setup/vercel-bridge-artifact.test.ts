@@ -21,6 +21,10 @@ describe("vercel bridge artifact", () => {
 
     expect(js.data).toContain("function issueKeyFromUrl");
     expect(js.data).toContain('.split(/[,\\s]+/)');
+    expect(js.data).toContain("ensureOpaqueDispatch");
+    expect(js.data).toContain("resolveLinearIssueIdByIdentifier");
+    const vercelJson = files.find((file) => file.file === "vercel.json");
+    expect(vercelJson?.data).toContain('"maxDuration": 30');
     // Broken String.raw regex literal form that crashed production.
     expect(js.data).not.toMatch(/url\.match\(\/\\\/\(/);
 

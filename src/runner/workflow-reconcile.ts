@@ -5,10 +5,7 @@ import {
   getEligibleRevisionStatuses,
   getTransitionalStatus,
 } from "../config/status-names.js";
-import {
-  resolveAuthoritativeLinearTeamIdFromConfig,
-  resolveAuthoritativeLinearTeamIds,
-} from "../config/resolve-linear-team.js";
+import { resolveAuthoritativeLinearTeamIds } from "../config/resolve-linear-team.js";
 import { runLinearAssociationGate } from "../config/linear-association-gate.js";
 import { fetchLinearIssue } from "../linear/client.js";
 import { listIssuesByStatus } from "../linear/issue-query.js";
@@ -38,28 +35,11 @@ import {
   getDispatchEventType,
   getDispatchRepository,
 } from "../webhook/dispatch-github.js";
+import { dispatchMergeReconcileJob } from "../workflow/job-request/dispatch-merge-reconcile.js";
+import { resolveMergeReconcileIdentity } from "./merge-reconcile-identity.js";
 
-/**
- * Team IDs to try when loading durable workflow state for reconcile.
- * Handoff/phases write under the config-authoritative association team, which can
- * differ from the issue's Linear teamId in multi-team dogfood (FRE-5).
- */
-export function reconcileWorkflowStateTeamCandidates(input: {
-  config: HarnessConfig;
-  issueTeamId?: string | null;
-}): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const candidate of [
-    input.issueTeamId?.trim(),
-    resolveAuthoritativeLinearTeamIdFromConfig(input.config),
-  ]) {
-    if (!candidate || seen.has(candidate)) continue;
-    seen.add(candidate);
-    out.push(candidate);
-  }
-  return out;
-}
+import { reconcileWorkflowStateTeamCandidates } from "./workflow-state-team-candidates.js";
+export { reconcileWorkflowStateTeamCandidates };
 
 export const MAX_RECONCILE_CANDIDATES_PER_STATUS = 25;
 export const MAX_RECONCILE_CANDIDATES_TOTAL = 100;
@@ -454,7 +434,7 @@ export async function evaluateWorkflowReconcileIssue(input: {
     }
   }
 
-  const shouldRun = action === "dispatch";
+  let shouldRun = action === "dispatch";
 
   if (
     shouldRun &&
@@ -463,48 +443,108 @@ export async function evaluateWorkflowReconcileIssue(input: {
     !dispatched &&
     !codeReviewRecoveryHandled
   ) {
-    const token = resolveDispatchGithubToken(process.env);
-    if (!token) {
-      return {
-        issueKey,
-        linearStatus: issue.status,
-        phase: route.phase,
-        action: "blocker",
-        reason: "missing_dispatch_token",
-        shouldRun: true,
-        dispatched: false,
-        pendingRecorded,
-        incompleteSideEffectIdentities: incompleteSideEffects,
-        workflowStateRevision: route.workflowStateRevision ?? null,
-        pmFeedbackCommentId,
-        mergePrUrl,
-      };
-    }
-
-    await dispatchRepositoryEvent({
-      token,
-      repository: getDispatchRepository(),
-      eventType: getDispatchEventType(),
-      clientPayload: {
-        issueKey,
-        issueId: issue.id,
-        issueUrl: issue.url,
-        action: "update",
-        statusName: issue.status,
-        previousStatusName: null,
-        linearDeliveryId: null,
-        linearWebhookId: null,
-        receivedAt: new Date().toISOString(),
-        meta: {
-          triggerKind: "issue_status",
-          reconcile: "workflow",
+    if (route.phase === "merge") {
+      const client = createLinearClient(input.linearApiKey);
+      const comments = await listIssueComments(client, issue.id);
+      const identity = resolveMergeReconcileIdentity({
+        issue,
+        comments,
+        orchestratorMarker: input.config.orchestratorMarker,
+        targetRepository: route.targetRepo,
+        authoritativeState,
+      });
+      if (!identity || !mergePrUrl) {
+        return {
+          issueKey,
+          linearStatus: issue.status,
           phase: route.phase,
-          pmFeedbackCommentId: pmFeedbackCommentId ?? undefined,
-          prUrl: mergePrUrl ?? undefined,
+          action: "blocker",
+          reason: "missing_merge_request_identity",
+          shouldRun: true,
+          dispatched: false,
+          pendingRecorded,
+          incompleteSideEffectIdentities: incompleteSideEffects,
+          workflowStateRevision: route.workflowStateRevision ?? null,
+          pmFeedbackCommentId,
+          mergePrUrl,
+        };
+      }
+      const mergeDispatch = await dispatchMergeReconcileJob({
+        ...identity,
+        prUrl: mergePrUrl,
+      });
+      if (
+        mergeDispatch.outcome === "missing_dispatch_token" ||
+        mergeDispatch.outcome === "missing_state_token"
+      ) {
+        return {
+          issueKey,
+          linearStatus: issue.status,
+          phase: route.phase,
+          action: "blocker",
+          reason: mergeDispatch.outcome,
+          shouldRun: true,
+          dispatched: false,
+          pendingRecorded,
+          incompleteSideEffectIdentities: incompleteSideEffects,
+          workflowStateRevision: route.workflowStateRevision ?? null,
+          pmFeedbackCommentId,
+          mergePrUrl,
+        };
+      }
+      dispatched = mergeDispatch.dispatched;
+      if (!mergeDispatch.dispatched) {
+        reason = `merge_request_${mergeDispatch.outcome}`;
+        action = "noop";
+        shouldRun = false;
+      } else {
+        reason = "eligible_merge";
+        shouldRun = true;
+      }
+    } else {
+      const token = resolveDispatchGithubToken(process.env);
+      if (!token) {
+        return {
+          issueKey,
+          linearStatus: issue.status,
+          phase: route.phase,
+          action: "blocker",
+          reason: "missing_dispatch_token",
+          shouldRun: true,
+          dispatched: false,
+          pendingRecorded,
+          incompleteSideEffectIdentities: incompleteSideEffects,
+          workflowStateRevision: route.workflowStateRevision ?? null,
+          pmFeedbackCommentId,
+          mergePrUrl,
+        };
+      }
+
+      await dispatchRepositoryEvent({
+        token,
+        repository: getDispatchRepository(),
+        eventType: getDispatchEventType(),
+        clientPayload: {
+          issueKey,
+          issueId: issue.id,
+          issueUrl: issue.url,
+          action: "update",
+          statusName: issue.status,
+          previousStatusName: null,
+          linearDeliveryId: null,
+          linearWebhookId: null,
+          receivedAt: new Date().toISOString(),
+          meta: {
+            triggerKind: "issue_status",
+            reconcile: "workflow",
+            phase: route.phase,
+            pmFeedbackCommentId: pmFeedbackCommentId ?? undefined,
+            prUrl: mergePrUrl ?? undefined,
+          },
         },
-      },
-    });
-    dispatched = true;
+      });
+      dispatched = true;
+    }
   }
 
   return {

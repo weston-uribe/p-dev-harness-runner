@@ -23,6 +23,8 @@ import {
   createWorkflowStateStore,
   resolveWorkflowStateStoreMode,
 } from "../workflow/state/factory.js";
+import type { WorkflowStateRecord } from "../workflow/state/types.js";
+import { reconcileWorkflowStateTeamCandidates } from "./workflow-state-team-candidates.js";
 import path from "node:path";
 
 export { CloudConfigStaleError } from "../config/assert-cloud-config-fingerprint.js";
@@ -313,13 +315,32 @@ export async function resolveRoute(
   const phaseArg = options.phase ?? "auto";
   const phase = resolvePhase(phaseArg, inferred.phase);
 
-  const stateStore = await createWorkflowStateStore({
-    logDirectory: path.resolve(config.logDirectory),
-    teamId: issue.teamId ?? undefined,
-    env: process.env,
-    mode: resolveWorkflowStateStoreMode(process.env),
+  // Handoff/phases may write under the config-authoritative association team
+  // (e.g. TT) while the issue's Linear teamId differs (e.g. FRE). Search both.
+  let authoritativeState: WorkflowStateRecord | null = null;
+  const stateTeamCandidates = reconcileWorkflowStateTeamCandidates({
+    config,
+    issueTeamId: issue.teamId,
   });
-  const authoritativeState = await stateStore.load(issueKey);
+  const teamIdsToTry =
+    stateTeamCandidates.length > 0 ? stateTeamCandidates : [undefined];
+  for (const teamId of teamIdsToTry) {
+    try {
+      const candidateStore = await createWorkflowStateStore({
+        logDirectory: path.resolve(config.logDirectory),
+        teamId,
+        env: process.env,
+        mode: resolveWorkflowStateStoreMode(process.env),
+      });
+      const loaded = await candidateStore.load(issueKey);
+      if (loaded) {
+        authoritativeState = loaded;
+        break;
+      }
+    } catch {
+      // try next candidate team path
+    }
+  }
   const eligibility = evaluateWorkflowEligibility({
     config,
     linearStatusName: issue.status,
