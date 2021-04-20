@@ -105,6 +105,16 @@ function hasPriorVercelMetadata(state: ControlPlaneSetupState | null): boolean {
 export function assessDurableBridgeHealth(
   state: ControlPlaneSetupState | null,
 ): PDevBridgeHealthStatus {
+  // Prior successful initial-setup completion is durable operational evidence
+  // that the bridge was verified; revoked tokens / missing local Vercel metadata
+  // must not force repair routing away from Workflow.
+  if (
+    state?.initialSetup?.status === "complete" &&
+    state.initialSetup.completionEvidence.vercelConfigured
+  ) {
+    return "verified";
+  }
+
   const vercel = state?.vercel;
   if (!vercel?.projectId?.trim()) {
     return "missing";
@@ -129,15 +139,6 @@ export function assessDurableBridgeHealth(
     redeploy.phase !== "terminal"
   ) {
     return "deploying";
-  }
-
-  // Prior successful initial-setup completion is durable operational evidence
-  // that the bridge was verified; revoked tokens must not force repair routing.
-  if (
-    state?.initialSetup?.status === "complete" &&
-    state.initialSetup.completionEvidence.vercelConfigured
-  ) {
-    return "verified";
   }
 
   return "unhealthy";

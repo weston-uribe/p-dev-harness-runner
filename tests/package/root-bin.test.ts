@@ -18,7 +18,8 @@ describe("root package bin", () => {
     };
 
     expect(manifest.bin["p-dev"]).toBe("./bin/p-dev-dev.js");
-    expect(manifest.scripts.dev).toBe("node bin/p-dev-dev.js");
+    expect(manifest.scripts.dev).toBe("node bin/gui-dev.js");
+    expect(manifest.scripts.start).toBe("node bin/p-dev-dev.js");
     expect(manifest.scripts["p-dev:install"]).toBe(
       "tsx scripts/install-p-dev-local.ts",
     );

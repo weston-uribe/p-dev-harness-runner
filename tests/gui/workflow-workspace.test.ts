@@ -48,7 +48,7 @@ const CONFIG_JSON = JSON.stringify(
       },
     ],
     allowedTargetRepos: ["https://github.com/acme/my-product"],
-    linear: { teamKey: "WES" },
+    linear: { teamKey: "WES", teamId: "team-123" },
   },
   null,
   2,

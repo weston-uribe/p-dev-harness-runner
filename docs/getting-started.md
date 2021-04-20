@@ -20,7 +20,7 @@ npx --yes p-dev-harness@0.4.0
 
 PDev automatically opens Initial Harness Configuration until setup is complete, then opens the Workflow page.
 
-- Node.js **22+** required
+- Node.js **22+** required (canonical pin: **22.23.1** / npm **10.9.8** via `.nvmrc`)
 - Starts the guided Configure GUI
 - Stores operator state under `~/.p-dev` (or `P_DEV_HOME` / `--workspace`)
 - macOS validated for browser auto-launch; use `--no-open` elsewhere

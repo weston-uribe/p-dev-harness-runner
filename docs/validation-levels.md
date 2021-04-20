@@ -26,12 +26,21 @@ Human-initiated confidence pass before treating a change as broadly safe.
 
 **Typical gate**
 
-- Full `npm test`
-- `npm run test:webhook`
+- `npm run validate:checkpoint` (`npm ci && npm run build && npm test`)
+- Or equivalently: full hermetic `npm test` / `npm run test:full` / `npm run test:clean`
+- Typecheck is included via `npm run build` (`tsc` emits); `npx tsc --noEmit` remains a separately useful check when you want typecheck without a GUI build. Checkpoint does **not** invoke `test:live`.
+- `npm run test:webhook` (subset shortcut; already included in full `npm test`)
 - Workflow and Configure browser matrices when UI/workflow surfaces are in scope
 - Broad regression relevant to the change
 - Additional live failure-mode runs when integration behavior is in scope
 - Package preparation and inspection when packaging boundaries may be affected
+
+**Hermetic contract**
+
+- `npm test` is the complete deterministic, non-credentialed regression suite.
+- Vitest bootstraps an isolated `HOME` / `P_DEV_HOME` / `TMPDIR` and restores harness env keys between tests.
+- Do not rely on repo `.env.local`, `.harness/config.local.json`, or `runs/` caches for suite success.
+- Credentialed/live checks require `npm run test:live` with `P_DEV_ALLOW_LIVE_TESTS=1` (fail-closed otherwise) or the existing canary workflows.
 
 ## Official Release
 

@@ -75,15 +75,21 @@ describe("ConfigureWorkflow service readiness", () => {
   });
 
   it("auto reverifies only missing stale or unknown saved summaries", () => {
+    // Auto-reverify runs only while the UI verification slot is still unchecked;
+    // durable summary status decides whether a reverify is needed.
+    const uncheckedVerification = serviceVerificationFromSummaries(
+      summaries("stale"),
+    );
+    expect(uncheckedVerification.GITHUB_TOKEN.state).toBe("unchecked");
+
     for (const status of ["missing", "unknown", "stale"] as const) {
-      const seeded = serviceVerificationFromSummaries(summaries(status));
       expect(
         shouldAutoReverifySavedService({
           key: "GITHUB_TOKEN",
           presence: presence(true),
           envValues: blankEnv,
           summaries: summaries(status),
-          verification: seeded,
+          verification: uncheckedVerification,
         }),
       ).toBe(true);
     }

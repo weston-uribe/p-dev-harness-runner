@@ -81,14 +81,14 @@ describe("verification-state helpers", () => {
     ).toBe("failed");
   });
 
-  it("shows unchecked when no saved credential and no verification", () => {
+  it("shows missing when no saved credential and no verification", () => {
     expect(
       resolveServiceConnectionBadgeState(
         false,
         { state: "unchecked" },
         "",
       ),
-    ).toBe("unchecked");
+    ).toBe("missing");
   });
 
   it("detects repo verification for the exact current URL", () => {

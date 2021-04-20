@@ -6,11 +6,21 @@ import {
   workflowInstallPrBodyContainsMarker,
 } from "../../src/setup/workflow-install-branch-recovery.js";
 import { TARGET_WORKFLOW_PATH } from "../../src/setup/remote-actions.js";
-import { buildTargetWorkflowBranchName } from "../../src/setup/target-workflow-setup.js";
+import {
+  buildTargetWorkflowBranchName,
+  generateTargetWorkflowYaml,
+} from "../../src/setup/target-workflow-setup.js";
 
 const REPO_CONFIG_ID = "weston-uribe-portfolio";
 const BRANCH_NAME = buildTargetWorkflowBranchName(REPO_CONFIG_ID);
-const WORKFLOW = "name: Trigger harness production sync\n";
+// Use a non-legacy dispatch repo — weston-uribe/p-dev-harness is archived/stale.
+const HARNESS_DISPATCH_REPO = "test-operator/p-dev-harness-runner";
+const WORKFLOW = generateTargetWorkflowYaml({
+  harnessDispatchRepo: HARNESS_DISPATCH_REPO,
+  repoConfigId: REPO_CONFIG_ID,
+  targetRepoSlug: "weston-uribe/weston-uribe-portfolio",
+  productionBranch: "main",
+});
 
 describe("recoverHarnessInstallBranch commit-first recovery", () => {
   it("builds a verified commit before force-updating the reserved branch", async () => {
