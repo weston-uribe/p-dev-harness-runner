@@ -6,8 +6,101 @@ import { canonicalLaunchContextDigest } from "./launch-context.js";
 import { PROVENANCE_WRITER_VERSION } from "./launch-surfaces.js";
 import type {
   ReconciliationEvidenceSource,
+  ReconciliationPayload,
   ReconciliationResolutionKind,
 } from "./reconciliation.js";
+
+export type TransitionSemantics =
+  | { eventType: "launch_intent" }
+  | { eventType: "provider_call_started" }
+  | { eventType: "provider_agent_acknowledged" }
+  | { eventType: "provider_run_intent"; providerRunOperationId: string }
+  | { eventType: "provider_run_call_started"; providerRunOperationId: string }
+  | { eventType: "provider_run_bound"; providerRunOperationId: string; runHash: string }
+  | { eventType: "execution_completed"; providerRunOperationId: string; runHash: string }
+  | { eventType: "launch_failed"; failureStage: string }
+  | {
+      eventType: "reconciliation_resolution";
+      resolutionId: string;
+      affectedOperationId: string;
+      resolutionKind: string;
+    };
+
+export function deriveProvenanceTransitionId(semantics: TransitionSemantics): string {
+  switch (semantics.eventType) {
+    case "launch_intent":
+      return "launch_intent";
+    case "provider_call_started":
+      return "provider_call_started";
+    case "provider_agent_acknowledged":
+      return "provider_agent_acknowledged";
+    case "provider_run_intent":
+      return `provider_run_intent:${semantics.providerRunOperationId}`;
+    case "provider_run_call_started":
+      return `provider_run_call_started:${semantics.providerRunOperationId}`;
+    case "provider_run_bound":
+      return `provider_run_bound:${semantics.providerRunOperationId}:${semantics.runHash}`;
+    case "execution_completed":
+      return `execution_completed:${semantics.providerRunOperationId}:${semantics.runHash}`;
+    case "launch_failed":
+      return `launch_failed:${semantics.failureStage}`;
+    case "reconciliation_resolution":
+      return `reconciliation_resolution:${semantics.resolutionKind}:${semantics.resolutionId}:${semantics.affectedOperationId}`;
+    default: {
+      const _exhaustive: never = semantics;
+      return _exhaustive;
+    }
+  }
+}
+
+export function transitionSemanticsFromEvent(event: ProvenanceEvent): TransitionSemantics {
+  switch (event.eventType) {
+    case "launch_intent":
+      return { eventType: "launch_intent" };
+    case "provider_call_started":
+      return { eventType: "provider_call_started" };
+    case "provider_agent_acknowledged":
+      return { eventType: "provider_agent_acknowledged" };
+    case "provider_run_intent":
+      return {
+        eventType: "provider_run_intent",
+        providerRunOperationId: event.providerRunOperationId,
+      };
+    case "provider_run_call_started":
+      return {
+        eventType: "provider_run_call_started",
+        providerRunOperationId: event.providerRunOperationId,
+      };
+    case "provider_run_bound":
+      return {
+        eventType: "provider_run_bound",
+        providerRunOperationId: event.providerRunOperationId,
+        runHash: event.runHash,
+      };
+    case "execution_completed":
+      return {
+        eventType: "execution_completed",
+        providerRunOperationId: event.providerRunOperationId,
+        runHash: event.runHash,
+      };
+    case "launch_failed":
+      return {
+        eventType: "launch_failed",
+        failureStage: event.failureStage,
+      };
+    case "reconciliation_resolution":
+      return {
+        eventType: "reconciliation_resolution",
+        resolutionId: event.resolutionId,
+        affectedOperationId: event.affectedOperationId,
+        resolutionKind: event.resolutionKind,
+      };
+    default: {
+      const _exhaustive: never = event;
+      return _exhaustive;
+    }
+  }
+}
 
 export const PROVENANCE_EVENT_SCHEMA_KIND =
   "p-dev.cursor-cloud-agent-provenance.v1" as const;
@@ -127,15 +220,31 @@ export interface LaunchFailedEvent extends ProvenanceEventBase {
 export interface ReconciliationResolutionEvent extends ProvenanceEventBase {
   eventType: "reconciliation_resolution";
   resolutionId: string;
-  /** Affected launch attempt or run operation id. */
   affectedOperationId: string;
   affectedOperationKind: "launch_attempt" | "run_operation";
-  /** Authoritative instant that closes possible activity (required to close). */
   authoritativeResolutionInstant: string;
   resolutionKind: ReconciliationResolutionKind;
   evidenceSource: ReconciliationEvidenceSource;
   evidenceDigest: string;
   producerSchemaVersion: string;
+  agentHash?: string;
+  agentIdEnvelope?: EncryptionEnvelope;
+  acknowledgmentTimestamp?: string;
+  providerRunOperationId?: string;
+  runHash?: string;
+  sendSurface?: string;
+  sendOrdinal?: number;
+  executionStartTimestamp?: string;
+  startEvidenceSource?: ExecutionWindow["startEvidenceSource"];
+  recoveredBindingDigest?: string;
+  runIdEnvelope?: EncryptionEnvelope;
+  terminalStatus?: string;
+  startInclusive?: string;
+  endExclusive?: string;
+  endEvidenceSource?: NonNullable<ExecutionWindow["endEvidenceSource"]>;
+  executionWindowDigest?: string;
+  executionBindingDigest?: string;
+  recoveryEvidenceDigest?: string;
 }
 
 export type ProvenanceEvent =
@@ -300,8 +409,8 @@ export function buildLaunchIntentEvent(input: {
   recordedAt: string;
 }): LaunchIntentEvent {
   const launchContextDigest = canonicalLaunchContextDigest(input.launchContext);
-  const transitionId = "launch_intent";
   const eventType = "launch_intent" as const;
+  const transitionId = deriveProvenanceTransitionId({ eventType });
   const canonicalSemanticDigest = computeCanonicalSemanticDigest({
     eventType,
     launchAttemptId: input.launchAttemptId,
@@ -338,8 +447,8 @@ export function buildProviderCallStartedEvent(input: {
   recordedAt: string;
 }): ProviderCallStartedEvent {
   const launchContextDigest = canonicalLaunchContextDigest(input.launchContext);
-  const transitionId = "provider_call_started";
   const eventType = "provider_call_started" as const;
+  const transitionId = deriveProvenanceTransitionId({ eventType });
   const canonicalSemanticDigest = computeCanonicalSemanticDigest({
     eventType,
     launchAttemptId: input.launchAttemptId,
@@ -378,8 +487,11 @@ export function buildProviderRunIntentEvent(input: {
   sendOrdinal: number;
 }): ProviderRunIntentEvent {
   const launchContextDigest = canonicalLaunchContextDigest(input.launchContext);
-  const transitionId = `provider_run_intent:${input.providerRunOperationId}`;
   const eventType = "provider_run_intent" as const;
+  const transitionId = deriveProvenanceTransitionId({
+    eventType,
+    providerRunOperationId: input.providerRunOperationId,
+  });
   const semanticPayload = {
     providerRunOperationId: input.providerRunOperationId,
     sendSurface: input.sendSurface,
@@ -425,8 +537,11 @@ export function buildProviderRunCallStartedEvent(input: {
   sendOrdinal: number;
 }): ProviderRunCallStartedEvent {
   const launchContextDigest = canonicalLaunchContextDigest(input.launchContext);
-  const transitionId = `provider_run_call_started:${input.providerRunOperationId}`;
   const eventType = "provider_run_call_started" as const;
+  const transitionId = deriveProvenanceTransitionId({
+    eventType,
+    providerRunOperationId: input.providerRunOperationId,
+  });
   const semanticPayload = {
     providerRunOperationId: input.providerRunOperationId,
     sendSurface: input.sendSurface,
@@ -470,25 +585,21 @@ export function buildReconciliationResolutionEvent(input: {
   resolutionId: string;
   affectedOperationId: string;
   affectedOperationKind: "launch_attempt" | "run_operation";
-  authoritativeResolutionInstant: string;
-  resolutionKind: ReconciliationResolutionKind;
-  evidenceSource: ReconciliationEvidenceSource;
-  evidenceDigest: string;
-  producerSchemaVersion?: string;
+  payload: ReconciliationPayload;
 }): ReconciliationResolutionEvent {
   const launchContextDigest = canonicalLaunchContextDigest(input.launchContext);
-  const transitionId = `reconciliation_resolution:${input.resolutionId}`;
   const eventType = "reconciliation_resolution" as const;
-  const producerSchemaVersion = input.producerSchemaVersion ?? "1";
+  const transitionId = deriveProvenanceTransitionId({
+    eventType,
+    resolutionId: input.resolutionId,
+    affectedOperationId: input.affectedOperationId,
+    resolutionKind: input.payload.resolutionKind,
+  });
   const semanticPayload = {
     resolutionId: input.resolutionId,
     affectedOperationId: input.affectedOperationId,
     affectedOperationKind: input.affectedOperationKind,
-    authoritativeResolutionInstant: input.authoritativeResolutionInstant,
-    resolutionKind: input.resolutionKind,
-    evidenceSource: input.evidenceSource,
-    evidenceDigest: input.evidenceDigest,
-    producerSchemaVersion,
+    ...input.payload,
   };
   return {
     schemaKind: PROVENANCE_EVENT_SCHEMA_KIND,
@@ -518,10 +629,48 @@ export function buildReconciliationResolutionEvent(input: {
     resolutionId: input.resolutionId,
     affectedOperationId: input.affectedOperationId,
     affectedOperationKind: input.affectedOperationKind,
-    authoritativeResolutionInstant: input.authoritativeResolutionInstant,
-    resolutionKind: input.resolutionKind,
-    evidenceSource: input.evidenceSource,
-    evidenceDigest: input.evidenceDigest,
-    producerSchemaVersion,
+    authoritativeResolutionInstant: input.payload.authoritativeResolutionInstant,
+    resolutionKind: input.payload.resolutionKind,
+    evidenceSource: input.payload.evidenceSource,
+    evidenceDigest: input.payload.evidenceDigest,
+    producerSchemaVersion: input.payload.producerSchemaVersion,
+    ...(input.payload.resolutionKind === "provider_agent_ack_recovered"
+      ? {
+          agentHash: input.payload.agentHash,
+          agentIdEnvelope: input.payload.agentIdEnvelope,
+          acknowledgmentTimestamp: input.payload.acknowledgmentTimestamp,
+        }
+      : {}),
+    ...(input.payload.resolutionKind === "provider_run_binding_recovered"
+      ? {
+          providerRunOperationId: input.payload.providerRunOperationId,
+          agentHash: input.payload.agentHash,
+          runHash: input.payload.runHash,
+          sendSurface: input.payload.sendSurface,
+          sendOrdinal: input.payload.sendOrdinal,
+          executionStartTimestamp: input.payload.executionStartTimestamp,
+          startEvidenceSource: input.payload.startEvidenceSource,
+          recoveredBindingDigest: input.payload.recoveredBindingDigest,
+          agentIdEnvelope: input.payload.agentIdEnvelope,
+          runIdEnvelope: input.payload.runIdEnvelope,
+        }
+      : {}),
+    ...(input.payload.resolutionKind === "provider_terminal_window_recovered"
+      ? {
+          providerRunOperationId: input.payload.providerRunOperationId,
+          agentHash: input.payload.agentHash,
+          runHash: input.payload.runHash,
+          sendSurface: input.payload.sendSurface,
+          sendOrdinal: input.payload.sendOrdinal,
+          terminalStatus: input.payload.terminalStatus,
+          startInclusive: input.payload.startInclusive,
+          endExclusive: input.payload.endExclusive,
+          startEvidenceSource: input.payload.startEvidenceSource,
+          endEvidenceSource: input.payload.endEvidenceSource,
+          executionWindowDigest: input.payload.executionWindowDigest,
+          executionBindingDigest: input.payload.executionBindingDigest,
+          recoveryEvidenceDigest: input.payload.recoveryEvidenceDigest,
+        }
+      : {}),
   };
 }

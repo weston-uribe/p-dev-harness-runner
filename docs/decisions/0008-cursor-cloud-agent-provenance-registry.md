@@ -95,6 +95,16 @@ Schema: `p-dev.cursor-cloud-agent-registry-coverage.v1`
 
 Coverage uses closed intervals `[coverageStart, coverageEnd)` by **execution overlap**, not event-timestamp-only membership. Open-ended “complete from now” is unsupported. A later clean epoch must not rewrite an earlier incomplete interval. Current branch tip alone is not an Apply contract.
 
+Complete coverage requires (test-only until an operator-activated epoch exists):
+
+- a **persisted activation record** (canonical payload + payload digest; no self-referential commit SHA);
+- a **retrieved activation source** (repo/branch/path/immutable commit of the fetched bytes);
+- a **verified activation-history proof** (`p-dev.cursor-cloud-agent-activation-history-proof.v1`) produced by a commit-graph verifier — caller-declared `descendant` alone is insufficient;
+- typed activation lifecycle records valid for the full interval;
+- topology-derived workflow install + durable runner deployment-slot manifests with full-interval evidence;
+- independently derived transition IDs for every event variant;
+- exact reconciliation variant payloads (`provider_agent_ack_recovered` never closes activity).
+
 No complete coverage interval is activated by this change.
 
 ### Future importer integration (deferred)

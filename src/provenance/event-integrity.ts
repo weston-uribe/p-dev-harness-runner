@@ -4,24 +4,31 @@
 
 import { createHash } from "node:crypto";
 import {
-  activationAttestationDigest,
-  type CoverageActivationAttestation,
+  activationPayloadDigest,
+  type CanonicalActivationPayload,
+  type PersistedActivationRecord,
+  type RetrievedActivationSource,
 } from "./activation-attestation.js";
+import type { VerifiedActivationHistoryProof } from "./activation-history-proof.js";
 import { CursorProvenanceError } from "./errors.js";
 import {
   computeCanonicalSemanticDigest,
   computeEventId,
+  deriveProvenanceTransitionId,
   executionBindingDigest,
   executionWindowDigest,
   PROVENANCE_EVENT_SCHEMA_KIND,
   semanticPayloadForAgentAck,
   semanticPayloadForRunBound,
+  transitionSemanticsFromEvent,
   type ProvenanceEvent,
 } from "./events.js";
 import { canonicalLaunchContextDigest } from "./launch-context.js";
 import { deriveProvenanceEventPath } from "./paths.js";
 import {
+  indexReconciliationConflicts,
   reconciliationContradictsExistingEvidence,
+  reconciliationPayloadFromEvent,
   validateReconciliationStructural,
   type ReconciliationResolutionKind,
 } from "./reconciliation.js";
@@ -30,6 +37,14 @@ const COMMIT_SHA_RE = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/i;
 const DIGEST_RE = /^[0-9a-f]{64}$/;
 
 export type CoverageIncompleteReason =
+  | "coverage_activation_record_missing"
+  | "coverage_activation_source_missing"
+  | "coverage_event_snapshot_source_missing"
+  | "coverage_activation_event_history_proof_missing"
+  | "coverage_activation_lifecycle_invalid"
+  | "coverage_workflow_manifest_mismatch"
+  | "coverage_runner_manifest_mismatch"
+  | "coverage_runner_slot_missing"
   | "coverage_activation_attestation_missing"
   | "coverage_attestation_interval_mismatch"
   | "coverage_attestation_mode_not_required"
@@ -64,14 +79,6 @@ export interface EventSnapshotSourceIdentity {
   immutableCommitSha: string;
 }
 
-export interface ActivationSourceIdentityInput {
-  stateRepository: string;
-  stateBranch: string;
-  activationRecordPath: string;
-  activationCommitSha: string;
-  attestationDigest: string;
-}
-
 export interface ProvenanceEventRecord {
   path: string;
   event: ProvenanceEvent;
@@ -82,7 +89,7 @@ export interface EventSnapshotValidationResult {
   incompleteReasons: CoverageIncompleteReason[];
   divergenceEvidence: string[];
   recomputedEventSetDigest: string;
-  activationAttestationDigest: string | null;
+  activationPayloadDigest: string | null;
 }
 
 function addReason(
@@ -161,22 +168,21 @@ function semanticPayloadFromEvent(event: ProvenanceEvent): Record<string, unknow
         resolutionId: event.resolutionId,
         affectedOperationId: event.affectedOperationId,
         affectedOperationKind: event.affectedOperationKind,
-        authoritativeResolutionInstant: event.authoritativeResolutionInstant,
-        resolutionKind: event.resolutionKind,
-        evidenceSource: event.evidenceSource,
-        evidenceDigest: event.evidenceDigest,
-        producerSchemaVersion: event.producerSchemaVersion,
+        ...reconciliationPayloadFromEvent(event),
       };
     default:
       return {};
   }
 }
 
-function recomputeSemanticDigest(event: ProvenanceEvent): string {
+function recomputeSemanticDigest(
+  event: ProvenanceEvent,
+  transitionId: string,
+): string {
   return computeCanonicalSemanticDigest({
     eventType: event.eventType,
     launchAttemptId: event.launchAttemptId,
-    transitionId: event.transitionId,
+    transitionId,
     launchContextDigest: event.launchContextDigest,
     semanticPayload: semanticPayloadFromEvent(event),
   });
@@ -215,6 +221,42 @@ function validateCompletionFields(event: ProvenanceEvent): string[] {
   return evidence;
 }
 
+function validateRuntimeEventSchema(event: ProvenanceEvent): string[] {
+  const evidence: string[] = [];
+  if (event.schemaKind !== PROVENANCE_EVENT_SCHEMA_KIND || event.schemaVersion !== "1") {
+    evidence.push("schema_version_mismatch");
+  }
+  if (!event.eventId?.trim() || !event.transitionId?.trim()) {
+    evidence.push("missing_identity_fields");
+  }
+  if (!DIGEST_RE.test(event.canonicalSemanticDigest)) {
+    evidence.push("invalid_semantic_digest");
+  }
+  if (!DIGEST_RE.test(event.launchContextDigest)) {
+    evidence.push("invalid_launch_context_digest");
+  }
+  if (
+    event.eventType === "provider_run_bound" ||
+    event.eventType === "execution_completed"
+  ) {
+    if (!event.providerRunOperationId?.trim() || !event.runHash?.trim()) {
+      evidence.push("missing_run_binding_fields");
+    }
+  }
+  if (
+    event.eventType === "provider_run_intent" ||
+    event.eventType === "provider_run_call_started"
+  ) {
+    if (!event.providerRunOperationId?.trim()) {
+      evidence.push("missing_provider_run_operation_id");
+    }
+    if (!event.sendSurface?.trim() || !Number.isFinite(event.sendOrdinal)) {
+      evidence.push("missing_send_surface_fields");
+    }
+  }
+  return evidence;
+}
+
 /** Migration helper — prefer `records` in the final contract. */
 export function eventRecordsFromParallelArrays(input: {
   events: ProvenanceEvent[];
@@ -235,8 +277,9 @@ export function eventRecordsFromParallelArrays(input: {
 export function validateEventSnapshot(input: {
   records: ProvenanceEventRecord[];
   eventSnapshotSource: EventSnapshotSourceIdentity;
-  activationAttestation?: CoverageActivationAttestation | null;
-  activationSource?: ActivationSourceIdentityInput | null;
+  activationRecord?: PersistedActivationRecord | null;
+  activationSource?: RetrievedActivationSource | null;
+  activationHistoryProof?: VerifiedActivationHistoryProof | null;
 }): EventSnapshotValidationResult {
   const incompleteReasons = new Set<CoverageIncompleteReason>();
   const divergenceEvidence = new Set<string>();
@@ -247,52 +290,83 @@ export function validateEventSnapshot(input: {
     !source.stateBranch.trim() ||
     !COMMIT_SHA_RE.test(source.immutableCommitSha)
   ) {
-    addReason(incompleteReasons, "coverage_event_snapshot_source_mismatch");
+    addReason(incompleteReasons, "coverage_event_snapshot_source_missing");
     addEvidence(divergenceEvidence, "invalid_event_snapshot_source");
   }
 
-  if (input.activationSource && input.activationAttestation) {
-    const attSource = input.activationAttestation.activationSource;
-    const provided = input.activationSource;
-    if (
-      provided.stateRepository !== attSource.stateRepository ||
-      provided.stateBranch !== attSource.stateBranch ||
-      provided.activationRecordPath !== attSource.activationRecordPath ||
-      provided.activationCommitSha !== attSource.activationCommitSha ||
-      provided.attestationDigest !== attSource.attestationDigest
-    ) {
-      addReason(incompleteReasons, "coverage_activation_source_mismatch");
-    }
-    if (
-      provided.stateRepository !== source.stateRepository ||
-      provided.stateBranch !== source.stateBranch
-    ) {
-      addReason(incompleteReasons, "coverage_event_snapshot_source_mismatch");
-    }
-    if (!COMMIT_SHA_RE.test(provided.activationCommitSha)) {
-      addReason(incompleteReasons, "coverage_activation_commit_invalid");
-    }
-  }
-
   let activationDigest: string | null = null;
-  if (!input.activationAttestation) {
-    addReason(incompleteReasons, "coverage_activation_attestation_missing");
+  let activationPayload: CanonicalActivationPayload | null = null;
+
+  if (!input.activationRecord) {
+    addReason(incompleteReasons, "coverage_activation_record_missing");
   } else {
     try {
-      activationDigest = activationAttestationDigest(input.activationAttestation);
+      activationPayload = input.activationRecord.payload;
+      activationDigest = activationPayloadDigest(activationPayload);
+      if (activationDigest !== input.activationRecord.canonicalPayloadDigest) {
+        addReason(incompleteReasons, "coverage_attestation_conflicting_install");
+        addEvidence(divergenceEvidence, "activation_record_digest_mismatch");
+      }
     } catch {
       addReason(incompleteReasons, "coverage_attestation_conflicting_install");
     }
-    const att = input.activationAttestation;
-    if (att.requiredWriterMode !== "required") {
+  }
+
+  if (activationPayload) {
+    if (!input.activationSource) {
+      addReason(incompleteReasons, "coverage_activation_source_missing");
+    } else {
+      const provided = input.activationSource;
+      if (
+        provided.stateRepository !== activationPayload.stateRepository ||
+        provided.stateBranch !== activationPayload.stateBranch
+      ) {
+        addReason(incompleteReasons, "coverage_activation_source_mismatch");
+      }
+      if (
+        provided.stateRepository !== source.stateRepository ||
+        provided.stateBranch !== source.stateBranch
+      ) {
+        addReason(incompleteReasons, "coverage_event_snapshot_source_mismatch");
+      }
+      if (!COMMIT_SHA_RE.test(provided.immutableCommitSha)) {
+        addReason(incompleteReasons, "coverage_activation_commit_invalid");
+      }
+      if (
+        activationDigest &&
+        provided.recordContentDigest &&
+        provided.recordContentDigest !== activationDigest
+      ) {
+        addReason(incompleteReasons, "coverage_activation_source_mismatch");
+        addEvidence(divergenceEvidence, "activation_source_digest_mismatch");
+      }
+    }
+
+    if (!input.activationHistoryProof) {
+      addReason(incompleteReasons, "coverage_activation_event_history_proof_missing");
+    } else {
+      const proof = input.activationHistoryProof;
+      if (
+        proof.stateRepository !== activationPayload.stateRepository ||
+        proof.stateBranch !== activationPayload.stateBranch ||
+        proof.stateRepository !== source.stateRepository ||
+        proof.stateBranch !== source.stateBranch ||
+        proof.eventSnapshotCommitSha !== source.immutableCommitSha ||
+        (input.activationSource &&
+          proof.activationCommitSha !==
+            input.activationSource.immutableCommitSha) ||
+        (proof.relationship !== "descendant" && proof.relationship !== "equal")
+      ) {
+        addReason(incompleteReasons, "coverage_activation_event_history_invalid");
+      }
+    }
+
+    if (activationPayload.requiredWriterMode !== "required") {
       addReason(incompleteReasons, "coverage_attestation_mode_not_required");
     }
-    if (!COMMIT_SHA_RE.test(att.activationSource.activationCommitSha)) {
-      addReason(incompleteReasons, "coverage_activation_commit_invalid");
-    }
     if (
-      att.stateRepository !== source.stateRepository ||
-      att.stateBranch !== source.stateBranch
+      activationPayload.stateRepository !== source.stateRepository ||
+      activationPayload.stateBranch !== source.stateBranch
     ) {
       addReason(incompleteReasons, "coverage_event_snapshot_source_mismatch");
     }
@@ -304,7 +378,6 @@ export function validateEventSnapshot(input: {
   const intentByAttempt = new Map<string, ProvenanceEvent>();
   const intentDigestByAttempt = new Map<string, string>();
 
-  // Order-independent pre-index: later events may appear before launch_intent.
   for (const record of input.records) {
     const { event } = record;
     if (event.eventType !== "launch_intent") continue;
@@ -329,9 +402,17 @@ export function validateEventSnapshot(input: {
   for (const record of input.records) {
     const { path: suppliedPath, event } = record;
 
-    if (event.schemaKind !== PROVENANCE_EVENT_SCHEMA_KIND) {
+    for (const schemaEvidence of validateRuntimeEventSchema(event)) {
       addReason(incompleteReasons, "coverage_event_snapshot_mismatch");
-      addEvidence(divergenceEvidence, `schema:${event.eventType}`);
+      addEvidence(divergenceEvidence, schemaEvidence);
+    }
+
+    const derivedTransitionId = deriveProvenanceTransitionId(
+      transitionSemanticsFromEvent(event),
+    );
+    if (derivedTransitionId !== event.transitionId) {
+      addReason(incompleteReasons, "coverage_event_snapshot_mismatch");
+      addEvidence(divergenceEvidence, `transition_id:${event.eventType}`);
     }
 
     if (event.eventType === "launch_intent") {
@@ -361,7 +442,7 @@ export function validateEventSnapshot(input: {
 
     const expectedEventId = computeEventId({
       launchAttemptId: event.launchAttemptId,
-      transitionId: event.transitionId,
+      transitionId: derivedTransitionId,
       eventType: event.eventType,
     });
     if (expectedEventId !== event.eventId) {
@@ -369,7 +450,7 @@ export function validateEventSnapshot(input: {
       addEvidence(divergenceEvidence, `event_id:${event.eventType}`);
     }
 
-    const recomputedDigest = recomputeSemanticDigest(event);
+    const recomputedDigest = recomputeSemanticDigest(event, derivedTransitionId);
     if (recomputedDigest !== event.canonicalSemanticDigest) {
       addReason(incompleteReasons, "coverage_event_snapshot_mismatch");
       addEvidence(divergenceEvidence, `semantic_digest:${event.eventType}`);
@@ -400,7 +481,7 @@ export function validateEventSnapshot(input: {
     }
     eventIdSet.add(event.eventId);
 
-    const transitionKey = `${event.launchAttemptId}:${event.transitionId}`;
+    const transitionKey = `${event.launchAttemptId}:${derivedTransitionId}`;
     if (transitionSet.has(transitionKey)) {
       addReason(incompleteReasons, "coverage_event_divergence");
       addEvidence(divergenceEvidence, "duplicate_transition");
@@ -448,7 +529,8 @@ export function validateEventSnapshot(input: {
     }
 
     if (event.eventType === "reconciliation_resolution") {
-      const structural = validateReconciliationStructural(event);
+      const payload = reconciliationPayloadFromEvent(event);
+      const structural = validateReconciliationStructural(payload);
       if (structural) {
         addReason(incompleteReasons, structural);
       }
@@ -457,8 +539,8 @@ export function validateEventSnapshot(input: {
       }
     }
 
-    if (input.activationAttestation) {
-      const att = input.activationAttestation;
+    if (activationPayload) {
+      const att = activationPayload;
       if (!att.sourceShaAllowlist.includes(event.sourceRepositorySha)) {
         addReason(incompleteReasons, "coverage_source_version_unsupported");
       }
@@ -473,6 +555,13 @@ export function validateEventSnapshot(input: {
 
     validatedPaths.push(derivedPath);
     validatedDigests.push(recomputedDigest);
+  }
+
+  for (const conflict of indexReconciliationConflicts(
+    input.records.map((record) => record.event),
+  )) {
+    addReason(incompleteReasons, "coverage_reconciliation_evidence_invalid");
+    addEvidence(divergenceEvidence, conflict);
   }
 
   for (const runOp of runOpsWithBind) {
@@ -597,7 +686,7 @@ export function validateEventSnapshot(input: {
     incompleteReasons: uniqueReasons,
     divergenceEvidence: [...divergenceEvidence].sort(),
     recomputedEventSetDigest,
-    activationAttestationDigest: activationDigest,
+    activationPayloadDigest: activationDigest,
   };
 }
 

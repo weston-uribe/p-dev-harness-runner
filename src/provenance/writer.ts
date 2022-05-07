@@ -14,6 +14,7 @@ import {
   buildReconciliationResolutionEvent,
   computeCanonicalSemanticDigest,
   computeEventId,
+  deriveProvenanceTransitionId,
   executionBindingDigest,
   executionWindowDigest,
   semanticPayloadForAgentAck,
@@ -29,8 +30,7 @@ import {
 import { CursorProvenanceError, type CursorProvenanceErrorCode } from "./errors.js";
 import type { LinearHarnessLaunchContext } from "./launch-context.js";
 import type {
-  ReconciliationEvidenceSource,
-  ReconciliationResolutionKind,
+  ReconciliationPayload,
 } from "./reconciliation.js";
 import { canonicalLaunchContextDigest } from "./launch-context.js";
 import { computeLaunchAttemptId, launchAttemptIdPrefix } from "./launch-attempt-id.js";
@@ -302,8 +302,8 @@ export class ProvenanceWriter {
       fieldPurpose: "cursor_agent_id",
     });
     const launchContextDigest = canonicalLaunchContextDigest(ctx);
-    const transitionId = "provider_agent_acknowledged";
     const eventType = "provider_agent_acknowledged" as const;
+    const transitionId = deriveProvenanceTransitionId({ eventType });
     const event: ProviderAgentAcknowledgedEvent = {
       schemaKind: PROVENANCE_EVENT_SCHEMA_KIND,
       schemaVersion: "1",
@@ -460,8 +460,12 @@ export class ProvenanceWriter {
     };
     validateExecutionWindow(executionWindow);
     const launchContextDigest = canonicalLaunchContextDigest(ctx);
-    const transitionId = `provider_run_bound:${input.providerRunOperationId}:${runHash}`;
     const eventType = "provider_run_bound" as const;
+    const transitionId = deriveProvenanceTransitionId({
+      eventType,
+      providerRunOperationId: input.providerRunOperationId,
+      runHash,
+    });
     const event: ProviderRunBoundEvent = {
       schemaKind: PROVENANCE_EVENT_SCHEMA_KIND,
       schemaVersion: "1",
@@ -580,8 +584,12 @@ export class ProvenanceWriter {
     }
     const windowDigest = executionWindowDigest(executionWindow);
     const launchContextDigest = canonicalLaunchContextDigest(ctx);
-    const transitionId = `execution_completed:${input.providerRunOperationId}:${runHash}`;
     const eventType = "execution_completed" as const;
+    const transitionId = deriveProvenanceTransitionId({
+      eventType,
+      providerRunOperationId: input.providerRunOperationId,
+      runHash,
+    });
     const event: ExecutionCompletedEvent = {
       schemaKind: PROVENANCE_EVENT_SCHEMA_KIND,
       schemaVersion: "1",
@@ -659,9 +667,11 @@ export class ProvenanceWriter {
     }
     const launchAttemptId = computeLaunchAttemptId(ctx);
     const launchContextDigest = canonicalLaunchContextDigest(ctx);
-    const stageKey = `${input.failureStage}:${input.failureCategory}`;
-    const transitionId = `launch_failed:${stageKey}`;
     const eventType = "launch_failed" as const;
+    const transitionId = deriveProvenanceTransitionId({
+      eventType,
+      failureStage: input.failureStage,
+    });
     const event: LaunchFailedEvent = {
       schemaKind: PROVENANCE_EVENT_SCHEMA_KIND,
       schemaVersion: "1",
@@ -691,7 +701,7 @@ export class ProvenanceWriter {
     };
     return this.persist(
       event,
-      stageKey,
+      `${input.failureStage}:${input.failureCategory}`,
       "cursor_provenance_launch_failed_write_failed",
       ctx,
       startedMs,
@@ -704,11 +714,7 @@ export class ProvenanceWriter {
       resolutionId: string;
       affectedOperationId: string;
       affectedOperationKind: "launch_attempt" | "run_operation";
-      authoritativeResolutionInstant: string;
-      resolutionKind: ReconciliationResolutionKind;
-      evidenceSource: ReconciliationEvidenceSource;
-      evidenceDigest: string;
-      producerSchemaVersion?: string;
+      payload: ReconciliationPayload;
     },
   ): Promise<WriteOutcome> {
     const startedMs = Date.now();
@@ -723,7 +729,10 @@ export class ProvenanceWriter {
       launchAttemptId,
       launchContext: ctx,
       recordedAt: nowIso(this.now),
-      ...input,
+      resolutionId: input.resolutionId,
+      affectedOperationId: input.affectedOperationId,
+      affectedOperationKind: input.affectedOperationKind,
+      payload: input.payload,
     });
     return this.persist(
       event,

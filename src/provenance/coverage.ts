@@ -1,15 +1,16 @@
 import { createHash } from "node:crypto";
 import {
-  activationAttestationDigest,
+  activationPayloadDigest,
   validateActivationAttestationCompleteness,
-  type ActivationSourceIdentity,
-  type CoverageActivationAttestation,
+  type CanonicalActivationPayload,
+  type PersistedActivationRecord,
+  type RetrievedActivationSource,
 } from "./activation-attestation.js";
+import type { VerifiedActivationHistoryProof } from "./activation-history-proof.js";
 import type { ProvenanceEvent } from "./events.js";
 import {
   assertEventSnapshotOrThrow,
   eventRecordsFromParallelArrays,
-  type ActivationSourceIdentityInput,
   type CoverageIncompleteReason,
   type EventSnapshotSourceIdentity,
   type ProvenanceEventRecord,
@@ -26,6 +27,7 @@ import { PROVENANCE_EVENT_SCHEMA_KIND } from "./events.js";
 import { CursorProvenanceError } from "./errors.js";
 import {
   reconciliationClosesActivity,
+  reconciliationPayloadFromEvent,
   validateReconciliationStructural,
   type ReconciliationResolutionKind,
 } from "./reconciliation.js";
@@ -57,8 +59,8 @@ export interface CoverageSnapshot {
   sendSurfacesSchemaKind: string;
   sendSurfacesManifestVersion: string;
   sendSurfacesManifestDigest: string;
-  activationAttestationDigest: string | null;
-  activationSource: ActivationSourceIdentity | null;
+  activationPayloadDigest: string | null;
+  activationSource: RetrievedActivationSource | null;
   eventSnapshotSource: EventSnapshotSourceIdentity;
   sourceRepositoryVersions: string[];
   runnerSnapshotVersions: string[];
@@ -310,7 +312,8 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
         bumpOpen(row, event.recordedAt);
         break;
       case "reconciliation_resolution": {
-        if (validateReconciliationStructural(event)) {
+        const payload = reconciliationPayloadFromEvent(event);
+        if (validateReconciliationStructural(payload)) {
           break;
         }
         const kind = event.resolutionKind as ReconciliationResolutionKind;
@@ -320,6 +323,13 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
             op.permanentlyUnresolvable = true;
           } else if (event.affectedOperationId === row.launchAttemptId) {
             row.permanentlyUnresolvable = true;
+          }
+          break;
+        }
+
+        if (kind === "provider_agent_ack_recovered") {
+          if (event.affectedOperationId === row.launchAttemptId) {
+            row.hasAgentAck = true;
           }
           break;
         }
@@ -351,9 +361,6 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
                 event.authoritativeResolutionInstant,
             })
           ) {
-            if (kind === "provider_run_binding_recovered") {
-              op.hasRunBound = true;
-            }
             if (kind === "provider_terminal_window_recovered") {
               op.hasRunBound = true;
               op.completed = true;
@@ -376,9 +383,6 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
                 event.authoritativeResolutionInstant,
             })
           ) {
-            if (kind === "provider_agent_ack_recovered") {
-              row.hasAgentAck = true;
-            }
             row.resolvedByReconciliation = true;
             bumpClosed(
               row,
@@ -512,10 +516,10 @@ export function buildCoverageSnapshot(input: {
   interval: CoverageInterval;
   records: ProvenanceEventRecord[];
   eventSnapshotSource: EventSnapshotSourceIdentity;
-  activationSource?: ActivationSourceIdentityInput | null;
-  activationAttestation?: CoverageActivationAttestation | null;
+  activationRecord?: PersistedActivationRecord | null;
+  activationSource?: RetrievedActivationSource | null;
+  activationHistoryProof?: VerifiedActivationHistoryProof | null;
   reconciliationTimestamp?: string | null;
-  eventCommitDescendedFromActivation?: boolean;
 }): CoverageSnapshot {
   const startMs = parseIso(input.interval.coverageStart);
   const endMs = parseIso(input.interval.coverageEnd);
@@ -532,18 +536,36 @@ export function buildCoverageSnapshot(input: {
   const integrity = assertEventSnapshotOrThrow({
     records: input.records,
     eventSnapshotSource: input.eventSnapshotSource,
-    activationAttestation: input.activationAttestation,
+    activationRecord: input.activationRecord,
     activationSource: input.activationSource,
+    activationHistoryProof: input.activationHistoryProof,
   });
 
   const incompleteReasons = new Set<CoverageIncompleteReason>(
     integrity.incompleteReasons,
   );
 
-  const att = input.activationAttestation ?? null;
-  if (!att) {
-    incompleteReasons.add("coverage_activation_attestation_missing");
-  } else {
+  const att: CanonicalActivationPayload | null =
+    input.activationRecord?.payload ?? null;
+
+  if (!input.activationRecord) {
+    incompleteReasons.add("coverage_activation_record_missing");
+  }
+  if (att && !input.activationSource) {
+    incompleteReasons.add("coverage_activation_source_missing");
+  }
+  if (
+    !input.eventSnapshotSource.stateRepository.trim() ||
+    !input.eventSnapshotSource.stateBranch.trim() ||
+    !input.eventSnapshotSource.immutableCommitSha.trim()
+  ) {
+    incompleteReasons.add("coverage_event_snapshot_source_missing");
+  }
+  if (att && !input.activationHistoryProof) {
+    incompleteReasons.add("coverage_activation_event_history_proof_missing");
+  }
+
+  if (att) {
     for (const reason of validateActivationAttestationCompleteness(
       att,
       input.interval,
@@ -551,17 +573,41 @@ export function buildCoverageSnapshot(input: {
       incompleteReasons.add(reason);
     }
 
+    if (input.activationRecord) {
+      const recomputed = activationPayloadDigest(att);
+      if (recomputed !== input.activationRecord.canonicalPayloadDigest) {
+        incompleteReasons.add("coverage_attestation_conflicting_install");
+      }
+    }
+
     if (input.activationSource) {
-      const pinned = att.activationSource;
       const provided = input.activationSource;
+      const recomputed = activationPayloadDigest(att);
       if (
-        provided.stateRepository !== pinned.stateRepository ||
-        provided.stateBranch !== pinned.stateBranch ||
-        provided.activationRecordPath !== pinned.activationRecordPath ||
-        provided.activationCommitSha !== pinned.activationCommitSha ||
-        provided.attestationDigest !== pinned.attestationDigest
+        provided.stateRepository !== att.stateRepository ||
+        provided.stateBranch !== att.stateBranch
       ) {
         incompleteReasons.add("coverage_activation_source_mismatch");
+      }
+      if (
+        provided.recordContentDigest &&
+        provided.recordContentDigest !== recomputed
+      ) {
+        incompleteReasons.add("coverage_activation_source_mismatch");
+      }
+    }
+
+    if (input.activationHistoryProof && input.activationSource) {
+      const proof = input.activationHistoryProof;
+      if (
+        proof.activationCommitSha !==
+          input.activationSource.immutableCommitSha ||
+        proof.eventSnapshotCommitSha !==
+          input.eventSnapshotSource.immutableCommitSha ||
+        (proof.relationship !== "descendant" &&
+          proof.relationship !== "equal")
+      ) {
+        incompleteReasons.add("coverage_activation_event_history_invalid");
       }
     }
 
@@ -571,10 +617,6 @@ export function buildCoverageSnapshot(input: {
     ) {
       incompleteReasons.add("coverage_event_snapshot_source_mismatch");
     }
-  }
-
-  if (input.eventCommitDescendedFromActivation === false) {
-    incompleteReasons.add("coverage_activation_event_history_invalid");
   }
 
   const attempts = projectAttempts(events);
@@ -698,7 +740,7 @@ export function buildCoverageSnapshot(input: {
     reasons.length === 0 && att ? "complete" : "incomplete";
 
   const eventPathSet = [...eventPaths].sort();
-  const activationSourcePinned = att?.activationSource ?? input.activationSource ?? null;
+  const activationSourcePinned = input.activationSource ?? null;
 
   const partial: Omit<CoverageSnapshot, "coverageDigest"> = {
     kind: COVERAGE_SCHEMA_KIND,
@@ -715,7 +757,7 @@ export function buildCoverageSnapshot(input: {
     sendSurfacesSchemaKind: SEND_SURFACES_SCHEMA_KIND,
     sendSurfacesManifestVersion: "1",
     sendSurfacesManifestDigest: sendSurfacesManifestDigest(),
-    activationAttestationDigest: att ? activationAttestationDigest(att) : null,
+    activationPayloadDigest: att ? activationPayloadDigest(att) : null,
     activationSource: activationSourcePinned,
     eventSnapshotSource: input.eventSnapshotSource,
     sourceRepositoryVersions: sourceVersions,
@@ -759,9 +801,9 @@ export function buildCoverageSnapshotFromLegacy(input: {
   stateRepository?: string;
   stateBranch?: string;
   reconciliationTimestamp?: string | null;
-  activationAttestation?: CoverageActivationAttestation | null;
-  activationSource?: ActivationSourceIdentityInput | null;
-  eventCommitDescendedFromActivation?: boolean;
+  activationRecord?: PersistedActivationRecord | null;
+  activationSource?: RetrievedActivationSource | null;
+  activationHistoryProof?: VerifiedActivationHistoryProof | null;
 }): CoverageSnapshot {
   return buildCoverageSnapshot({
     interval: input.interval,
@@ -774,10 +816,10 @@ export function buildCoverageSnapshotFromLegacy(input: {
       stateBranch: input.stateBranch ?? "",
       immutableCommitSha: input.immutableEventSetCommitSha,
     },
-    activationAttestation: input.activationAttestation,
+    activationRecord: input.activationRecord,
     activationSource: input.activationSource,
+    activationHistoryProof: input.activationHistoryProof,
     reconciliationTimestamp: input.reconciliationTimestamp,
-    eventCommitDescendedFromActivation: input.eventCommitDescendedFromActivation,
   });
 }
 

@@ -204,7 +204,7 @@ describe("coverage overlap projection", () => {
     );
   });
 
-  it("7. reconciliation after interval can close overlapping attempt", () => {
+  it("7. recovered ack reconciliation does not close overlapping attempt", () => {
     const id = "i".repeat(64);
     const events = [
       base({
@@ -223,7 +223,8 @@ describe("coverage overlap projection", () => {
       base({
         eventType: "reconciliation_resolution",
         launchAttemptId: id,
-        transitionId: "reconciliation_resolution:res1",
+        transitionId:
+          "reconciliation_resolution:provider_agent_ack_recovered:res1:" + id,
         resolutionId: "res1",
         affectedOperationId: id,
         affectedOperationKind: "launch_attempt",
@@ -232,12 +233,15 @@ describe("coverage overlap projection", () => {
         evidenceSource: "operator_attestation",
         evidenceDigest: "e".repeat(64),
         producerSchemaVersion: "1",
+        agentHash: "a".repeat(64),
+        acknowledgmentTimestamp: "2026-07-12T00:00:00.000Z",
         recordedAt: "2026-07-25T00:00:00.000Z",
       }),
     ];
     const attempts = projectAttempts(events);
-    expect(attempts[0]?.resolvedByReconciliation).toBe(true);
-    expect(attempts[0]?.unresolved).toBe(false);
+    expect(attempts[0]?.hasAgentAck).toBe(true);
+    expect(attempts[0]?.resolvedByReconciliation).toBe(false);
+    expect(attempts[0]?.unresolved).toBe(true);
     expect(attemptOverlapsInterval(attempts[0]!, INTERVAL)).toBe(true);
   });
 
@@ -304,7 +308,7 @@ describe("coverage overlap projection", () => {
     });
     expect(snap.status).toBe("incomplete");
     expect(snap.incompleteReasons).toContain(
-      "coverage_activation_attestation_missing",
+      "coverage_activation_record_missing",
     );
   });
 
@@ -390,12 +394,14 @@ describe("coverage overlap projection", () => {
       base({
         eventType: "reconciliation_resolution",
         launchAttemptId: id,
-        transitionId: "reconciliation_resolution:bad",
+        transitionId:
+          "reconciliation_resolution:provider_mutation_proven_not_started:bad:" +
+          id,
         resolutionId: "bad",
         affectedOperationId: id,
         affectedOperationKind: "launch_attempt",
         authoritativeResolutionInstant: "",
-        resolutionKind: "guess",
+        resolutionKind: "provider_mutation_proven_not_started",
         evidenceSource: "",
         evidenceDigest: "",
         producerSchemaVersion: "1",

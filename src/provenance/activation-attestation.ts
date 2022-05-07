@@ -12,9 +12,17 @@ import {
   SEND_SURFACES_SCHEMA_KIND,
   sendSurfacesManifestDigest,
 } from "./launch-surfaces.js";
+import {
+  productionRunnerInstallManifestPin,
+  productionWorkflowInstallManifestPin,
+  workflowEntrypointKey,
+} from "./production-install-manifests.js";
 
 export const ACTIVATION_ATTESTATION_SCHEMA_KIND =
   "p-dev.cursor-cloud-agent-coverage-activation.v1" as const;
+
+export const ACTIVATION_RECORD_SCHEMA_KIND =
+  "p-dev.cursor-cloud-agent-activation-record.v1" as const;
 
 const DIGEST_RE = /^[0-9a-f]{64}$/;
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/;
@@ -30,6 +38,7 @@ export interface SurfaceInstallAttestation {
 }
 
 export interface WorkflowInstallAttestation {
+  entrypointKey: string;
   workflowId: string;
   workflowVersion: string;
   installedFrom: string;
@@ -38,18 +47,11 @@ export interface WorkflowInstallAttestation {
 }
 
 export interface RunnerVersionInstallAttestation {
+  installationId: string;
   runnerSnapshotVersion: string;
   installedFrom: string;
   installedUntil: string | null;
   evidenceDigest: string;
-}
-
-export interface ActivationSourceIdentity {
-  stateRepository: string;
-  stateBranch: string;
-  activationRecordPath: string;
-  activationCommitSha: string;
-  attestationDigest: string;
 }
 
 export interface WriterOutageOrGap {
@@ -65,11 +67,36 @@ export interface SurfacesManifestPin {
   surfaces: string[];
 }
 
-/**
- * Immutable activation/deployment evidence required before coverage can be complete.
- * Never written live by this capture-only repair.
- */
-export interface CoverageActivationAttestation {
+export interface WorkflowInstallManifestPin {
+  kind: string;
+  version: "1";
+  digest: string;
+  entrypoints: string[];
+}
+
+export interface RunnerInstallManifestPin {
+  kind: string;
+  version: "1";
+  digest: string;
+  installationIds: string[];
+}
+
+export type ActivationLifecycleKind =
+  | "activation"
+  | "deactivation"
+  | "invalidation";
+
+export interface ActivationLifecycleRecord {
+  lifecycleKind: ActivationLifecycleKind;
+  epochId: string;
+  effectiveAt: string;
+  reasonCode: string;
+  producerSchemaVersion: string;
+  evidenceSource: string;
+  evidenceDigest: string;
+}
+
+export interface CanonicalActivationPayload {
   kind: typeof ACTIVATION_ATTESTATION_SCHEMA_KIND;
   version: "1";
   epochId: string;
@@ -82,6 +109,8 @@ export interface CoverageActivationAttestation {
   coverageSchemaVersion: string;
   launchSurfacesManifest: SurfacesManifestPin;
   sendSurfacesManifest: SurfacesManifestPin;
+  workflowInstallManifest: WorkflowInstallManifestPin;
+  runnerInstallManifest: RunnerInstallManifestPin;
   sourceShaAllowlist: string[];
   runnerSnapshotVersionAllowlist: string[];
   workflowInstallAttestations: WorkflowInstallAttestation[];
@@ -89,9 +118,25 @@ export interface CoverageActivationAttestation {
   runnerVersionInstallAttestations: RunnerVersionInstallAttestation[];
   stateRepository: string;
   stateBranch: string;
-  activationSource: ActivationSourceIdentity;
-  deactivationOrInvalidationEvidence: string | null;
+  lifecycleRecords: ActivationLifecycleRecord[];
   knownWriterOutagesOrGaps: WriterOutageOrGap[];
+}
+
+export type CoverageActivationAttestation = CanonicalActivationPayload;
+
+export interface PersistedActivationRecord {
+  kind: typeof ACTIVATION_RECORD_SCHEMA_KIND;
+  version: "1";
+  payload: CanonicalActivationPayload;
+  canonicalPayloadDigest: string;
+}
+
+export interface RetrievedActivationSource {
+  stateRepository: string;
+  stateBranch: string;
+  activationRecordPath: string;
+  immutableCommitSha: string;
+  recordContentDigest?: string;
 }
 
 function stableStringify(value: unknown): string {
@@ -158,19 +203,16 @@ function sortWorkflowInstalls(
   rows: WorkflowInstallAttestation[],
 ): WorkflowInstallAttestation[] {
   const sorted = [...rows].sort((a, b) => {
-    const id = a.workflowId.localeCompare(b.workflowId);
-    if (id !== 0) return id;
+    const key = a.entrypointKey.localeCompare(b.entrypointKey);
+    if (key !== 0) return key;
     return a.workflowVersion.localeCompare(b.workflowVersion);
   });
   for (let i = 1; i < sorted.length; i += 1) {
     const prev = sorted[i - 1]!;
     const cur = sorted[i]!;
-    if (
-      prev.workflowId === cur.workflowId &&
-      prev.workflowVersion === cur.workflowVersion
-    ) {
+    if (prev.entrypointKey === cur.entrypointKey) {
       throw new Error(
-        `duplicate workflow install attestation: ${cur.workflowId}@${cur.workflowVersion}`,
+        `duplicate workflow install attestation: ${cur.entrypointKey}`,
       );
     }
   }
@@ -181,18 +223,28 @@ function sortRunnerInstalls(
   rows: RunnerVersionInstallAttestation[],
 ): RunnerVersionInstallAttestation[] {
   const sorted = [...rows].sort((a, b) =>
-    a.runnerSnapshotVersion.localeCompare(b.runnerSnapshotVersion),
+    a.installationId.localeCompare(b.installationId),
   );
   for (let i = 1; i < sorted.length; i += 1) {
-    if (
-      sorted[i]!.runnerSnapshotVersion === sorted[i - 1]!.runnerSnapshotVersion
-    ) {
+    if (sorted[i]!.installationId === sorted[i - 1]!.installationId) {
       throw new Error(
-        `duplicate runner install attestation: ${sorted[i]!.runnerSnapshotVersion}`,
+        `duplicate runner install attestation: ${sorted[i]!.installationId}`,
       );
     }
   }
   return sorted;
+}
+
+function sortLifecycleRecords(
+  rows: ActivationLifecycleRecord[],
+): ActivationLifecycleRecord[] {
+  return [...rows].sort((a, b) => {
+    const effective = a.effectiveAt.localeCompare(b.effectiveAt);
+    if (effective !== 0) return effective;
+    const kind = a.lifecycleKind.localeCompare(b.lifecycleKind);
+    if (kind !== 0) return kind;
+    return a.epochId.localeCompare(b.epochId);
+  });
 }
 
 function validateInstallInterval(
@@ -221,66 +273,85 @@ function installCoversInterval(
   return coversStart && coversEnd;
 }
 
-/** Canonical form used for attestation digest — rejects duplicates and invalid digests. */
-export function canonicalizeActivationAttestation(
-  attestation: CoverageActivationAttestation,
-): CoverageActivationAttestation {
-  assertTimestamp(attestation.activatedAt, "activatedAt");
-  assertTimestamp(attestation.interval.coverageStart, "interval.coverageStart");
-  assertTimestamp(attestation.interval.coverageEnd, "interval.coverageEnd");
+function surfacesEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((value, index) => value === sortedB[index]);
+}
+
+export function canonicalizeActivationPayload(
+  payload: CanonicalActivationPayload,
+): CanonicalActivationPayload {
+  assertTimestamp(payload.activatedAt, "activatedAt");
+  assertTimestamp(payload.interval.coverageStart, "interval.coverageStart");
+  assertTimestamp(payload.interval.coverageEnd, "interval.coverageEnd");
   if (
-    parseIso(attestation.interval.coverageEnd) <=
-    parseIso(attestation.interval.coverageStart)
+    parseIso(payload.interval.coverageEnd) <=
+    parseIso(payload.interval.coverageStart)
   ) {
     throw new Error("coverage interval must be half-open with end > start");
   }
 
-  if (!attestation.stateRepository.trim() || !attestation.stateBranch.trim()) {
+  if (!payload.stateRepository.trim() || !payload.stateBranch.trim()) {
     throw new Error("stateRepository and stateBranch are required");
   }
 
-  const activationSource = attestation.activationSource;
-  if (
-    activationSource.stateRepository !== attestation.stateRepository ||
-    activationSource.stateBranch !== attestation.stateBranch
-  ) {
-    throw new Error("activationSource repository/branch must match attestation");
-  }
-  if (!COMMIT_SHA_RE.test(activationSource.activationCommitSha)) {
-    throw new Error("activationCommitSha must be a git commit SHA");
-  }
-  assertDigest(activationSource.attestationDigest, "activationSource.attestationDigest");
-
   const launchSurfaces = sortUnique(
-    [...attestation.launchSurfacesManifest.surfaces],
+    [...payload.launchSurfacesManifest.surfaces],
     "launch surface",
   );
   const sendSurfaces = sortUnique(
-    [...attestation.sendSurfacesManifest.surfaces],
+    [...payload.sendSurfacesManifest.surfaces],
     "send surface",
   );
 
   const launchManifest: SurfacesManifestPin = {
-    kind: attestation.launchSurfacesManifest.kind,
+    kind: payload.launchSurfacesManifest.kind,
     version: "1",
-    digest: attestation.launchSurfacesManifest.digest,
+    digest: payload.launchSurfacesManifest.digest,
     surfaces: launchSurfaces,
   };
   const sendManifest: SurfacesManifestPin = {
-    kind: attestation.sendSurfacesManifest.kind,
+    kind: payload.sendSurfacesManifest.kind,
     version: "1",
-    digest: attestation.sendSurfacesManifest.digest,
+    digest: payload.sendSurfacesManifest.digest,
     surfaces: sendSurfaces,
   };
   assertDigest(launchManifest.digest, "launchSurfacesManifest.digest");
   assertDigest(sendManifest.digest, "sendSurfacesManifest.digest");
 
+  const workflowInstallManifest: WorkflowInstallManifestPin = {
+    kind: payload.workflowInstallManifest.kind,
+    version: "1",
+    digest: payload.workflowInstallManifest.digest,
+    entrypoints: sortUnique(
+      [...payload.workflowInstallManifest.entrypoints],
+      "workflowInstallManifest entrypoint",
+    ),
+  };
+  assertDigest(
+    workflowInstallManifest.digest,
+    "workflowInstallManifest.digest",
+  );
+
+  const runnerInstallManifest: RunnerInstallManifestPin = {
+    kind: payload.runnerInstallManifest.kind,
+    version: "1",
+    digest: payload.runnerInstallManifest.digest,
+    installationIds: sortUnique(
+      [...payload.runnerInstallManifest.installationIds],
+      "runnerInstallManifest installationId",
+    ),
+  };
+  assertDigest(runnerInstallManifest.digest, "runnerInstallManifest.digest");
+
   const sourceShaAllowlist = sortUnique(
-    [...attestation.sourceShaAllowlist],
+    [...payload.sourceShaAllowlist],
     "sourceShaAllowlist entry",
   );
   const runnerSnapshotVersionAllowlist = sortUnique(
-    [...attestation.runnerSnapshotVersionAllowlist],
+    [...payload.runnerSnapshotVersionAllowlist],
     "runnerSnapshotVersionAllowlist entry",
   );
   if (sourceShaAllowlist.length === 0) {
@@ -296,7 +367,7 @@ export function canonicalizeActivationAttestation(
   }
 
   const surfaceInstallAttestations = sortSurfaceInstalls(
-    attestation.surfaceInstallAttestations.map((row) => {
+    payload.surfaceInstallAttestations.map((row) => {
       validateInstallInterval(row.installedFrom, row.installedUntil);
       assertDigest(row.evidenceDigest, "surfaceInstallAttestations.evidenceDigest");
       if (row.kind !== "launch" && row.kind !== "send") {
@@ -307,25 +378,39 @@ export function canonicalizeActivationAttestation(
   );
 
   const workflowInstallAttestations = sortWorkflowInstalls(
-    attestation.workflowInstallAttestations.map((row) => {
+    payload.workflowInstallAttestations.map((row) => {
       validateInstallInterval(row.installedFrom, row.installedUntil);
       assertDigest(row.evidenceDigest, "workflowInstallAttestations.evidenceDigest");
+      if (!row.entrypointKey.includes("#")) {
+        throw new Error("workflow install attestation entrypointKey must be workflowPath#jobId");
+      }
       return { ...row };
     }),
   );
 
   const runnerVersionInstallAttestations = sortRunnerInstalls(
-    attestation.runnerVersionInstallAttestations.map((row) => {
+    payload.runnerVersionInstallAttestations.map((row) => {
       validateInstallInterval(row.installedFrom, row.installedUntil);
       assertDigest(
         row.evidenceDigest,
         "runnerVersionInstallAttestations.evidenceDigest",
       );
+      if (!row.installationId.trim()) {
+        throw new Error("runner install attestation installationId is required");
+      }
       return { ...row };
     }),
   );
 
-  const knownWriterOutagesOrGaps = [...attestation.knownWriterOutagesOrGaps]
+  const lifecycleRecords = sortLifecycleRecords(
+    payload.lifecycleRecords.map((row) => {
+      assertTimestamp(row.effectiveAt, "lifecycleRecords.effectiveAt");
+      assertDigest(row.evidenceDigest, "lifecycleRecords.evidenceDigest");
+      return { ...row };
+    }),
+  );
+
+  const knownWriterOutagesOrGaps = [...payload.knownWriterOutagesOrGaps]
     .map((gap) => {
       assertTimestamp(gap.from, "knownWriterOutagesOrGaps.from");
       if (gap.until !== null) {
@@ -335,36 +420,68 @@ export function canonicalizeActivationAttestation(
     })
     .sort((a, b) => a.from.localeCompare(b.from));
 
-  if (
-    attestation.deactivationOrInvalidationEvidence !== null &&
-    attestation.deactivationOrInvalidationEvidence.trim() !== ""
-  ) {
-    assertDigest(
-      attestation.deactivationOrInvalidationEvidence,
-      "deactivationOrInvalidationEvidence",
-    );
-  }
-
   return {
-    ...attestation,
+    ...payload,
     launchSurfacesManifest: launchManifest,
     sendSurfacesManifest: sendManifest,
+    workflowInstallManifest,
+    runnerInstallManifest,
     sourceShaAllowlist,
     runnerSnapshotVersionAllowlist,
     surfaceInstallAttestations,
     workflowInstallAttestations,
     runnerVersionInstallAttestations,
+    lifecycleRecords,
     knownWriterOutagesOrGaps,
   };
 }
 
-export function activationAttestationDigest(
-  attestation: CoverageActivationAttestation,
+export function activationPayloadDigest(
+  payload: CanonicalActivationPayload,
 ): string {
-  const canonical = canonicalizeActivationAttestation(attestation);
+  const canonical = canonicalizeActivationPayload(payload);
   return createHash("sha256")
     .update(stableStringify(canonical), "utf8")
     .digest("hex");
+}
+
+/** @deprecated Use activationPayloadDigest */
+export function activationAttestationDigest(
+  payload: CanonicalActivationPayload,
+): string {
+  return activationPayloadDigest(payload);
+}
+
+export function buildPersistedActivationRecord(
+  payload: CanonicalActivationPayload,
+): PersistedActivationRecord {
+  const canonical = canonicalizeActivationPayload(payload);
+  const canonicalPayloadDigest = activationPayloadDigest(canonical);
+  return {
+    kind: ACTIVATION_RECORD_SCHEMA_KIND,
+    version: "1",
+    payload: canonical,
+    canonicalPayloadDigest,
+  };
+}
+
+export function parsePersistedActivationRecord(
+  bytes: string | object,
+): PersistedActivationRecord {
+  const parsed = (
+    typeof bytes === "string" ? JSON.parse(bytes) : bytes
+  ) as PersistedActivationRecord;
+  if (
+    parsed.kind !== ACTIVATION_RECORD_SCHEMA_KIND ||
+    parsed.version !== "1"
+  ) {
+    throw new Error("invalid persisted activation record schema");
+  }
+  const recomputed = activationPayloadDigest(parsed.payload);
+  if (recomputed !== parsed.canonicalPayloadDigest) {
+    throw new Error("persisted activation record digest mismatch");
+  }
+  return parsed;
 }
 
 export function productionLaunchSurfacesManifestPin(): SurfacesManifestPin {
@@ -387,48 +504,91 @@ export function productionSendSurfacesManifestPin(): SurfacesManifestPin {
   };
 }
 
-function surfacesEqual(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((value, index) => value === sortedB[index]);
+export function validateLifecycleForInterval(
+  records: ActivationLifecycleRecord[],
+  epochId: string,
+  interval: CoverageInterval,
+): CoverageIncompleteReason[] {
+  const reasons = new Set<CoverageIncompleteReason>();
+  const epochRecords = records.filter((row) => row.epochId === epochId);
+  const activations = epochRecords.filter(
+    (row) => row.lifecycleKind === "activation",
+  );
+  const closures = epochRecords.filter(
+    (row) =>
+      row.lifecycleKind === "deactivation" ||
+      row.lifecycleKind === "invalidation",
+  );
+
+  if (activations.length === 0) {
+    reasons.add("coverage_activation_lifecycle_invalid");
+    return [...reasons].sort();
+  }
+
+  const activationBeforeStart = activations.some(
+    (row) => parseIso(row.effectiveAt) <= parseIso(interval.coverageStart),
+  );
+  if (!activationBeforeStart) {
+    reasons.add("coverage_activation_lifecycle_invalid");
+  }
+
+  for (const row of closures) {
+    if (parseIso(row.effectiveAt) < parseIso(interval.coverageEnd)) {
+      reasons.add("coverage_activation_lifecycle_invalid");
+    }
+  }
+
+  const seen = new Set<string>();
+  for (const row of epochRecords) {
+    const key = `${row.lifecycleKind}:${row.effectiveAt}:${row.reasonCode}`;
+    if (seen.has(key)) {
+      reasons.add("coverage_activation_lifecycle_invalid");
+    }
+    seen.add(key);
+  }
+
+  return [...reasons].sort();
 }
 
-/** Typed incomplete reasons for vacuous, wrong, or missing install evidence. */
 export function validateActivationAttestationCompleteness(
-  attestation: CoverageActivationAttestation,
+  payload: CanonicalActivationPayload,
   interval: CoverageInterval,
 ): CoverageIncompleteReason[] {
   const reasons = new Set<CoverageIncompleteReason>();
 
   try {
-    canonicalizeActivationAttestation(attestation);
+    canonicalizeActivationPayload(payload);
   } catch {
     reasons.add("coverage_attestation_conflicting_install");
   }
 
-  if (attestation.requiredWriterMode !== "required") {
+  if (payload.requiredWriterMode !== "required") {
     reasons.add("coverage_attestation_mode_not_required");
   }
 
   if (
-    attestation.interval.coverageStart !== interval.coverageStart ||
-    attestation.interval.coverageEnd !== interval.coverageEnd
+    payload.interval.coverageStart !== interval.coverageStart ||
+    payload.interval.coverageEnd !== interval.coverageEnd
   ) {
     reasons.add("coverage_attestation_interval_mismatch");
   }
 
-  if (attestation.sourceShaAllowlist.length === 0) {
+  if (payload.sourceShaAllowlist.length === 0) {
     reasons.add("coverage_empty_source_allowlist");
   }
-  if (attestation.runnerSnapshotVersionAllowlist.length === 0) {
+  if (payload.runnerSnapshotVersionAllowlist.length === 0) {
     reasons.add("coverage_empty_runner_allowlist");
   }
 
   const expectedLaunch = productionLaunchSurfacesManifestPin();
   const expectedSend = productionSendSurfacesManifestPin();
-  const launch = attestation.launchSurfacesManifest;
-  const send = attestation.sendSurfacesManifest;
+  const expectedWorkflow = productionWorkflowInstallManifestPin();
+  const expectedRunner = productionRunnerInstallManifestPin();
+
+  const launch = payload.launchSurfacesManifest;
+  const send = payload.sendSurfacesManifest;
+  const workflow = payload.workflowInstallManifest;
+  const runner = payload.runnerInstallManifest;
 
   if (
     launch.kind !== expectedLaunch.kind ||
@@ -448,16 +608,34 @@ export function validateActivationAttestationCompleteness(
     reasons.add("coverage_send_manifest_mismatch");
   }
 
-  const launchInstalls = attestation.surfaceInstallAttestations.filter(
+  if (
+    workflow.kind !== expectedWorkflow.kind ||
+    workflow.version !== expectedWorkflow.version ||
+    workflow.digest !== expectedWorkflow.digest ||
+    !surfacesEqual(workflow.entrypoints, expectedWorkflow.entrypoints)
+  ) {
+    reasons.add("coverage_workflow_manifest_mismatch");
+  }
+
+  if (
+    runner.kind !== expectedRunner.kind ||
+    runner.version !== expectedRunner.version ||
+    runner.digest !== expectedRunner.digest ||
+    !surfacesEqual(runner.installationIds, expectedRunner.installationIds)
+  ) {
+    reasons.add("coverage_runner_manifest_mismatch");
+  }
+
+  const launchInstalls = payload.surfaceInstallAttestations.filter(
     (row) => row.kind === "launch",
   );
-  const sendInstalls = attestation.surfaceInstallAttestations.filter(
+  const sendInstalls = payload.surfaceInstallAttestations.filter(
     (row) => row.kind === "send",
   );
 
   const launchKeys = new Set<string>();
   const sendKeys = new Set<string>();
-  for (const row of attestation.surfaceInstallAttestations) {
+  for (const row of payload.surfaceInstallAttestations) {
     const key = `${row.kind}:${row.surface}`;
     if (row.kind === "launch") {
       if (launchKeys.has(key)) {
@@ -506,42 +684,80 @@ export function validateActivationAttestationCompleteness(
     }
   }
 
-  if (attestation.workflowInstallAttestations.length === 0) {
-    reasons.add("coverage_workflow_installation_incomplete");
-  } else {
-    for (const row of attestation.workflowInstallAttestations) {
-      if (
-        !installCoversInterval(row.installedFrom, row.installedUntil, interval)
-      ) {
-        reasons.add("coverage_workflow_installation_incomplete");
-      }
+  const workflowKeys = new Set(
+    payload.workflowInstallAttestations.map((row) => row.entrypointKey),
+  );
+  for (const entrypoint of expectedWorkflow.entrypoints) {
+    const install = payload.workflowInstallAttestations.find(
+      (row) => row.entrypointKey === entrypoint,
+    );
+    if (
+      !install ||
+      !installCoversInterval(
+        install.installedFrom,
+        install.installedUntil,
+        interval,
+      )
+    ) {
+      reasons.add("coverage_workflow_installation_incomplete");
+    }
+    if (!workflowKeys.has(entrypoint)) {
+      reasons.add("coverage_workflow_installation_incomplete");
+    }
+  }
+  for (const row of payload.workflowInstallAttestations) {
+    if (!expectedWorkflow.entrypoints.includes(row.entrypointKey)) {
+      reasons.add("coverage_attestation_conflicting_install");
     }
   }
 
-  if (attestation.runnerVersionInstallAttestations.length === 0) {
-    reasons.add("coverage_runner_installation_incomplete");
-  } else {
-    let runnerCovers = false;
-    for (const row of attestation.runnerVersionInstallAttestations) {
-      if (
-        installCoversInterval(row.installedFrom, row.installedUntil, interval)
-      ) {
-        runnerCovers = true;
-      }
-      if (
-        !attestation.runnerSnapshotVersionAllowlist.includes(
-          row.runnerSnapshotVersion,
-        )
-      ) {
-        reasons.add("coverage_attestation_conflicting_install");
-      }
-    }
-    if (!runnerCovers) {
+  const runnerIds = new Set(
+    payload.runnerVersionInstallAttestations.map((row) => row.installationId),
+  );
+  for (const installationId of expectedRunner.installationIds) {
+    const install = payload.runnerVersionInstallAttestations.find(
+      (row) => row.installationId === installationId,
+    );
+    if (
+      !install ||
+      !installCoversInterval(
+        install.installedFrom,
+        install.installedUntil,
+        interval,
+      )
+    ) {
+      reasons.add("coverage_runner_slot_missing");
       reasons.add("coverage_runner_installation_incomplete");
     }
+    if (!runnerIds.has(installationId)) {
+      reasons.add("coverage_runner_slot_missing");
+    }
+  }
+  for (const row of payload.runnerVersionInstallAttestations) {
+    if (!row.installationId) {
+      reasons.add("coverage_runner_installation_incomplete");
+    }
+    if (!expectedRunner.installationIds.includes(row.installationId)) {
+      reasons.add("coverage_attestation_conflicting_install");
+    }
+    if (
+      !payload.runnerSnapshotVersionAllowlist.includes(
+        row.runnerSnapshotVersion,
+      )
+    ) {
+      reasons.add("coverage_attestation_conflicting_install");
+    }
   }
 
-  for (const gap of attestation.knownWriterOutagesOrGaps) {
+  for (const reason of validateLifecycleForInterval(
+    payload.lifecycleRecords,
+    payload.epochId,
+    interval,
+  )) {
+    reasons.add(reason);
+  }
+
+  for (const gap of payload.knownWriterOutagesOrGaps) {
     const gapStart = gap.from;
     const gapEnd = gap.until;
     const overlaps =
@@ -554,9 +770,7 @@ export function validateActivationAttestationCompleteness(
     }
   }
 
-  if (attestation.deactivationOrInvalidationEvidence) {
-    reasons.add("coverage_deployment_gap");
-  }
-
   return [...reasons].sort();
 }
+
+export { workflowEntrypointKey };
