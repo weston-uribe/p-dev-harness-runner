@@ -29,6 +29,15 @@ describe("harness reconcile revisions workflow", () => {
     expect(workflow).toContain("P_DEV_STATE_GITHUB_TOKEN:");
   });
 
+  it("aliases HARNESS_GITHUB_TOKEN as GITHUB_DISPATCH_TOKEN for code-review dispatch", () => {
+    expect(workflow).toContain(
+      "GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}",
+    );
+    expect(workflow).toContain(
+      "GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}",
+    );
+  });
+
   it("uses request_id workflow_dispatch input instead of issue", () => {
     expect(workflow).toContain("request_id:");
     expect(workflow).not.toMatch(/^\s+issue:\s*$/m);

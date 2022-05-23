@@ -48,4 +48,17 @@ describe("classify-phase-error", () => {
       "validation_failed",
     );
   });
+
+  it("classifies missing_dispatch_token as configuration_error", () => {
+    expect(
+      classifyUnexpectedPhaseError(new Error("missing_dispatch_token")),
+    ).toBe("configuration_error");
+    expect(
+      classifyUnexpectedPhaseError(
+        new Error(
+          "missing_dispatch_token: GITHUB_DISPATCH_TOKEN is not available to the harness runner.",
+        ),
+      ),
+    ).toBe("configuration_error");
+  });
 });

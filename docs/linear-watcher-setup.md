@@ -59,9 +59,18 @@ In repo **Settings → Secrets and variables → Actions**:
 |--------|---------|
 | `LINEAR_API_KEY` | All live harness phases |
 | `CURSOR_API_KEY` | planning, implementation, revision, merge repair fallback |
-| `HARNESS_GITHUB_TOKEN` | handoff, revision, merge — mapped to runtime `GITHUB_TOKEN` in the workflow |
+| `HARNESS_GITHUB_TOKEN` | handoff, revision, merge — mapped to runtime `GITHUB_TOKEN` in the workflow; also aliased to `GITHUB_DISPATCH_TOKEN` on `run-harness` and reconcile jobs |
 
-`HARNESS_GITHUB_TOKEN` must be a PAT with access to **target repos** used by the harness (e.g. target-app), including classic `repo` scope or equivalent fine-grained permissions for PR read, checks, merge, and PR branch repair. Fine-grained PATs need **Contents: Read and write** plus **Pull requests: Read and write** on target repos.
+`HARNESS_GITHUB_TOKEN` must be a PAT with access to **target repos** used by the harness (e.g. target-app), including classic `repo` scope or equivalent fine-grained permissions for PR read, checks, merge, and PR branch repair. Fine-grained PATs need **Contents: Read and write** plus **Pull requests: Read and write** on target repos. The same PAT must also be able to call `repository_dispatch` on the managed execution repo (Contents: write), because in-runner handoff dispatches the code-review job via that credential.
+
+Managed-runner wiring (no new secret):
+
+```yaml
+GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}
+GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}
+```
+
+This alias is required on the `run-harness` job in `harness-auto-runner.yml` (and already present on the reconcile workflow). Opaque dispatch resolves `GITHUB_DISPATCH_TOKEN ?? HARNESS_GITHUB_TOKEN` and does **not** fall back to env `GITHUB_TOKEN`.
 
 Run `npm run harness:doctor -- --profile merge` with `GITHUB_TOKEN` set before enabling merge automation. Doctor verifies target base branches and token write permission used by integration repair.
 

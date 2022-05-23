@@ -81,7 +81,12 @@ export type WorkflowSideEffectKind =
   | "pm_handoff_marker"
   | "code_review_dispatch";
 
-export type WorkflowSideEffectStatus = "pending" | "completed";
+export type WorkflowSideEffectStatus =
+  | "pending"
+  | "dispatching"
+  | "dispatched"
+  | "blocked"
+  | "completed";
 
 /** Deterministic side-effect ledger entry (identities only — no bodies/secrets). */
 export interface WorkflowSideEffectRecord {
@@ -90,6 +95,16 @@ export interface WorkflowSideEffectRecord {
   status: WorkflowSideEffectStatus;
   createdAt: string;
   completedAt?: string;
+  /** Owner generation claiming a dispatching effect (run id / reconcile generation). */
+  ownerGeneration?: string;
+  /** Deterministic job-request id for code_review_dispatch (`cr-subject:…`). */
+  reviewRequestId?: string;
+  claimedAt?: string;
+  dispatchedAt?: string;
+  /** Optional GitHub delivery id from repository_dispatch response headers. */
+  githubDeliveryId?: string | null;
+  blockedReason?: string;
+  blockedAt?: string;
 }
 
 export interface WorkflowStateRecord {

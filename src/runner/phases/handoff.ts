@@ -23,7 +23,10 @@ import {
   buildHandoffCommentBody,
   writeCommentsArtifact,
 } from "../../linear/comments.js";
-import { createCodeReviewJobAndDispatch } from "../../workflow/job-request/dispatch-opaque.js";
+import {
+  ensureCodeReviewJobDispatched,
+  MISSING_DISPATCH_TOKEN_MESSAGE,
+} from "../../workflow/code-review-dispatch-effect.js";
 import { buildCodeReviewSubjectIdentity } from "../../workflow/subject-identities.js";
 import { fetchLinearIssue } from "../../linear/client.js";
 import { findImplementationPullRequest } from "../../github/pr-discovery.js";
@@ -169,6 +172,7 @@ async function writeFinalManifest(
             "unknown_repo_denied",
             "wrong_status",
             "github_auth_failure",
+            "configuration_error",
             "missing_implementation_marker",
             "missing_implementation_pr",
             "missing_pr_url",
@@ -911,32 +915,27 @@ export async function executeHandoffPhase(
         diffHash: implementationArtifact.diffHash,
         reviewCycle,
       });
-      const dispatchEffectId = buildSideEffectIdentity({
-        kind: "code_review_dispatch",
-        subjectIdentity: reviewSubjectIdentity,
+      const dispatchResult = await ensureCodeReviewJobDispatched({
+        store,
+        issueKey: options.issueKey,
+        reviewSubjectIdentity,
+        ownerGeneration: runId,
+        state: durable,
       });
-      if (!isSideEffectCompleted(durable, dispatchEffectId)) {
-        durable = upsertPendingSideEffect(durable, {
-          identity: dispatchEffectId,
-          kind: "code_review_dispatch",
-        });
-        await createCodeReviewJobAndDispatch({
-          issueKey: options.issueKey,
-          reviewSubjectIdentity,
-        });
-        durable = markSideEffectCompleted(durable, dispatchEffectId);
-        durable = {
-          ...durable,
-          stateRevision: durable.stateRevision + 1,
-          activeReviewSubjectIdentity: reviewSubjectIdentity,
-        };
-        await store.compareAndSet({
-          issueKey: options.issueKey,
-          expectedRevision: durable.stateRevision - 1,
-          next: durable,
-        });
+      durable = dispatchResult.state;
+      if (dispatchResult.outcome === "missing_dispatch_token") {
+        throw new Error(MISSING_DISPATCH_TOKEN_MESSAGE);
+      }
+      if (
+        dispatchResult.outcome === "dispatched" ||
+        dispatchResult.outcome === "request_already_present" ||
+        dispatchResult.outcome === "already_dispatched"
+      ) {
         await events.log("code_review_job_dispatched", "info", {
           reviewSubjectIdentity,
+          reviewRequestId: dispatchResult.reviewRequestId,
+          outcome: dispatchResult.outcome,
+          httpDispatched: dispatchResult.httpDispatched,
           prNumber: implementationArtifact.prNumber,
           headSha: implementationArtifact.headSha,
         });
@@ -978,10 +977,16 @@ export async function executeHandoffPhase(
       });
     } else if (enteredHandoff) {
       try {
+        const errorMessage =
+          errorClassification === "configuration_error" &&
+          (message === "missing_dispatch_token" ||
+            message.startsWith("missing_dispatch_token"))
+            ? MISSING_DISPATCH_TOKEN_MESSAGE
+            : message;
         await postErrorComment(
           client,
           issue.id,
-          message,
+          errorMessage,
           {
             ...footerBase,
             branch: branch ?? undefined,
@@ -990,6 +995,7 @@ export async function executeHandoffPhase(
             previousImplementationRunId: previousImplementationRunId ?? undefined,
           },
           "handoff",
+          { errorClassification: errorClassification ?? undefined },
         );
         const blocked = resolveNextStatusName({
           config,
