@@ -206,6 +206,97 @@ export function markCodeReviewDispatchBlocked(
   });
 }
 
+/** True when plan_review_dispatch is durably dispatched or fully completed. */
+export function isPlanReviewDispatchDurable(
+  state: WorkflowStateRecord,
+  identity: string,
+): boolean {
+  return (state.sideEffects ?? []).some(
+    (e) =>
+      e.identity === identity && DISPATCH_COMPLETE_STATUSES.has(e.status),
+  );
+}
+
+export function claimPlanReviewDispatchEffect(
+  state: WorkflowStateRecord,
+  input: {
+    identity: string;
+    ownerGeneration: string;
+    reviewRequestId: string;
+    claimedAt?: string;
+  },
+): WorkflowStateRecord {
+  const withPending = upsertPendingSideEffect(state, {
+    identity: input.identity,
+    kind: "plan_review_dispatch",
+  });
+  const current = getSideEffect(withPending, input.identity);
+  if (current && DISPATCH_COMPLETE_STATUSES.has(current.status)) {
+    return withPending;
+  }
+  if (
+    current?.status === "dispatching" &&
+    current.ownerGeneration &&
+    current.ownerGeneration !== input.ownerGeneration
+  ) {
+    return withPending;
+  }
+  return patchSideEffect(withPending, input.identity, {
+    status: "dispatching",
+    kind: "plan_review_dispatch",
+    ownerGeneration: input.ownerGeneration,
+    reviewRequestId: input.reviewRequestId,
+    claimedAt: input.claimedAt ?? new Date().toISOString(),
+  });
+}
+
+export function markPlanReviewDispatchDispatched(
+  state: WorkflowStateRecord,
+  input: {
+    identity: string;
+    reviewRequestId: string;
+    githubDeliveryId?: string | null;
+    dispatchedAt?: string;
+    dispatchAttemptCount?: number;
+  },
+): WorkflowStateRecord {
+  const current = getSideEffect(state, input.identity);
+  return patchSideEffect(state, input.identity, {
+    status: "dispatched",
+    kind: "plan_review_dispatch",
+    reviewRequestId: input.reviewRequestId,
+    githubDeliveryId: input.githubDeliveryId ?? null,
+    dispatchedAt: input.dispatchedAt ?? new Date().toISOString(),
+    dispatchAttemptCount:
+      input.dispatchAttemptCount ??
+      (current?.dispatchAttemptCount ?? 0) + 1,
+    blockedReason: undefined,
+    blockedAt: undefined,
+  });
+}
+
+export function markPlanReviewDispatchBlocked(
+  state: WorkflowStateRecord,
+  input: {
+    identity: string;
+    blockedReason: string;
+    reviewRequestId?: string;
+    blockedAt?: string;
+  },
+): WorkflowStateRecord {
+  const withPending = upsertPendingSideEffect(state, {
+    identity: input.identity,
+    kind: "plan_review_dispatch",
+  });
+  return patchSideEffect(withPending, input.identity, {
+    status: "blocked",
+    kind: "plan_review_dispatch",
+    reviewRequestId: input.reviewRequestId,
+    blockedReason: input.blockedReason,
+    blockedAt: input.blockedAt ?? new Date().toISOString(),
+  });
+}
+
 export function buildSideEffectIdentity(parts: {
   kind: WorkflowSideEffectKind;
   subjectIdentity: string;

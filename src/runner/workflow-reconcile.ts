@@ -29,14 +29,23 @@ import {
 import {
   ensureCodeReviewJobDispatched,
 } from "../workflow/code-review-dispatch-effect.js";
-import { resolveDispatchGithubToken } from "../public-execution/runtime-repos.js";
 import {
-  dispatchRepositoryEvent,
-  getDispatchEventType,
-  getDispatchRepository,
-} from "../webhook/dispatch-github.js";
+  buildPlanReviewRequestId,
+  ensurePlanReviewJobDispatched,
+} from "../workflow/plan-review-dispatch-effect.js";
+import { createReconcileJobAndDispatch } from "../workflow/job-request/dispatch-reconcile.js";
 import { dispatchMergeReconcileJob } from "../workflow/job-request/dispatch-merge-reconcile.js";
 import { resolveMergeReconcileIdentity } from "./merge-reconcile-identity.js";
+import {
+  buildReconcileHeartbeat,
+  evaluateAutomatedPhaseStaleness,
+  AUTOMATED_PHASE_STALE_BLOCKED_MS,
+} from "../workflow/reconcile-health.js";
+import {
+  writeReconcileHeartbeat,
+} from "../workflow/reconcile-heartbeat-store.js";
+import { markRunStatusBlocked } from "../linear/run-status-comment.js";
+import { buildPlanReviewSubjectIdentity } from "../workflow/subject-identities.js";
 
 import { reconcileWorkflowStateTeamCandidates } from "./workflow-state-team-candidates.js";
 export { reconcileWorkflowStateTeamCandidates };
@@ -70,6 +79,9 @@ export interface WorkflowReconcileIssueResult {
   workflowStateRevision: number | null;
   pmFeedbackCommentId?: string | null;
   mergePrUrl?: string | null;
+  /** Plan Review recovery identity (dry-run / live preflight). */
+  planReviewSubjectIdentity?: string | null;
+  planReviewRequestId?: string | null;
 }
 
 export interface WorkflowReconcileSummary {
@@ -265,6 +277,9 @@ export async function evaluateWorkflowReconcileIssue(input: {
   let pendingRecorded = false;
   let dispatched = false;
   let codeReviewRecoveryHandled = false;
+  let planReviewRecoveryHandled = false;
+  let planReviewSubjectIdentityOut: string | null = null;
+  let planReviewRequestIdOut: string | null = null;
   let pmFeedbackCommentId = route.pmFeedbackCommentId ?? null;
   let mergePrUrl = route.mergePrUrl ?? null;
 
@@ -434,6 +449,161 @@ export async function evaluateWorkflowReconcileIssue(input: {
     }
   }
 
+  // Explicit Plan Review recovery: harness-authored Plan Review is webhook-silent.
+  const durablePlanReviewEligible =
+    authoritativeState?.currentPhaseId === "plan_review" &&
+    Boolean(authoritativeState.latestPlanArtifact) &&
+    (linearStatusLower === "plan review" || linearStatusLower === "blocked");
+  if (
+    durablePlanReviewEligible &&
+    authoritativeState &&
+    stateStore &&
+    (action === "noop" || action === "replay_side_effects")
+  ) {
+    const { isActiveRunLeaseExpired } = await import("../workflow/state/apply.js");
+    const artifact = authoritativeState.latestPlanArtifact!;
+    const reviewCycle = authoritativeState.cycleCounters.plan_review_cycles ?? 0;
+    const subjectIdentity = buildPlanReviewSubjectIdentity({
+      issueKey,
+      planGenerationId: artifact.planGenerationId,
+      planHash: artifact.planArtifactHash,
+      reviewCycle,
+    });
+    const leaseIdentity = `plan_review:${subjectIdentity}`;
+    const accepted =
+      authoritativeState.acceptedReviewSubjects?.[subjectIdentity] ?? null;
+    const lease = authoritativeState.activeRunLease;
+    const leaseActive =
+      lease?.identity === leaseIdentity &&
+      !isActiveRunLeaseExpired(lease, Date.now());
+    const hasReviewerAgent = Boolean(authoritativeState.planReviewerAgentId);
+    if (!accepted && !leaseActive && !hasReviewerAgent) {
+      action = "dispatch";
+      reason = "plan_review_subject_missing_active_or_completed";
+      const planReviewRequestId = buildPlanReviewRequestId(subjectIdentity);
+      planReviewSubjectIdentityOut = subjectIdentity;
+      planReviewRequestIdOut = planReviewRequestId;
+      if (input.dryRun || !input.dispatch) {
+        return {
+          issueKey,
+          linearStatus: issue.status,
+          phase: "plan_review",
+          action: "dispatch",
+          reason,
+          shouldRun: true,
+          dispatched: false,
+          pendingRecorded,
+          incompleteSideEffectIdentities: incompleteSideEffects,
+          workflowStateRevision: authoritativeState.stateRevision,
+          pmFeedbackCommentId,
+          mergePrUrl,
+          planReviewSubjectIdentity: subjectIdentity,
+          planReviewRequestId,
+        };
+      }
+      if (input.dispatch && !input.dryRun) {
+        const dispatchResult = await ensurePlanReviewJobDispatched({
+          store: stateStore,
+          issueKey,
+          reviewSubjectIdentity: subjectIdentity,
+          ownerGeneration: `reconcile:${issueKey}:${Date.now()}`,
+          state: authoritativeState,
+        });
+        authoritativeState = dispatchResult.state;
+        planReviewRequestIdOut = dispatchResult.reviewRequestId;
+        if (dispatchResult.outcome === "missing_dispatch_token") {
+          return {
+            issueKey,
+            linearStatus: issue.status,
+            phase: "plan_review",
+            action: "blocker",
+            reason: "missing_dispatch_token",
+            shouldRun: true,
+            dispatched: false,
+            pendingRecorded,
+            incompleteSideEffectIdentities: listIncompleteSideEffects(
+              dispatchResult.state,
+            ).map((effect) => effect.identity),
+            workflowStateRevision: dispatchResult.state.stateRevision,
+            pmFeedbackCommentId,
+            mergePrUrl,
+            planReviewSubjectIdentity: subjectIdentity,
+            planReviewRequestId: dispatchResult.reviewRequestId,
+          };
+        }
+        if (dispatchResult.outcome === "max_attempts_exhausted") {
+          const stale = evaluateAutomatedPhaseStaleness({
+            state: dispatchResult.state,
+            blockedMs: AUTOMATED_PHASE_STALE_BLOCKED_MS,
+          });
+          if (stale.level === "blocked_candidate" || linearStatusLower === "plan review") {
+            const client = createLinearClient(input.linearApiKey);
+            await transitionIssueStatus(client, issue, "Blocked");
+            await markRunStatusBlocked(client, issue.id, {
+              message: [
+                "Plan Review automatic start exhausted retries.",
+                `subject=${subjectIdentity}`,
+                `requestId=${dispatchResult.reviewRequestId}`,
+                `effect=max_attempts_exhausted`,
+                "retries exhausted",
+                "recovery: npm run harness:reconcile-workflow -- --issue " +
+                  `${issueKey} --dispatch`,
+              ].join(" | "),
+              phase: "plan_review",
+              generation: Date.now(),
+              stateRevision: dispatchResult.state.stateRevision,
+              reviewSubjectIdentity: subjectIdentity,
+              deliveryId: dispatchResult.reviewRequestId,
+            });
+          }
+          planReviewRecoveryHandled = true;
+          action = "blocker";
+          reason = "plan_review_max_dispatch_attempts_exhausted";
+          return {
+            issueKey,
+            linearStatus: "Blocked",
+            phase: "plan_review",
+            action,
+            reason,
+            shouldRun: false,
+            dispatched: false,
+            pendingRecorded,
+            incompleteSideEffectIdentities: listIncompleteSideEffects(
+              dispatchResult.state,
+            ).map((effect) => effect.identity),
+            workflowStateRevision: dispatchResult.state.stateRevision,
+            pmFeedbackCommentId,
+            mergePrUrl,
+            planReviewSubjectIdentity: subjectIdentity,
+            planReviewRequestId: dispatchResult.reviewRequestId,
+          };
+        }
+        if (
+          dispatchResult.outcome === "dispatched" ||
+          dispatchResult.outcome === "request_already_present" ||
+          dispatchResult.outcome === "already_dispatched"
+        ) {
+          planReviewRecoveryHandled = true;
+          dispatched = dispatchResult.httpDispatched;
+          if (
+            dispatchResult.outcome === "request_already_present" ||
+            dispatchResult.outcome === "already_dispatched"
+          ) {
+            reason = "plan_review_request_already_present";
+          }
+          if (linearStatusLower === "blocked") {
+            const client = createLinearClient(input.linearApiKey);
+            await transitionIssueStatus(client, issue, "Plan Review");
+          }
+        } else if (dispatchResult.outcome === "claim_lost") {
+          planReviewRecoveryHandled = true;
+          action = "noop";
+          reason = "plan_review_dispatch_claim_lost";
+        }
+      }
+    }
+  }
+
   let shouldRun = action === "dispatch";
 
   if (
@@ -441,7 +611,8 @@ export async function evaluateWorkflowReconcileIssue(input: {
     input.dispatch &&
     !input.dryRun &&
     !dispatched &&
-    !codeReviewRecoveryHandled
+    !codeReviewRecoveryHandled &&
+    !planReviewRecoveryHandled
   ) {
     if (route.phase === "merge") {
       const client = createLinearClient(input.linearApiKey);
@@ -501,15 +672,79 @@ export async function evaluateWorkflowReconcileIssue(input: {
         reason = "eligible_merge";
         shouldRun = true;
       }
+    } else if (route.phase === "plan_review") {
+      // Plan Review must use subject-identity opaque dispatch only.
+      return {
+        issueKey,
+        linearStatus: issue.status,
+        phase: route.phase,
+        action: "blocker",
+        reason: "plan_review_requires_subject_dispatch",
+        shouldRun: true,
+        dispatched: false,
+        pendingRecorded,
+        incompleteSideEffectIdentities: incompleteSideEffects,
+        workflowStateRevision: route.workflowStateRevision ?? null,
+        pmFeedbackCommentId,
+        mergePrUrl,
+      };
+    } else if (route.phase === "code_review") {
+      return {
+        issueKey,
+        linearStatus: issue.status,
+        phase: route.phase,
+        action: "blocker",
+        reason: "code_review_requires_subject_dispatch",
+        shouldRun: true,
+        dispatched: false,
+        pendingRecorded,
+        incompleteSideEffectIdentities: incompleteSideEffects,
+        workflowStateRevision: route.workflowStateRevision ?? null,
+        pmFeedbackCommentId,
+        mergePrUrl,
+      };
     } else {
-      const token = resolveDispatchGithubToken(process.env);
-      if (!token) {
+      // Global opaque reconcile path — never emit legacy issueKey/status payloads.
+      try {
+        const opaque = await createReconcileJobAndDispatch({
+          issueKey,
+          phase: route.phase,
+          workflowStateRevision: route.workflowStateRevision ?? null,
+          linearStatus: issue.status,
+          detail: pmFeedbackCommentId ?? mergePrUrl ?? null,
+        });
+        if (!opaque.requestId?.trim()) {
+          return {
+            issueKey,
+            linearStatus: issue.status,
+            phase: route.phase,
+            action: "blocker",
+            reason: "opaque_dispatch_missing_request_id",
+            shouldRun: true,
+            dispatched: false,
+            pendingRecorded,
+            incompleteSideEffectIdentities: incompleteSideEffects,
+            workflowStateRevision: route.workflowStateRevision ?? null,
+            pmFeedbackCommentId,
+            mergePrUrl,
+          };
+        }
+        dispatched = opaque.dispatched || opaque.duplicate;
+        reason = opaque.duplicate
+          ? "reconcile_request_already_present"
+          : "eligible_opaque_dispatch";
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         return {
           issueKey,
           linearStatus: issue.status,
           phase: route.phase,
           action: "blocker",
-          reason: "missing_dispatch_token",
+          reason: message.includes("missing_dispatch_token")
+            ? "missing_dispatch_token"
+            : message.includes("missing_state_token")
+              ? "missing_state_token"
+              : `opaque_dispatch_failed:${message.slice(0, 80)}`,
           shouldRun: true,
           dispatched: false,
           pendingRecorded,
@@ -519,31 +754,6 @@ export async function evaluateWorkflowReconcileIssue(input: {
           mergePrUrl,
         };
       }
-
-      await dispatchRepositoryEvent({
-        token,
-        repository: getDispatchRepository(),
-        eventType: getDispatchEventType(),
-        clientPayload: {
-          issueKey,
-          issueId: issue.id,
-          issueUrl: issue.url,
-          action: "update",
-          statusName: issue.status,
-          previousStatusName: null,
-          linearDeliveryId: null,
-          linearWebhookId: null,
-          receivedAt: new Date().toISOString(),
-          meta: {
-            triggerKind: "issue_status",
-            reconcile: "workflow",
-            phase: route.phase,
-            pmFeedbackCommentId: pmFeedbackCommentId ?? undefined,
-            prUrl: mergePrUrl ?? undefined,
-          },
-        },
-      });
-      dispatched = true;
     }
   }
 
@@ -560,6 +770,11 @@ export async function evaluateWorkflowReconcileIssue(input: {
     workflowStateRevision: route.workflowStateRevision ?? null,
     pmFeedbackCommentId,
     mergePrUrl,
+    planReviewSubjectIdentity:
+      planReviewSubjectIdentityOut ??
+      authoritativeState?.planReviewSubjectIdentity ??
+      null,
+    planReviewRequestId: planReviewRequestIdOut,
   };
 }
 
@@ -593,11 +808,27 @@ export async function runWorkflowReconcile(input: {
     );
   }
 
+  const statusesScanned = resolveWorkflowReconcileStatusNames(input.config);
+  const opaqueDispatches = results.filter((r) => r.dispatched).length;
+  if (!input.dryRun) {
+    try {
+      await writeReconcileHeartbeat({
+        heartbeat: buildReconcileHeartbeat({
+          candidatesFound: candidates.length,
+          opaqueDispatches,
+          statusesScanned,
+        }),
+      });
+    } catch {
+      // Heartbeat persistence must not fail the reconcile scan.
+    }
+  }
+
   return {
     dryRun: Boolean(input.dryRun),
     dispatchRequested: Boolean(input.dispatch),
     teamsScanned: resolveAuthoritativeLinearTeamIds(input.config),
-    statusesScanned: resolveWorkflowReconcileStatusNames(input.config),
+    statusesScanned,
     candidatesFound: candidates.length,
     results,
   };

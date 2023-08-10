@@ -78,12 +78,15 @@ describe("runDoctor", () => {
     delete process.env.LINEAR_API_KEY;
     delete process.env.CURSOR_API_KEY;
     delete process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_DISPATCH_TOKEN;
+    delete process.env.HARNESS_GITHUB_TOKEN;
     vi.clearAllMocks();
     await rm(tempRoot, { recursive: true, force: true });
   });
 
   it("fails when GITHUB_TOKEN is missing", async () => {
     delete process.env.GITHUB_TOKEN;
+    delete process.env.HARNESS_GITHUB_TOKEN;
     const code = await runDoctor({ configPath });
     expect(code).toBe(EXIT_CONFIG);
   });
@@ -91,12 +94,14 @@ describe("runDoctor", () => {
   it("passes merge profile without CURSOR_API_KEY", async () => {
     delete process.env.CURSOR_API_KEY;
     process.env.GITHUB_TOKEN = "test-github";
+    process.env.HARNESS_GITHUB_TOKEN = "test-dispatch";
     const code = await runDoctor({ configPath, profile: "merge" });
     expect(code).toBe(EXIT_SUCCESS);
   });
 
   it("passes when required tokens are valid", async () => {
     process.env.GITHUB_TOKEN = "test-github";
+    process.env.HARNESS_GITHUB_TOKEN = "test-dispatch";
     const code = await runDoctor({ configPath });
     expect(code).toBe(EXIT_SUCCESS);
     expect(mocks.pingGitHub).toHaveBeenCalledWith("test-github");
@@ -112,6 +117,7 @@ describe("runDoctor", () => {
         }) as never,
     );
     process.env.GITHUB_TOKEN = "test-github";
+    process.env.HARNESS_GITHUB_TOKEN = "test-dispatch";
 
     const code = await runDoctor({ configPath, profile: "merge" });
 

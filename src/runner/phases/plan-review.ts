@@ -28,6 +28,7 @@ import { formatPlanReviewComment } from "../../linear/plan-review-comment.js";
 import {
   createPlanReviewAgent,
   disposeAgent,
+  resumePlanReviewAgent,
   sendAndObserve,
 } from "../../agents/index.js";
 import { manifestModelEvidence } from "../../cursor/model.js";
@@ -446,12 +447,55 @@ export async function executePlanReviewPhase(
       }),
     );
 
-    const agent = await createPlanReviewAgent({
-      apiKey: cursorApiKey,
-      config,
-      targetRepo: resolved.targetRepo,
-      baseBranch: resolved.baseBranch,
-    });
+    const reviewCycleForSubject = state.cycleCounters.plan_review_cycles ?? 0;
+    const { buildPlanReviewSubjectIdentity } = await import(
+      "../../workflow/subject-identities.js"
+    );
+    const planReviewSubjectIdentity =
+      state.planReviewSubjectIdentity ??
+      buildPlanReviewSubjectIdentity({
+        issueKey: options.issueKey,
+        planGenerationId: latestPlan.planGenerationId,
+        planHash: latestPlan.planArtifactHash,
+        reviewCycle: reviewCycleForSubject,
+      });
+
+    // Reuse an existing reviewer agent when durable state already has one.
+    let agent;
+    if (state.planReviewerAgentId) {
+      try {
+        agent = await resumePlanReviewAgent({
+          apiKey: cursorApiKey,
+          agentId: state.planReviewerAgentId,
+          config,
+        });
+        await events.log("plan_review_agent_reused", "info", {
+          planReviewerAgentId: state.planReviewerAgentId,
+          planReviewSubjectIdentity,
+        });
+      } catch (resumeError) {
+        await events.log("plan_review_agent_resume_failed", "warn", {
+          planReviewerAgentId: state.planReviewerAgentId,
+          message:
+            resumeError instanceof Error
+              ? resumeError.message
+              : String(resumeError),
+        });
+        agent = await createPlanReviewAgent({
+          apiKey: cursorApiKey,
+          config,
+          targetRepo: resolved.targetRepo,
+          baseBranch: resolved.baseBranch,
+        });
+      }
+    } else {
+      agent = await createPlanReviewAgent({
+        apiKey: cursorApiKey,
+        config,
+        targetRepo: resolved.targetRepo,
+        baseBranch: resolved.baseBranch,
+      });
+    }
 
     try {
       const timeoutMs =
@@ -487,6 +531,31 @@ export async function executePlanReviewPhase(
 
       cursorAgentId = observed.agentId;
       cursorRunId = observed.runId;
+
+      // Persist agent/run ids separately from dispatch subject (crash recovery).
+      if (cursorAgentId || cursorRunId) {
+        const withAgent = {
+          ...state,
+          planReviewSubjectIdentity,
+          planReviewerAgentId: cursorAgentId ?? state.planReviewerAgentId,
+          planReviewerRunId: cursorRunId ?? state.planReviewerRunId,
+          stateRevision: state.stateRevision + 1,
+        };
+        const casOk = await store.compareAndSet({
+          issueKey: options.issueKey,
+          expectedRevision: state.stateRevision,
+          next: withAgent,
+        });
+        if (casOk) {
+          state = withAgent;
+        }
+        await events.log("plan_review_agent_persisted", "info", {
+          planReviewSubjectIdentity,
+          planReviewerAgentId: cursorAgentId,
+          planReviewerRunId: cursorRunId,
+          casOk,
+        });
+      }
       await mkdir(path.join(runDirectory, "outputs"), { recursive: true });
       const resultPath = getPlanReviewResultPath(runDirectory);
       await writeFile(resultPath, `${observed.assistantText}\n`, "utf8");
