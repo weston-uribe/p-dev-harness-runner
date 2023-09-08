@@ -215,6 +215,66 @@ describe("workflow reconcile plan review recovery", () => {
     expect(mocks.ensurePlanReviewJobDispatched).not.toHaveBeenCalled();
   });
 
+  it("recovers when route already marks Plan Review eligible (live FRE-6 shape)", async () => {
+    // Production resolveRoute returns shouldRun=true for Plan Review — recovery
+    // must still compute subject/request ids and opaque-dispatch, not fall through
+    // to plan_review_requires_subject_dispatch.
+    mocks.resolveRoute.mockResolvedValue({
+      issueKey: "FRE-6",
+      phase: "plan_review",
+      shouldRun: true,
+      repoConfigId: "portfolio",
+      baseBranch: "dev",
+      targetRepo: "https://github.com/weston-uribe/weston-uribe-portfolio",
+      linearStatus: "Plan Review",
+      mergeConcurrencyGroup: "portfolio-dev",
+      workflowStateRevision: 1,
+      reconcileReason: "eligible",
+    });
+    mocks.ensurePlanReviewJobDispatched.mockResolvedValue({
+      outcome: "dispatched",
+      reviewRequestId,
+      state: {
+        ...(await store.load("FRE-6"))!,
+        planReviewSubjectIdentity: subjectIdentity,
+        sideEffects: [
+          {
+            identity: effectId,
+            kind: "plan_review_dispatch",
+            status: "dispatched",
+            createdAt: new Date().toISOString(),
+            reviewRequestId,
+          },
+        ],
+      },
+      httpDispatched: true,
+    });
+
+    const dry = await evaluateWorkflowReconcileIssue({
+      config,
+      configPath: "/tmp/harness.config.json",
+      issueKey: "FRE-6",
+      linearApiKey: "lin",
+      dryRun: true,
+      dispatch: true,
+    });
+    expect(dry.reason).toBe("plan_review_subject_missing_active_or_completed");
+    expect(dry.planReviewSubjectIdentity).toBe(subjectIdentity);
+    expect(dry.planReviewRequestId).toBe(reviewRequestId);
+
+    const live = await evaluateWorkflowReconcileIssue({
+      config,
+      configPath: "/tmp/harness.config.json",
+      issueKey: "FRE-6",
+      linearApiKey: "lin",
+      dispatch: true,
+    });
+    expect(live.dispatched).toBe(true);
+    expect(live.reason).toBe("plan_review_subject_missing_active_or_completed");
+    expect(mocks.ensurePlanReviewJobDispatched).toHaveBeenCalledTimes(1);
+    expect(mocks.createReconcileJobAndDispatch).not.toHaveBeenCalled();
+  });
+
   it("recovers missing webhook via subject dispatch", async () => {
     mocks.ensurePlanReviewJobDispatched.mockResolvedValue({
       outcome: "dispatched",
@@ -271,6 +331,18 @@ describe("workflow reconcile plan review recovery", () => {
   });
 
   it("second reconcile after recovery is effect-level no-op", async () => {
+    mocks.resolveRoute.mockResolvedValue({
+      issueKey: "FRE-6",
+      phase: "plan_review",
+      shouldRun: true,
+      repoConfigId: "portfolio",
+      baseBranch: "dev",
+      targetRepo: "https://github.com/weston-uribe/weston-uribe-portfolio",
+      linearStatus: "Plan Review",
+      mergeConcurrencyGroup: "portfolio-dev",
+      workflowStateRevision: 3,
+      reconcileReason: "eligible",
+    });
     const recovered = {
       ...(await store.load("FRE-6"))!,
       stateRevision: 3,
@@ -298,6 +370,8 @@ describe("workflow reconcile plan review recovery", () => {
     });
 
     expect(result.action).toBe("noop");
+    expect(result.reason).toBe("plan_review_reviewer_already_present");
+    expect(result.planReviewSubjectIdentity).toBe(subjectIdentity);
     expect(mocks.ensurePlanReviewJobDispatched).not.toHaveBeenCalled();
   });
 
