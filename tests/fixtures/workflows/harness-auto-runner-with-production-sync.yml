@@ -577,8 +577,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
-      group: harness-production-sync-${{ github.event.client_payload.repo || github.event.inputs.sync_repo }}
-      cancel-in-progress: true
+      group: harness-production-sync
+      cancel-in-progress: false
 
     env:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
@@ -697,10 +697,16 @@ jobs:
           SOURCE_REPO: ${{ steps.sync.outputs.source_repo }}
           PRODUCTION_BRANCH: ${{ steps.sync.outputs.production_branch }}
           REF: ${{ steps.sync.outputs.ref }}
+          AFTER: ${{ steps.sync.outputs.after }}
+          TRIGGER: ${{ steps.sync.outputs.trigger }}
           SYNC_DRY_RUN: ${{ steps.sync.outputs.dry_run }}
         run: |
           set +e
-          SYNC_ARGS=(--repo "$REPO_ID" --json)
+          SYNC_ARGS=(
+            --repo "$REPO_ID"
+            --json-out sync-production-raw.json
+            --trigger "$TRIGGER"
+          )
           if [ -n "$SOURCE_REPO" ]; then
             SYNC_ARGS+=(--source-repo "$SOURCE_REPO")
           fi
@@ -710,14 +716,26 @@ jobs:
           if [ -n "$REF" ]; then
             SYNC_ARGS+=(--ref "$REF")
           fi
+          if [ -n "$AFTER" ]; then
+            SYNC_ARGS+=(--after "$AFTER")
+          fi
           if [ "$SYNC_DRY_RUN" = "true" ]; then
             SYNC_ARGS+=(--dry-run)
           fi
-          npm run harness:sync-production -- "${SYNC_ARGS[@]}" 2>&1 \
-            | tee sync-raw-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          npm run harness:redact-output < sync-raw-output.txt > sync-production-output.json
-          rm -f sync-raw-output.txt
+          # Write machine JSON only via --json-out (stderr diagnostics stay out of the file).
+          npx tsx src/index.ts sync-production "${SYNC_ARGS[@]}"
+          EXIT_CODE=$?
+          if [ ! -f sync-production-raw.json ]; then
+            echo "invalid_machine_output: missing sync-production-raw.json"
+            exit 1
+          fi
+          npx tsx src/index.ts redact-json-file \
+            --in sync-production-raw.json \
+            --out sync-production-output.json
+          PARSE_EXIT=$?
+          if [ "$PARSE_EXIT" -ne 0 ]; then
+            exit "$PARSE_EXIT"
+          fi
           echo "Redacted sync output written to sync-production-output.json"
           echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
           exit $EXIT_CODE

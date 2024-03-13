@@ -1,81 +1,71 @@
 # Issue intake
 
-How to turn a fuzzy product idea into a harness-compatible Linear issue before planning or implementation runs.
+Issue intake is an **external, operator-invoked ChatGPT workflow**. It is not part of the harness runtime.
 
-## When to use
+A human copies the canonical skill into a normal ChatGPT conversation. That conversation investigates the request, scopes PR-sized work, and creates Linear issues. The harness begins only after those issues exist and a human moves each issue from **Backlog** to **Ready for Planning** or **Ready for Build**.
 
-- Starting new harness work from an unstructured idea
-- Drafting a Linear issue description
-- Checking whether an issue is ready for **Ready for Planning** or **Ready for Build**
+```text
+Standalone ChatGPT intake agent
+  → creates complete Linear issue(s) (default status: Backlog)
+  → human moves each issue to Ready for Planning or Ready for Build
+  → existing harness processes the issue using its Linear contract
+```
 
-## Paths
+The harness does **not** execute, test, or observe the intake conversation.
 
-### ChatGPT copy-paste prompt (primary PM UX)
+## Canonical skill
 
-Product managers draft issues in a **normal ChatGPT thread**—no Custom GPT required:
+Copy the **entire** file into a new ChatGPT conversation:
 
-1. Open [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatgpt.md)
-2. Copy the **entire file** into a new ChatGPT conversation
-3. Answer the upfront intake form (**Linear project first**; target repo optional when project metadata includes `Harness metadata: Target repo: ...`)
-4. Review the **proposed Linear issue** (title, status, labels, description)
-5. Approve creation; ChatGPT creates the issue if Linear access is available in that thread, otherwise create it manually in Linear
-6. Set the **status** and **labels** on the issue per the recommendation (not in the description)
-7. Operator optionally validates the live issue with CLI (below)
+[`.agents/skills/issue-intake/SKILL.md`](../.agents/skills/issue-intake/SKILL.md)
 
-### Cursor skill + CLI (operator path)
+That file is the single behavioral source of truth. It is fully standalone when pasted alone. Illustrative examples (non-authoritative) live at [`.agents/skills/issue-intake/examples.md`](../.agents/skills/issue-intake/examples.md).
 
-1. Invoke the **issue-intake** skill in Cursor ([`.agents/skills/issue-intake/SKILL.md`](../.agents/skills/issue-intake/SKILL.md))
-2. Answer the upfront intake form (same fields as the ChatGPT prompt, including structured validation expectations)
-3. Save the description to a draft markdown file
-4. Validate with route-specific flags:
+Compatibility pointers (no independent behavioral contract):
+
+- [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatgpt.md)
+- [`gpt/issue-intake/README.md`](../gpt/issue-intake/README.md) (Custom GPT path deprecated)
+- [`skills/issue-intake/README.md`](../skills/issue-intake/README.md)
+
+## Operating model (summary)
+
+- Investigate with connected tools before asking discoverable factual questions.
+- Default to review-first issue creation; auto-create only when explicitly preauthorized.
+- Default new issues to **Backlog** unless the user explicitly chooses another status.
+- Planning is optional; the user selects planning or build-direct via Linear status later.
+- One Linear issue → exactly one target repository → one coherent PR-sized outcome.
+- No parent/child coordination issues; no research-spike / exploratory Linear issues.
+- Preserve the uninitialized-product foundation guard: do not place uninitialized feature work in Ready for Build.
+
+## After issues exist: validate-issue CLI
+
+`harness:validate-issue` validates the **resulting Linear issue contract** (parser sections, target repo, structural readiness). It does **not** evaluate how the ChatGPT intake agent reasoned or asked questions.
 
 ```bash
-# Recommended Ready for Planning
+# Structural check for planning-oriented readiness
 npm run harness:validate-issue -- --file draft.md --intended-phase planning
 
-# Recommended Ready for Build (structural readiness; narrow heuristics are advisory only)
+# Structural check for Ready for Build eligibility (narrow heuristics are advisory only)
 npm run harness:validate-issue -- --file draft.md --intended-phase implementation
 
 # General check (both routes reported; exit 0 if planning-valid)
 npm run harness:validate-issue -- --file draft.md
-```
 
-5. Paste the description into Linear and set the **status** field per the recommendation (not in the description)
-6. Re-validate after paste:
-
-```bash
-npm run harness:validate-issue -- --issue TEAM-XX --intended-phase planning
-# or
+# Live Linear issue (read-only)
 npm run harness:validate-issue -- --issue TEAM-XX --intended-phase implementation
 ```
 
-## Deferred: Custom GPT package
-
-A Custom GPT setup package exists at [`gpt/issue-intake/`](../gpt/issue-intake/) for future productization (OAuth, uploaded knowledge, dedicated GPT). **It is not the current operating path.** See [`gpt/issue-intake/setup-guide.md`](../gpt/issue-intake/setup-guide.md).
-
 ## Plan-first vs build-direct
 
-| Route | Linear status | When to recommend |
-|-------|---------------|-------------------|
-| Plan first | Ready for Planning | Broad, ambiguous, cross-cutting, high-risk, or >7 AC / task >240 chars |
-| Build direct | Ready for Build | Narrow, low-risk work — or whenever the PM chooses to skip planning |
-| Not ready | Backlog | Open questions remain |
+| Route | Linear status | Who chooses |
+|-------|---------------|-------------|
+| Plan first | Ready for Planning | Human, after intake creates the issue (usually from Backlog) |
+| Build direct | Ready for Build | Human; status-authoritative — no planning comment required |
+| Default after intake | Backlog | Intake default unless user explicitly approved another status |
 
-**Routing is the Linear status field.** **Ready for Build** is status-authoritative: the harness executes implementation without requiring a planning comment. Labels (`requires-plan`, `skip-plan`) are operational hints only — the runner does not enforce them.
+**Routing is the Linear status field.** Labels (`requires-plan`, `skip-plan`) are operational hints only — the runner does not enforce them.
 
-Narrow-size thresholds remain **advisory intake guidance**. They do not fail `--intended-phase implementation` and do not block the runner. Uninitialized-product foundation still blocks Ready for Build until foundation planning completes.
-
-## Narrow-issue thresholds (advisory)
-
-Recommend planning first when:
-
-- Task > 240 characters
-- Acceptance criteria > 7 hyphen bullets
-- Scope is broad, ambiguous, or high-risk
-
-Constants: [`src/validate/constants.ts`](../src/validate/constants.ts)
-
-Full contract: [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatgpt.md) (canonical) or [`gpt/issue-intake/knowledge.md`](../gpt/issue-intake/knowledge.md) (deferred GPT reference)
+Historical narrow-size thresholds (task length, acceptance-criteria count) are **advisory only**. They do not fail `--intended-phase implementation` and do not block the runner. Uninitialized-product foundation still blocks Ready for Build until foundation planning completes.
 
 ## File vs Linear validation
 
@@ -84,7 +74,7 @@ Full contract: [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatg
 | `--file` | Not required for Ready for Build eligibility |
 | `--issue` | Optional — a durable planning comment is supplemental context if present |
 
-If the PM selects **Ready for Build**, validate structural readiness (`--intended-phase implementation`); do not treat missing planning markers as a hard failure.
+If the operator selects **Ready for Build**, validate structural readiness (`--intended-phase implementation`); do not treat missing planning markers as a hard failure.
 
 ## Parser contract
 
@@ -92,7 +82,7 @@ Authoritative parser: [`src/linear/parser.ts`](../src/linear/parser.ts)
 
 Template: [`templates/linear-issue.md`](../templates/linear-issue.md)
 
-**Project-first intake:** assign the issue to a Linear project mapped in [`harness.config.json`](../harness.config.json) `repos[].linearProjects`. The runner resolves target repo from project when `## Target repo` is absent.
+Assign the issue to a Linear project mapped in [`harness.config.json`](../harness.config.json) `repos[].linearProjects`. The runner resolves target repo from project when `## Target repo` is absent.
 
 | Linear project (WES) | Resolved target repo |
 |----------------------|----------------------|
@@ -109,34 +99,21 @@ Product initialization: uninitialized
 
 For PDev-created products, Linear project metadata is written during workspace setup and updated to `initialized` after the approved foundation PR merges to the development branch.
 
-### ChatGPT vs Cursor inspection
-
-| Path | Product initialization signal |
-|------|------------------------------|
-| **ChatGPT intake** | Reads `Harness metadata:` from the Linear project description (or asks the PM) |
-| **Cursor issue-intake skill** | May inspect the target repo marker on the **development branch** (`dev` by default) via GitHub |
-
-Neither path should assume application deployment is configured from `.p-dev/product.json`. Runtime preview/deployment capability comes from harness `repos[].previewProvider` only.
+Intake reads `Harness metadata:` (and related workspace evidence) itself. Do not assume application deployment is configured from `.p-dev/product.json`. Runtime preview/deployment capability comes from harness `repos[].previewProvider` only.
 
 Required description sections (intake authoring contract):
 
-- `## Target repo` (include when known — derived from project metadata or PM override)
+- `## Target repo` (include when known — derived from project metadata or override)
 - `## Task`
 - `## Acceptance criteria` (≥1 `-` bullet; product outcomes)
 - `## Out of scope` (≥1 `-` bullet)
 - `## Validation expectations` — required for new intake packages; structure as Automated checks, Behavioral acceptance verification (or `Planner must determine the representative runtime verification method.`), Regression checks, and Required evidence
 
-The Linear description parser still treats `## Validation expectations` as optional for legacy issues. New intake must always include structured proof expectations. Intake defines what proof will be required later; it does not claim tests already passed. Do not invent technical commands during intake.
-
-## Skill installation
-
-The canonical skill lives at [`.agents/skills/issue-intake/`](../.agents/skills/issue-intake/). To use it as a Cursor project skill, symlink or copy to `.cursor/skills/issue-intake/` in this repo or your user skills directory. The `.cursor/skills` path is a Cursor adapter location, not the canonical source.
-
-The legacy [`skills/issue-intake/`](../skills/issue-intake/) path is a compatibility pointer only.
+The Linear description parser still treats `## Validation expectations` as optional for legacy issues. New intake must always include structured proof expectations. Intake defines what proof will be required later; it does not claim tests already passed.
 
 ## Related
 
-- Canonical ChatGPT prompt: [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatgpt.md)
-- Deferred Custom GPT package: [`gpt/issue-intake/`](../gpt/issue-intake/)
+- Canonical skill: [`.agents/skills/issue-intake/SKILL.md`](../.agents/skills/issue-intake/SKILL.md)
+- Compatibility pointers: [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatgpt.md), [`gpt/issue-intake/README.md`](../gpt/issue-intake/README.md)
 - Milestone doc: [`docs/milestones/m7-issue-intake.md`](milestones/m7-issue-intake.md)
 - State machine: [`docs/architecture/linear-automation-state-machine.md`](architecture/linear-automation-state-machine.md)

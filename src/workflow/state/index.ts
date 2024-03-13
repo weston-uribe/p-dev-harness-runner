@@ -57,6 +57,15 @@ export {
 } from "./production-completion.js";
 
 export {
+  DurableStateCasExhaustedError,
+  DurableStateUnavailableError,
+  ProductionCompletionIdentityMismatchError,
+  applyProductionCompletionMutation,
+  mutateProductionCompletionCas,
+  type ProductionCompletionMutation,
+} from "./production-completion-cas.js";
+
+export {
   DEFAULT_WORKFLOW_STATE_MAX_RETRIES,
   decideConflictRetry,
   type RetryDecision,

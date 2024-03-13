@@ -133,6 +133,11 @@ export interface EvaluationRuntime {
   readonly namespace: string;
   startPhaseTrace(input: StartPhaseTraceInput): Promise<PhaseTraceHandle | null>;
   recordScore(input: EvaluationScoreInput): void;
+  /**
+   * Production-effect path: create score and await flush.
+   * Throws on create/flush failure. Idempotent retries use the same score id.
+   */
+  recordAcknowledgedScore(input: EvaluationScoreInput): Promise<void>;
   flushAndShutdown(): Promise<void>;
 }
 

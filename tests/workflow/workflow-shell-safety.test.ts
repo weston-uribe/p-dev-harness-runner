@@ -88,7 +88,9 @@ describe("workflow shell safety", () => {
       const workflow = readFileSync(workflowPath, "utf8");
       expect(
         workflow.includes("--json-out harness-run-output.json") ||
-          workflow.includes("harness:redact-output"),
+          workflow.includes("--json-out sync-production-raw.json") ||
+          workflow.includes("harness:redact-output") ||
+          workflow.includes("redact-json-file"),
       ).toBe(true);
     });
   }

@@ -22,6 +22,7 @@ import { runWorkflowStatusReportCommand } from "./commands/workflow-status-repor
 import { runWorkflowStatusMigrateCommand } from "./commands/workflow-status-migrate.js";
 import { runValidationRunCommand } from "./commands/validation-run.js";
 import { runRedactOutputCommand } from "./commands/redact-output.js";
+import { runRedactJsonFileCommand } from "./commands/redact-json-file.js";
 import { runDiagnoseVercelBridgeCommand } from "./commands/diagnose-vercel-bridge.js";
 import { runOperatorInit } from "./commands/operator-init.js";
 import { runCanaryRunnerConfigCommand } from "./commands/canary-runner-config.js";
@@ -250,6 +251,12 @@ export function createProgram(): Command {
     .option("--dry-run", "Inspect without Linear writes", false)
     .option("--force", "Re-run even when markers exist", false)
     .option("--json", "Print sync summary JSON to stdout", false)
+    .option(
+      "--json-out <path>",
+      "Write sync summary JSON to a file (diagnostics stay on stderr)",
+    )
+    .option("--trigger <name>", "Trigger metadata for machine output")
+    .option("--after <sha>", "Dispatched production after SHA for machine output")
     .action(async (opts) => {
       const configPath = program.opts<{ config: string }>().config;
       const exitCode = await runSyncProductionCommand({
@@ -259,9 +266,12 @@ export function createProgram(): Command {
         sourceRepo: opts.sourceRepo,
         productionBranch: opts.productionBranch,
         ref: opts.ref,
+        after: opts.after,
+        trigger: opts.trigger,
         dryRun: opts.dryRun,
         force: opts.force,
         json: opts.json,
+        jsonOut: opts.jsonOut,
       });
       process.exitCode = exitCode;
     });
@@ -352,6 +362,21 @@ export function createProgram(): Command {
     .description("Read stdin and write redacted JSON or text to stdout")
     .action(async () => {
       const exitCode = await runRedactOutputCommand();
+      process.exitCode = exitCode;
+    });
+
+  program
+    .command("redact-json-file")
+    .description(
+      "Parse a JSON file, redact secrets, write output, and re-parse to validate",
+    )
+    .requiredOption("--in <path>", "Input JSON file path")
+    .requiredOption("--out <path>", "Output redacted JSON file path")
+    .action(async (opts) => {
+      const exitCode = await runRedactJsonFileCommand({
+        inputPath: opts.in,
+        outputPath: opts.out,
+      });
       process.exitCode = exitCode;
     });
 

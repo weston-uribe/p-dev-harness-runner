@@ -7,7 +7,6 @@ import {
   findLatestPhaseStartRunId,
   hasHandoffCompletionMarker,
   hasPlanningCompletionMarker,
-  findProductionSyncMarkerForMergeCommit,
 } from "../linear/comments.js";
 import { parseHarnessMarkers } from "../linear/markers.js";
 import type { GitHubClient } from "../github/client.js";
@@ -26,6 +25,11 @@ import {
   NARROW_TASK_MAX_LENGTH,
 } from "../validate/constants.js";
 import { isImplementationStartStale } from "./building-recovery.js";
+import {
+  isProductionEffectCompleted,
+  type ProductionCompletionRecord,
+  type ProductionEffectKind,
+} from "../workflow/state/production-completion.js";
 
 export interface IdempotencyResult {
   skip: boolean;
@@ -486,45 +490,97 @@ export function assertMergeEligibleStatus(
   );
 }
 
+/** Effects required for a durable production-sync completion no-op. */
+export const REQUIRED_PRODUCTION_SYNC_EFFECTS: ProductionEffectKind[] = [
+  "linear_production_comment",
+  "linear_status_transition",
+  "langfuse_promoted_to_main",
+  "langfuse_production_deployment_started",
+  "langfuse_production_deployment_ready",
+  "langfuse_production_verified",
+  "langfuse_delivery_outcome",
+];
+
+export function isProductionSyncDurableComplete(
+  completion: ProductionCompletionRecord | null | undefined,
+): boolean {
+  if (!completion || completion.state !== "completed") {
+    return false;
+  }
+  return REQUIRED_PRODUCTION_SYNC_EFFECTS.every((kind) =>
+    isProductionEffectCompleted(completion, kind),
+  );
+}
+
+export type ProductionSyncGateDecision =
+  | { action: "noop"; reason: string }
+  | { action: "continue"; reason?: string }
+  | { action: "fail"; reason: string; classification: "wrong_status" };
+
+/**
+ * Effect-level gate after durable state is loaded.
+ * Markers alone never produce a skip; unexpected status fails with wrong_status.
+ */
+export function decideProductionSyncGate(input: {
+  issueStatus: string | null | undefined;
+  productionSuccessStatus: string;
+  integrationSuccessStatus: string;
+  completion: ProductionCompletionRecord | null | undefined;
+  force?: boolean;
+}): ProductionSyncGateDecision {
+  const status = input.issueStatus?.toLowerCase() ?? "";
+  const productionSuccess = input.productionSuccessStatus.toLowerCase();
+  const integrationSuccess = input.integrationSuccessStatus.toLowerCase();
+
+  if (input.force) {
+    return { action: "continue", reason: "force" };
+  }
+
+  if (
+    status === productionSuccess &&
+    isProductionSyncDurableComplete(input.completion)
+  ) {
+    return {
+      action: "noop",
+      reason: `duplicate_phase_completed: issue already ${input.issueStatus} with durable completion`,
+    };
+  }
+
+  if (status === productionSuccess || status === integrationSuccess) {
+    return { action: "continue" };
+  }
+
+  return {
+    action: "fail",
+    classification: "wrong_status",
+    reason: `wrong_status: issue is "${input.issueStatus}"; expected ${input.integrationSuccessStatus} or ${input.productionSuccessStatus}`,
+  };
+}
+
+/**
+ * @deprecated Prefer decideProductionSyncGate after loading durable state.
+ * Retained for call-site migration; never skips on marker presence alone.
+ */
 export function checkProductionSyncIdempotency(
-  config: HarnessConfig,
+  _config: HarnessConfig,
   issue: LinearIssueSnapshot,
-  comments: LinearCommentRecord[],
-  mergeCommitSha: string | null,
+  _comments: LinearCommentRecord[],
+  _mergeCommitSha: string | null,
   productionSuccessStatus: string,
   integrationSuccessStatus: string,
+  completion?: ProductionCompletionRecord | null,
 ): IdempotencyResult {
-  const orchestratorMarker = config.orchestratorMarker;
-  const status = issue.status?.toLowerCase() ?? "";
-
-  if (status === productionSuccessStatus.toLowerCase()) {
-    return {
-      skip: true,
-      reason: `duplicate_phase_completed: issue already ${issue.status}`,
-    };
+  const decision = decideProductionSyncGate({
+    issueStatus: issue.status,
+    productionSuccessStatus,
+    integrationSuccessStatus,
+    completion,
+  });
+  if (decision.action === "noop") {
+    return { skip: true, reason: decision.reason };
   }
-
-  if (mergeCommitSha) {
-    const hasSyncMarker = findProductionSyncMarkerForMergeCommit(
-      comments,
-      orchestratorMarker,
-      mergeCommitSha,
-    );
-    if (hasSyncMarker) {
-      return {
-        skip: true,
-        reason:
-          "duplicate_phase_completed: production sync marker already exists for merge commit",
-      };
-    }
+  if (decision.action === "fail") {
+    return { skip: true, reason: decision.reason };
   }
-
-  if (status !== integrationSuccessStatus.toLowerCase()) {
-    return {
-      skip: true,
-      reason: `wrong_status: issue is "${issue.status}"; expected ${integrationSuccessStatus}`,
-    };
-  }
-
   return { skip: false };
 }

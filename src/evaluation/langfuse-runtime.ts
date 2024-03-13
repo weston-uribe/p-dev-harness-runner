@@ -136,6 +136,31 @@ function mapScoreValueForLangfuse(
   return value;
 }
 
+function buildLangfuseScorePayload(
+  input: EvaluationScoreInput,
+): Record<string, unknown> {
+  const scoreClass = input.scoreClass ?? "operational";
+  const defaultComment =
+    scoreClass === "cursor_usage_import"
+      ? "cursor_usage_import scoreClass=cursor_usage_import"
+      : "operational scoreClass=operational";
+  const payload: Record<string, unknown> = {
+    id: input.id,
+    name: input.name,
+    dataType: input.dataType,
+    value: mapScoreValueForLangfuse(input.dataType, input.value),
+    timestamp: input.timestamp,
+    comment: input.comment ?? defaultComment,
+  };
+  if (input.target === "trace" && input.traceId) {
+    payload.traceId = input.traceId;
+  }
+  if (input.target === "session" && input.sessionId) {
+    payload.sessionId = input.sessionId;
+  }
+  return payload;
+}
+
 async function loadLangfuseModules(): Promise<LangfuseModules> {
   const [tracing, otel, sdkTraceNode] = await Promise.all([
     import("@langfuse/tracing"),
@@ -343,30 +368,42 @@ export async function createLangfuseRuntime(
     recordScore(input: EvaluationScoreInput): void {
       if (demoted || !scoreClient) return;
       try {
-        const scoreClass = input.scoreClass ?? "operational";
-        const defaultComment =
-          scoreClass === "cursor_usage_import"
-            ? "cursor_usage_import scoreClass=cursor_usage_import"
-            : "operational scoreClass=operational";
-        const payload: Record<string, unknown> = {
-          id: input.id,
-          name: input.name,
-          dataType: input.dataType,
-          value: mapScoreValueForLangfuse(input.dataType, input.value),
-          timestamp: input.timestamp,
-          comment: input.comment ?? defaultComment,
-        };
-        if (input.target === "trace" && input.traceId) {
-          payload.traceId = input.traceId;
-        }
-        if (input.target === "session" && input.sessionId) {
-          payload.sessionId = input.sessionId;
-        }
-        scoreClient.score.create(payload);
+        scoreClient.score.create(buildLangfuseScorePayload(input));
       } catch (error) {
         warnOnce(
           "score-create",
           `Failed to record evaluation score: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    },
+
+    async recordAcknowledgedScore(input: EvaluationScoreInput): Promise<void> {
+      if (demoted) {
+        throw new Error(
+          "langfuse_projection_failure: evaluation runtime demoted",
+        );
+      }
+      if (!scoreClient) {
+        throw new Error(
+          "langfuse_projection_failure: score client unavailable",
+        );
+      }
+      try {
+        scoreClient.score.create(buildLangfuseScorePayload(input));
+      } catch (error) {
+        throw new Error(
+          `langfuse_projection_failure: score create failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      try {
+        await scoreClient.score.flush();
+      } catch (error) {
+        throw new Error(
+          `langfuse_projection_failure: score flush failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

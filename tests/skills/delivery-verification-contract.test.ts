@@ -10,21 +10,6 @@ async function readRepoFile(relativePath: string): Promise<string> {
 }
 
 describe("delivery verification contract", () => {
-  it("requires intake behavioral verification expectations or planner-resolution placeholder", async () => {
-    const skill = await readRepoFile(".agents/skills/issue-intake/SKILL.md");
-    const prompt = await readRepoFile("prompts/issue-intake-chatgpt.md");
-
-    for (const text of [skill, prompt]) {
-      expect(text).toContain("Behavioral acceptance verification");
-      expect(text).toContain(
-        "Planner must determine the representative runtime verification method.",
-      );
-      expect(text).toContain("Required evidence");
-      expect(text).not.toMatch(/optional\s*[—-]\s*"none known"/i);
-      expect(text).not.toMatch(/"none known" is acceptable/i);
-    }
-  });
-
   it("requires planner Acceptance Verification Plan with behavioral steps and repair loop", async () => {
     const skill = await readRepoFile(".agents/skills/planner/SKILL.md");
     const planningPrompt = await readRepoFile("src/prompts/planning.md");
