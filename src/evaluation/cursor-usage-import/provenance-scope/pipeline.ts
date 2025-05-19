@@ -19,12 +19,24 @@ import type {
 import { mapAllHarnessOwnedTraces } from "./trace-map.js";
 import { buildProvenanceScopeManifest } from "./manifest.js";
 import { scanLateEvidence, type LateEvidenceScanInput } from "./late-evidence.js";
+import {
+  assertEpochNotInvalidatedBeforeStaging,
+  blockedReasonForInvalidatedRegistry,
+} from "./invalidation-guard.js";
+import {
+  buildSealedWindowSelectionManifest,
+  excludedOutsideSealedFingerprintsFromManifest,
+  type SealedWindowSelectionManifest,
+} from "./selection-manifest.js";
 
 export interface ProvenanceScopePipelineResult {
   registry: RegistryReadResult | null;
   ownership: SegmentOwnershipResult[];
   traceMappings: TraceMappingResult[];
   manifest: ProvenanceScopeManifest | null;
+  sealedWindowSelectionManifest: SealedWindowSelectionManifest | null;
+  sealedWindowSelectionDigest: string | null;
+  excludedOutsideSealedFingerprints: string[];
   worstOwnership: ReturnType<typeof worstOwnershipClassification>;
   dispositionDigest: string;
   sourceScopeBlockedReason: string | null;
@@ -44,12 +56,19 @@ export function runProvenanceScopePipeline(input: {
     manifest: input.dispositionManifest,
   });
 
+  const emptySelection = {
+    sealedWindowSelectionManifest: null as SealedWindowSelectionManifest | null,
+    sealedWindowSelectionDigest: null as string | null,
+    excludedOutsideSealedFingerprints: [] as string[],
+  };
+
   if (!disposition.ok) {
     return {
       registry: input.registry,
       ownership: [],
       traceMappings: [],
       manifest: null,
+      ...emptySelection,
       worstOwnership: "registry_integrity_failure",
       dispositionDigest,
       sourceScopeBlockedReason: disposition.code,
@@ -63,6 +82,7 @@ export function runProvenanceScopePipeline(input: {
       ownership: [],
       traceMappings: [],
       manifest: null,
+      ...emptySelection,
       worstOwnership: "coverage_incomplete",
       dispositionDigest,
       sourceScopeBlockedReason: null,
@@ -71,22 +91,74 @@ export function runProvenanceScopePipeline(input: {
   }
 
   if (!input.registry.integrityOk) {
+    const invalidationReason = blockedReasonForInvalidatedRegistry(input.registry);
     return {
       registry: input.registry,
       ownership: [],
       traceMappings: [],
       manifest: null,
+      ...emptySelection,
       worstOwnership: "registry_integrity_failure",
       dispositionDigest,
       sourceScopeBlockedReason:
-        input.registry.integrityFailures[0]?.code ?? "registry_integrity_failure",
+        invalidationReason ??
+        input.registry.integrityFailures[0]?.code ??
+        "registry_integrity_failure",
+      registryIntegrityFailure: true,
+    };
+  }
+
+  const stagingGuard = assertEpochNotInvalidatedBeforeStaging({
+    epochId: input.registry.activationEpochId,
+    invalidation: input.registry.epochInvalidation,
+  });
+  if (stagingGuard.blocked) {
+    return {
+      registry: input.registry,
+      ownership: [],
+      traceMappings: [],
+      manifest: null,
+      ...emptySelection,
+      worstOwnership: "registry_integrity_failure",
+      dispositionDigest,
+      sourceScopeBlockedReason: stagingGuard.reasonCode,
       registryIntegrityFailure: true,
     };
   }
 
   const sourceSegments = formSourceSegmentsFromUsage(input.segments);
+  const sealed = input.registry.sealedInterval;
+  let sealedWindowSelectionManifest: SealedWindowSelectionManifest | null =
+    null;
+  let selectedSegments = sourceSegments;
+  let excludedOutsideSealedFingerprints: string[] = [];
+  if (
+    sealed &&
+    input.registry.coverageSnapshot?.status === "complete" &&
+    input.registry.activationEpochId
+  ) {
+    sealedWindowSelectionManifest = buildSealedWindowSelectionManifest({
+      epochId: input.registry.activationEpochId,
+      sealedInterval: sealed,
+      segments: sourceSegments,
+    });
+    const selectedKeys = new Set(
+      sealedWindowSelectionManifest.entries
+        .filter((e) => e.classification === "selected_in_sealed_scope")
+        .map((e) => e.segmentKey),
+    );
+    selectedSegments = sourceSegments.filter((s) =>
+      selectedKeys.has(s.segmentKey),
+    );
+    excludedOutsideSealedFingerprints = [
+      ...excludedOutsideSealedFingerprintsFromManifest(
+        sealedWindowSelectionManifest,
+      ),
+    ];
+  }
+
   const ownership = classifyAllSegmentOwnership({
-    segments: sourceSegments,
+    segments: selectedSegments,
     registry: input.registry,
   });
 
@@ -154,6 +226,10 @@ export function runProvenanceScopePipeline(input: {
     ownership,
     traceMappings,
     manifest,
+    sealedWindowSelectionManifest,
+    sealedWindowSelectionDigest:
+      sealedWindowSelectionManifest?.digest ?? null,
+    excludedOutsideSealedFingerprints,
     worstOwnership: worst,
     dispositionDigest,
     sourceScopeBlockedReason,

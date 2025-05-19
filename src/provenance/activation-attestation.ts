@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CoverageInterval } from "./coverage.js";
+import type { FinalizationPolicyPin } from "./finalization-policy.js";
 import type { CoverageIncompleteReason } from "./event-integrity.js";
 import {
   getLaunchSurfacesManifest,
@@ -120,6 +121,8 @@ export interface CanonicalActivationPayload {
   stateBranch: string;
   lifecycleRecords: ActivationLifecycleRecord[];
   knownWriterOutagesOrGaps: WriterOutageOrGap[];
+  /** Optional pinned finalization policy (v1+ activations). */
+  finalizationPolicy?: FinalizationPolicyPin;
 }
 
 export type CoverageActivationAttestation = CanonicalActivationPayload;
@@ -292,6 +295,11 @@ export function canonicalizeActivationPayload(
   ) {
     throw new Error("coverage interval must be half-open with end > start");
   }
+  if (
+    parseIso(payload.interval.coverageStart) < parseIso(payload.activatedAt)
+  ) {
+    throw new Error("coverageStart must be >= activatedAt");
+  }
 
   if (!payload.stateRepository.trim() || !payload.stateBranch.trim()) {
     throw new Error("stateRepository and stateBranch are required");
@@ -406,6 +414,15 @@ export function canonicalizeActivationPayload(
     payload.lifecycleRecords.map((row) => {
       assertTimestamp(row.effectiveAt, "lifecycleRecords.effectiveAt");
       assertDigest(row.evidenceDigest, "lifecycleRecords.evidenceDigest");
+      if (
+        row.lifecycleKind === "activation" &&
+        row.epochId === payload.epochId &&
+        row.effectiveAt !== payload.activatedAt
+      ) {
+        throw new Error(
+          "activation lifecycle effectiveAt must equal activatedAt",
+        );
+      }
       return { ...row };
     }),
   );
@@ -433,6 +450,9 @@ export function canonicalizeActivationPayload(
     runnerVersionInstallAttestations,
     lifecycleRecords,
     knownWriterOutagesOrGaps,
+    ...(payload.finalizationPolicy
+      ? { finalizationPolicy: payload.finalizationPolicy }
+      : {}),
   };
 }
 

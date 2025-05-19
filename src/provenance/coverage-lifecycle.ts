@@ -31,15 +31,21 @@ import {
   buildCoverageGapRecord,
   buildCoverageSealRecord,
   buildCoverageSupersessionRecord,
+  buildDuplicateOperationIncidentRecord,
+  buildEpochInvalidationRecord,
   buildPersistedCoverageSnapshotEnvelope,
   parseCoverageGapRecord,
   parseCoverageSealRecord,
   parseCoverageSupersessionRecord,
+  parseDuplicateOperationIncidentRecord,
+  parseEpochInvalidationRecord,
   parsePersistedCoverageSnapshotEnvelope,
   persistedActivationRecordDigest,
   type CoverageGapRecord,
   type CoverageSealRecord,
   type CoverageSupersessionRecord,
+  type DuplicateOperationIncidentRecord,
+  type EpochInvalidationRecord,
   type PersistedCoverageSnapshotEnvelope,
 } from "./coverage-lifecycle-schemas.js";
 import { CursorProvenanceError } from "./errors.js";
@@ -54,8 +60,14 @@ import {
   coverageSealRemotePath,
   coverageSnapshotRemotePath,
   coverageSupersessionRemotePath,
+  duplicateIncidentRemotePath,
+  epochInvalidationRemotePath,
+  provenanceEventsRootPrefix,
 } from "./paths.js";
-import type { ProvenanceLifecycleStore } from "./lifecycle-store.js";
+import type {
+  LifecycleWritePolicy,
+  ProvenanceLifecycleStore,
+} from "./lifecycle-store.js";
 import type { ProvenanceEventStore } from "./store.js";
 
 export interface CoverageLifecycleServiceOptions {
@@ -66,6 +78,7 @@ export interface CoverageLifecycleServiceOptions {
   repo: string;
   branch: string;
   stateRepository: string;
+  writePolicy?: LifecycleWritePolicy;
 }
 
 export interface LifecycleWriteResult {
@@ -112,7 +125,20 @@ export interface SealToTipEnumeration {
 }
 
 export class CoverageLifecycleService {
-  constructor(private readonly options: CoverageLifecycleServiceOptions) {}
+  constructor(private readonly options: CoverageLifecycleServiceOptions) {
+    if (options.writePolicy) {
+      const store =
+        "configuredWritePolicy" in options.lifecycleStore
+          ? options.lifecycleStore.configuredWritePolicy
+          : null;
+      if (store && store !== options.writePolicy) {
+        throw new CursorProvenanceError(
+          "cursor_provenance_config_invalid",
+          `Lifecycle store policy mismatch (expected ${options.writePolicy}, got ${store}).`,
+        );
+      }
+    }
+  }
 
   async writeActivation(input: {
     epochId: string;
@@ -204,6 +230,7 @@ export class CoverageLifecycleService {
     activationHistoryProofCommitSha: string;
     activationHistoryProofDigest: string;
     snapshot: CoverageSnapshot;
+    finalizationPolicyDigest?: string;
     commitMessage?: string;
   }): Promise<
     LifecycleWriteResult & { envelope: PersistedCoverageSnapshotEnvelope }
@@ -236,6 +263,7 @@ export class CoverageLifecycleService {
     epochId: string;
     operatorToolSourceSha: string;
     finalizationEvidenceDigest: string;
+    finalizationPolicyDigest?: string;
     coverageSnapshotCommitSha?: string;
     commitMessage?: string;
   }): Promise<LifecycleWriteResult & { seal: CoverageSealRecord }> {
@@ -326,6 +354,8 @@ export class CoverageLifecycleService {
       coverageSnapshotDigest: envelope.envelopeDigest,
       finalizationEvidenceDigest: input.finalizationEvidenceDigest,
       operatorToolSourceSha: input.operatorToolSourceSha,
+      finalizationPolicyDigest:
+        input.finalizationPolicyDigest ?? envelope.finalizationPolicyDigest,
     });
 
     const path = coverageSealRemotePath(input.epochId);
@@ -440,31 +470,197 @@ export class CoverageLifecycleService {
     return { ...result, path, supersession };
   }
 
+  async reportDuplicateOperationIncident(input: {
+    epochId: string;
+    recoveryOperationId: string;
+    stage: string;
+    attemptOrdinal: number;
+    duplicateOperationId: string;
+    priorOperationId: string;
+    recordedAt: string;
+    commitMessage?: string;
+  }): Promise<
+    LifecycleWriteResult & { incident: DuplicateOperationIncidentRecord }
+  > {
+    const incident = buildDuplicateOperationIncidentRecord(input);
+    const path = duplicateIncidentRemotePath(
+      input.epochId,
+      incident.incidentDigest,
+    );
+    const body = `${JSON.stringify(incident, null, 2)}\n`;
+    const result = await this.options.lifecycleStore.persistImmutableRecord({
+      path,
+      body,
+      canonicalDigest: incident.incidentDigest,
+      commitMessage:
+        input.commitMessage ??
+        `p-dev: duplicate operation incident ${input.epochId}`,
+    });
+    return { ...result, path, incident };
+  }
+
+  async invalidateNeverSealedEpoch(input: {
+    epochId: string;
+    activationCommitSha: string;
+    invalidInterval: CoverageInterval;
+    reasons: string[];
+    publicCanaryIdentities?: string[];
+    workflowRunIds?: string[];
+    eventCommitRange: {
+      startCommitSha: string;
+      endCommitSha: string;
+    };
+    gapId?: string | null;
+    incidentId?: string | null;
+    operatorToolSourceSha: string;
+    improperPriorSeal?: {
+      sealCommitSha: string;
+      sealDigest: string;
+      treatedAsValidCompleteSeal: false;
+    };
+    commitMessage?: string;
+  }): Promise<LifecycleWriteResult & { invalidation: EpochInvalidationRecord }> {
+    const invalidation = buildEpochInvalidationRecord(input);
+    const path = epochInvalidationRemotePath(input.epochId);
+    const body = `${JSON.stringify(invalidation, null, 2)}\n`;
+    const result = await this.options.lifecycleStore.persistImmutableRecord({
+      path,
+      body,
+      canonicalDigest: invalidation.invalidationDigest,
+      commitMessage:
+        input.commitMessage ??
+        `p-dev: epoch invalidation ${input.epochId}`,
+    });
+    return { ...result, path, invalidation };
+  }
+
+  async loadEpochInvalidation(
+    epochId: string,
+  ): Promise<EpochInvalidationRecord | null> {
+    const path = epochInvalidationRemotePath(epochId);
+    const body = await this.options.lifecycleStore.loadRecord(path);
+    if (!body) return null;
+    return parseEpochInvalidationRecord(body);
+  }
+
   async enumerateSealToTip(input: {
     sealCommitSha: string;
     tipCommitSha: string;
     sealedInterval: CoverageInterval;
   }): Promise<SealToTipEnumeration> {
-    const tipRecords = await this.enumerateEvents(input.tipCommitSha);
-    const sealRecords = await this.enumerateEvents(input.sealCommitSha);
-    const sealPaths = new Set(sealRecords.map((record) => record.path));
-
     const items: PostSealEvidenceItem[] = [];
-    for (const record of tipRecords) {
-      if (sealPaths.has(record.path)) {
-        continue;
+    let fullyEnumerated = true;
+
+    // Prefer GitHub compare for seal→tip commit enumeration (O(delta), not
+    // full event-tree materialization at tip). In-memory/test clients fall back.
+    const compare = this.options.client?.compareCommits?.bind(
+      this.options.client,
+    );
+    if (typeof compare === "function") {
+      const comparison = await this.options.client.compareCommits(
+        this.options.owner,
+        this.options.repo,
+        input.sealCommitSha,
+        input.tipCommitSha,
+      );
+      if (comparison.status === "behind" || comparison.status === "diverged") {
+        fullyEnumerated = false;
+      } else if (comparison.status === "identical") {
+        fullyEnumerated = true;
+      } else {
+        // ahead: GitHub compare returns at most 250 commits / 300 files.
+        if (comparison.ahead_by > comparison.commits.length) {
+          fullyEnumerated = false;
+        }
+        const eventsPrefix = `${provenanceEventsRootPrefix()}/`;
+        const changed = comparison.files ?? [];
+        for (const file of changed) {
+          const path = file.filename;
+          if (!path) continue;
+          if (path.startsWith(eventsPrefix) && path.endsWith(".json")) {
+            const content = await this.options.client.getRepositoryContent(
+              this.options.owner,
+              this.options.repo,
+              path,
+              input.tipCommitSha,
+            );
+            if (!content) {
+              fullyEnumerated = false;
+              continue;
+            }
+            const body = this.options.client.decodeRepositoryContent(content);
+            let event: ProvenanceEventRecord["event"];
+            try {
+              event = JSON.parse(body) as ProvenanceEventRecord["event"];
+            } catch {
+              fullyEnumerated = false;
+              continue;
+            }
+            const record: ProvenanceEventRecord = { path, event };
+            items.push({
+              kind:
+                event.eventType === "reconciliation_resolution"
+                  ? "reconciliation_resolution"
+                  : "provenance_event",
+              path,
+              commitSha: input.tipCommitSha,
+              overlapsSealedInterval: eventOverlapsInterval(
+                record,
+                input.sealedInterval,
+              ),
+              summary: event.eventType,
+            });
+          }
+          if (path.includes("/gaps/")) {
+            items.push({
+              kind: "gap_record",
+              path,
+              commitSha: input.tipCommitSha,
+              overlapsSealedInterval: true,
+              summary: "coverage_gap",
+            });
+          }
+          if (path.includes("/supersessions/")) {
+            items.push({
+              kind: "supersession_record",
+              path,
+              commitSha: input.tipCommitSha,
+              overlapsSealedInterval: true,
+              summary: "coverage_supersession",
+            });
+          }
+          if (path.endsWith("/invalidation.json")) {
+            items.push({
+              kind: "invalidation_record",
+              path,
+              commitSha: input.tipCommitSha,
+              overlapsSealedInterval: true,
+              summary: "epoch_invalidation",
+            });
+          }
+        }
       }
-      const overlaps = eventOverlapsInterval(record, input.sealedInterval);
-      items.push({
-        kind:
-          record.event.eventType === "reconciliation_resolution"
-            ? "reconciliation_resolution"
-            : "provenance_event",
-        path: record.path,
-        commitSha: input.tipCommitSha,
-        overlapsSealedInterval: overlaps,
-        summary: record.event.eventType,
-      });
+    } else {
+      // In-memory / test stores: diff full event snapshots.
+      const tipRecords = await this.enumerateEvents(input.tipCommitSha);
+      const sealRecords = await this.enumerateEvents(input.sealCommitSha);
+      const sealPaths = new Set(sealRecords.map((record) => record.path));
+      for (const record of tipRecords) {
+        if (sealPaths.has(record.path)) {
+          continue;
+        }
+        const overlaps = eventOverlapsInterval(record, input.sealedInterval);
+        items.push({
+          kind:
+            record.event.eventType === "reconciliation_resolution"
+              ? "reconciliation_resolution"
+              : "provenance_event",
+          path: record.path,
+          commitSha: input.tipCommitSha,
+          overlapsSealedInterval: overlaps,
+          summary: record.event.eventType,
+        });
+      }
     }
 
     const gapAndSupersessionItems =
@@ -484,7 +680,7 @@ export class CoverageLifecycleService {
     return {
       sealCommitSha: input.sealCommitSha,
       tipCommitSha: input.tipCommitSha,
-      fullyEnumerated: true,
+      fullyEnumerated,
       items,
       overlappingRawEvidenceCount,
       explicitInvalidationCount,
@@ -569,6 +765,17 @@ export class CoverageLifecycleService {
           summary: "coverage_supersession",
         });
       }
+      if (path.endsWith("/invalidation.json")) {
+        const body = await store.loadRecord(path);
+        if (!body) continue;
+        items.push({
+          kind: "invalidation_record",
+          path,
+          commitSha: store.commitShaForPath?.(path) ?? "unknown",
+          overlapsSealedInterval: true,
+          summary: "epoch_invalidation",
+        });
+      }
     }
     return items;
   }
@@ -619,4 +826,6 @@ export {
   parseCoverageGapRecord,
   parseCoverageSealRecord,
   parseCoverageSupersessionRecord,
+  parseDuplicateOperationIncidentRecord,
+  parseEpochInvalidationRecord,
 };

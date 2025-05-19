@@ -121,6 +121,8 @@ export interface CanonicalImportIdentity {
   provenanceScopeManifestDigest?: string | null;
   /** Disposition manifest digest when applicable (v14+). */
   dispositionManifestDigest?: string | null;
+  /** Sealed-window selection manifest digest (v15+). */
+  sealedWindowSelectionDigest?: string | null;
 }
 
 export interface ParserEvidenceArtifact {
@@ -198,6 +200,8 @@ export interface PreflightPrivateArtifact {
   /** v14+ private provenance-scope manifest digest. */
   provenanceScopeManifestDigest?: string | null;
   provenanceScopeIncompleteReason?: string | null;
+  /** v15+ sealed-window selection digest. */
+  sealedWindowSelectionDigest?: string | null;
 }
 
 export interface PublicSummaryArtifact {
@@ -632,6 +636,7 @@ export function buildCanonicalImportIdentity(params: {
     exactTargetTraceDigest: string | null;
     provenanceScopeManifestDigest: string | null;
     dispositionManifestDigest: string | null;
+    sealedWindowSelectionDigest?: string | null;
   } | null;
 }): CanonicalImportIdentity {
   return {
@@ -714,6 +719,8 @@ export function buildCanonicalImportIdentity(params: {
       params.provenanceScope?.provenanceScopeManifestDigest ?? undefined,
     dispositionManifestDigest:
       params.provenanceScope?.dispositionManifestDigest ?? undefined,
+    sealedWindowSelectionDigest:
+      params.provenanceScope?.sealedWindowSelectionDigest ?? undefined,
   };
 }
 
@@ -730,6 +737,7 @@ export function fingerprintPreflightApproval(params: {
   expectedScoreManifestDigest: string;
   attributionSnapshotDigest?: string | null;
   provenanceScopeManifestDigest?: string | null;
+  sealedWindowSelectionDigest?: string | null;
 }): string {
   return digestCanonical({
     canonicalImportIdentity: params.canonicalImportIdentity,
@@ -738,6 +746,7 @@ export function fingerprintPreflightApproval(params: {
     expectedScoreManifestDigest: params.expectedScoreManifestDigest,
     attributionSnapshotDigest: params.attributionSnapshotDigest ?? null,
     provenanceScopeManifestDigest: params.provenanceScopeManifestDigest ?? null,
+    sealedWindowSelectionDigest: params.sealedWindowSelectionDigest ?? null,
   });
 }
 

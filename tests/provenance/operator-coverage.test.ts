@@ -9,6 +9,7 @@ import { activationHistoryProofRecordDigest } from "../../src/provenance/coverag
 import { buildCoverageSnapshot } from "../../src/provenance/coverage.js";
 import { buildLiveActivationPayload } from "../../src/provenance/live-activation.js";
 import { InMemoryProvenanceLifecycleStore } from "../../src/provenance/lifecycle-store.js";
+import { claimActivationHistoryRelationship } from "../../src/provenance/operator-coverage.js";
 import {
   activationRecordRemotePath,
   coverageSealRemotePath,
@@ -202,5 +203,13 @@ describe("operator coverage orchestration", () => {
     expect(graph.isEqualOrDescendant(ACTIVATION_COMMIT, EVENT_COMMIT)).toBe(
       true,
     );
+  });
+
+  it("claims equal history relationship when activation tip equals event snapshot tip", () => {
+    const tip = "a".repeat(40);
+    expect(claimActivationHistoryRelationship(tip, tip)).toBe("equal");
+    expect(
+      claimActivationHistoryRelationship(ACTIVATION_COMMIT, EVENT_COMMIT),
+    ).toBe("descendant");
   });
 });

@@ -19,6 +19,7 @@ import { runFailJobRequestCommand } from "./commands/fail-job-request.js";
 import { runDispatchJobRequestCommand } from "./commands/dispatch-job-request.js";
 import { runPrivateStateCanaryCommand } from "./commands/private-state-canary.js";
 import { runProvenanceRolloutCommand } from "./commands/provenance-rollout.js";
+import { runConfigureCursorUsageCommand } from "./commands/provenance-configure-cursor-usage.js";
 import { runWorkflowStatusReportCommand } from "./commands/workflow-status-report.js";
 import { runWorkflowStatusMigrateCommand } from "./commands/workflow-status-migrate.js";
 import { runValidationRunCommand } from "./commands/validation-run.js";
@@ -246,7 +247,7 @@ export function createProgram(): Command {
     )
     .argument(
       "<action>",
-      "readiness | quiet-window | activate | inspect-coverage | finalize | enumerate-seal-to-tip | generate-key | install-key | set-mode | shred-local-key-dir | canary-create | canary-validate | canary-trigger | canary-observe | key-recoverability | ensure-key",
+      "readiness | quiet-window | activation-prepare | activation-confirm-required | activate | inspect-coverage | finalize | enumerate-seal-to-tip | recovery-root-create | invalidate-epoch | report-duplicate-incident | generate-key | install-key | set-mode | shred-local-key-dir | canary-create | canary-validate | canary-trigger | canary-observe | key-recoverability | ensure-key | configure-cursor-usage",
     )
     .option("--issue <key>", "Linear issue key for canary/observe actions")
     .option(
@@ -270,8 +271,17 @@ export function createProgram(): Command {
       false,
     )
     .option("--epoch-id <id>", "Coverage epoch id for activate/finalize/inspect")
+    .option("--activated-at <iso>", "Activation effective timestamp (ISO UTC)")
     .option("--coverage-start <iso>", "Coverage interval start (ISO UTC)")
     .option("--coverage-end <iso>", "Coverage interval end (ISO UTC)")
+    .option(
+      "--min-guard-duration-ms <n>",
+      "Minimum guard window (ms) before activatedAt",
+    )
+    .option(
+      "--finalization-policy-json <json>",
+      "Optional finalization policy override JSON (activation-prepare only)",
+    )
     .option(
       "--capture-source-sha <sha>",
       "Production capture producer source SHA",
@@ -286,6 +296,11 @@ export function createProgram(): Command {
       "Operator tool source SHA for finalize",
     )
     .option(
+      "--verify-existing-only",
+      "Finalize in verify_existing_only mode (no writes; fail closed if missing/divergent)",
+      false,
+    )
+    .option(
       "--poll-gap-seconds <n>",
       "Quiet-window gap between samples (default 1800 = two 15m reconcile cycles)",
     )
@@ -293,8 +308,118 @@ export function createProgram(): Command {
       "--prior-observation-json <json>",
       "Optional prior quiet-window observation JSON for a single resume sample",
     )
+    .option("--prior-epoch-id <id>", "Prior epoch id for recovery-root-create")
+    .option(
+      "--recovery-contract-version <version>",
+      "Recovery contract version (default 1)",
+    )
+    .option(
+      "--recovery-operation-id <uuid>",
+      "Recovery operation UUID for recovery-root-create",
+    )
+    .option("--new-epoch-id <id>", "Replacement epoch id for recovery-root-create")
+    .option(
+      "--planned-stage <stage>",
+      "Planned canary stage (e.g. required_canary)",
+    )
+    .option("--stage <stage>", "Canary stage for recovery canary-create")
+    .option("--attempt-ordinal <n>", "Canary attempt ordinal for recovery canary-create")
+    .option(
+      "--attempt-operation-id <uuid>",
+      "Attempt operation UUID for recovery canary-create",
+    )
+    .option(
+      "--activation-schedule-identity <id>",
+      "Activation schedule identity for recovery root",
+    )
+    .option(
+      "--creator-session-id <id>",
+      "Creator session id (evidence only; not in path uniqueness)",
+    )
+    .option(
+      "--invalidation-reasons <csv>",
+      "Comma-separated invalidation reasons for invalidate-epoch",
+    )
+    .option(
+      "--public-canary-identities <csv>",
+      "Comma-separated public canary identities (e.g. TT-18,TT-19)",
+    )
+    .option("--workflow-run-ids <csv>", "Comma-separated workflow run ids")
+    .option(
+      "--event-commit-start-sha <sha>",
+      "Event commit range start for invalidate-epoch",
+    )
+    .option(
+      "--event-commit-end-sha <sha>",
+      "Event commit range end for invalidate-epoch",
+    )
+    .option("--gap-id <id>", "Optional gap id to pin in invalidation")
+    .option("--incident-id <id>", "Optional incident id to pin in invalidation")
+    .option(
+      "--improper-seal-commit-sha <sha>",
+      "Optional improper prior seal commit sha",
+    )
+    .option(
+      "--improper-seal-digest <digest>",
+      "Optional improper prior seal digest",
+    )
+    .option(
+      "--duplicate-recovery-operation-id <uuid>",
+      "Recovery operation id for report-duplicate-incident",
+    )
+    .option("--duplicate-stage <stage>", "Stage for report-duplicate-incident")
+    .option(
+      "--duplicate-attempt-ordinal <n>",
+      "Attempt ordinal for report-duplicate-incident",
+    )
+    .option(
+      "--duplicate-operation-id <uuid>",
+      "Duplicate operation id for report-duplicate-incident",
+    )
+    .option(
+      "--prior-operation-id <uuid>",
+      "Prior operation id for report-duplicate-incident",
+    )
+    .option(
+      "--workspace <path>",
+      "Operator workspace for configure-cursor-usage",
+    )
+    .option(
+      "--state-repository <slug>",
+      "State repository for configure-cursor-usage",
+    )
+    .option(
+      "--state-branch <branch>",
+      "State branch for configure-cursor-usage",
+    )
+    .option(
+      "--active-epoch <id>",
+      "Active epoch id for configure-cursor-usage",
+    )
+    .option(
+      "--runner-repository <slug>",
+      "Runner repository for configure-cursor-usage",
+    )
+    .option(
+      "--check",
+      "configure-cursor-usage: verify without writing",
+      false,
+    )
     .option("--json", "Print public-safe JSON", false)
     .action(async (action, opts) => {
+      if (action === "configure-cursor-usage") {
+        const exitCode = await runConfigureCursorUsageCommand({
+          workspace: opts.workspace,
+          stateRepository: opts.stateRepository,
+          stateBranch: opts.stateBranch,
+          activeEpoch: opts.activeEpoch ?? opts.epochId,
+          runnerRepository: opts.runnerRepository ?? opts.runnerRepo,
+          check: opts.check === true,
+          json: opts.json === true,
+        });
+        process.exitCode = exitCode;
+        return;
+      }
       const configPath = program.opts<{ config: string }>().config;
       const pollGapSeconds =
         opts.pollGapSeconds != null && opts.pollGapSeconds !== ""
@@ -312,14 +437,42 @@ export function createProgram(): Command {
         shadowValidated: opts.shadowValidated,
         json: opts.json,
         epochId: opts.epochId,
+        activatedAt: opts.activatedAt,
         coverageStart: opts.coverageStart,
         coverageEnd: opts.coverageEnd,
         captureSourceSha: opts.captureSourceSha,
         runnerSha: opts.runnerSha,
         eventSnapshotSha: opts.eventSnapshotSha,
         operatorToolSourceSha: opts.operatorToolSourceSha,
+        minGuardDurationMs: opts.minGuardDurationMs,
+        finalizationPolicyJson: opts.finalizationPolicyJson,
+        verifyExistingOnly: opts.verifyExistingOnly,
         pollGapSeconds,
         priorObservationJson: opts.priorObservationJson,
+        priorEpochId: opts.priorEpochId,
+        recoveryContractVersion: opts.recoveryContractVersion,
+        recoveryOperationId: opts.recoveryOperationId,
+        newEpochId: opts.newEpochId,
+        plannedStage: opts.plannedStage,
+        stage: opts.stage,
+        attemptOrdinal: opts.attemptOrdinal,
+        attemptOperationId: opts.attemptOperationId,
+        activationScheduleIdentity: opts.activationScheduleIdentity,
+        creatorSessionId: opts.creatorSessionId,
+        invalidationReasons: opts.invalidationReasons,
+        publicCanaryIdentities: opts.publicCanaryIdentities,
+        workflowRunIds: opts.workflowRunIds,
+        eventCommitStartSha: opts.eventCommitStartSha,
+        eventCommitEndSha: opts.eventCommitEndSha,
+        gapId: opts.gapId,
+        incidentId: opts.incidentId,
+        improperSealCommitSha: opts.improperSealCommitSha,
+        improperSealDigest: opts.improperSealDigest,
+        duplicateRecoveryOperationId: opts.duplicateRecoveryOperationId,
+        duplicateStage: opts.duplicateStage,
+        duplicateAttemptOrdinal: opts.duplicateAttemptOrdinal,
+        duplicateOperationId: opts.duplicateOperationId,
+        priorOperationId: opts.priorOperationId,
       });
       process.exitCode = exitCode;
     });

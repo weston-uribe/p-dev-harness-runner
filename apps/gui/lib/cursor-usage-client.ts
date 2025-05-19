@@ -20,6 +20,7 @@ async function cursorUsageFetch(
 export interface ProvenanceCoveragePublicStatus {
   provenanceConfigured: boolean;
   mode: string;
+  status: string;
   activeEpochId: string | null;
   earliestEligibleCsvUtc: string | null;
   latestSealedCompleteUtc: string | null;

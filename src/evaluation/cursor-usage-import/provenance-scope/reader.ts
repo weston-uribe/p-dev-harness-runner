@@ -24,6 +24,7 @@ import {
 import type { ProvenanceEvent } from "../../../provenance/events.js";
 import { deriveProvenanceEventPath } from "../../../provenance/paths.js";
 import type { CoverageSealRecord } from "../../../provenance/coverage-lifecycle-schemas.js";
+import type { EpochInvalidationRecord } from "../../../provenance/coverage-lifecycle-schemas.js";
 import { digestCanonical } from "../expected-score-manifest.js";
 import {
   CURSOR_USAGE_REGISTRY_READER_SCHEMA_VERSION,
@@ -43,6 +44,7 @@ export interface RegistrySnapshotInput {
   eventPaths?: string[];
   coverageSnapshot: CoverageSnapshot | null;
   sealRecord: CoverageSealRecord | null;
+  epochInvalidation?: EpochInvalidationRecord | null;
 }
 
 export interface RegistryContentFetcher {
@@ -236,6 +238,16 @@ export function readRegistrySnapshotFromInput(
   input: RegistrySnapshotInput,
 ): RegistryReadResult {
   const failures: RegistryIntegrityFailure[] = [];
+  const epochInvalidation = input.epochInvalidation ?? null;
+  const epochInvalidated = epochInvalidation != null;
+
+  if (epochInvalidated) {
+    failures.push({
+      code: "epoch_invalidated",
+      detail: epochInvalidation.reasons.join(","),
+    });
+  }
+
   const eventPaths =
     input.eventPaths ??
     input.events.map((event) => deriveProvenanceEventPath(event));
@@ -335,13 +347,13 @@ export function readRegistrySnapshotFromInput(
   }
 
   let coverageSnapshot = input.coverageSnapshot;
-  const sealedInterval: CoverageInterval | null =
-    input.sealRecord?.interval ??
-    coverageSnapshot?.interval ??
-    att?.interval ??
-    null;
+  const sealedInterval: CoverageInterval | null = epochInvalidated
+    ? null
+    : input.sealRecord?.interval ??
+      coverageSnapshot?.interval ??
+      null;
 
-  if (att && sealedInterval && !coverageSnapshot) {
+  if (att && sealedInterval && !coverageSnapshot && !epochInvalidated) {
     try {
       coverageSnapshot = buildCoverageSnapshot({
         interval: sealedInterval,
@@ -466,6 +478,8 @@ export function readRegistrySnapshotFromInput(
     includedRunOperationSetDigest,
     integrityFailures: failures,
     integrityOk: failures.length === 0,
+    epochInvalidation,
+    epochInvalidated,
   };
 }
 

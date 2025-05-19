@@ -2,6 +2,7 @@
  * Append-only CAS persistence for coverage lifecycle records.
  */
 
+import { createHash } from "node:crypto";
 import {
   GitHubApiError,
   type GitHubClient,
@@ -9,6 +10,9 @@ import {
 import { decideConflictRetry } from "../workflow/state/conflict.js";
 import { DEFAULT_WORKFLOW_STATE_BRANCH } from "../public-execution/runtime-repos.js";
 import { CursorProvenanceError } from "./errors.js";
+import { canonicalDigestFromLifecycleRecordBody } from "./lifecycle-record-canonical-digest.js";
+
+export type LifecycleWritePolicy = "create_or_adopt" | "verify_existing_only";
 
 export interface GithubProvenanceLifecycleStoreOptions {
   client: GitHubClient;
@@ -18,6 +22,7 @@ export interface GithubProvenanceLifecycleStoreOptions {
   beforeWrite?: () => Promise<void>;
   maxConflictRetries?: number;
   autoCreateBranch?: boolean;
+  writePolicy?: LifecycleWritePolicy;
 }
 
 export interface PersistImmutableRecordResult {
@@ -30,16 +35,27 @@ export class GithubProvenanceLifecycleStore {
   private readonly branch: string;
   private readonly maxConflictRetries: number;
   private readonly autoCreateBranch: boolean;
+  private readonly writePolicy: LifecycleWritePolicy;
   private readonly pathCommitSha = new Map<string, string>();
+  private writeAttemptCounter = 0;
 
   constructor(private readonly options: GithubProvenanceLifecycleStoreOptions) {
     this.branch = options.branch ?? DEFAULT_WORKFLOW_STATE_BRANCH;
     this.maxConflictRetries = options.maxConflictRetries ?? 3;
     this.autoCreateBranch = options.autoCreateBranch === true;
+    this.writePolicy = options.writePolicy ?? "create_or_adopt";
   }
 
   get configuredBranch(): string {
     return this.branch;
+  }
+
+  get configuredWritePolicy(): LifecycleWritePolicy {
+    return this.writePolicy;
+  }
+
+  get writeAttemptCount(): number {
+    return this.writeAttemptCounter;
   }
 
   async loadRecordAtCommit(
@@ -69,6 +85,35 @@ export class GithubProvenanceLifecycleStore {
     canonicalDigest: string;
     commitMessage: string;
   }): Promise<PersistImmutableRecordResult> {
+    if (this.writePolicy === "verify_existing_only") {
+      this.writeAttemptCounter += 1;
+      // Never create branches in verify mode (would be a write).
+      await this.assertBranchExists();
+
+      const existing = await this.loadRecord(input.path);
+      if (!existing) {
+        throw new CursorProvenanceError(
+          "cursor_provenance_read_only_violation",
+          `Lifecycle store is read-only; would write ${input.path}.`,
+        );
+      }
+      const comparison = compareExistingLifecycleRecord(
+        existing,
+        input.canonicalDigest,
+      );
+      if (comparison === "identical") {
+        return {
+          idempotent: true,
+          commitSha: null,
+          canonicalDigest: input.canonicalDigest,
+        };
+      }
+      throw new CursorProvenanceError(
+        "cursor_provenance_event_divergence",
+        `Divergent lifecycle record at ${input.path.split("/").slice(-2).join("/")}.`,
+      );
+    }
+
     let attempt = 0;
     while (true) {
       attempt += 1;
@@ -83,8 +128,11 @@ export class GithubProvenanceLifecycleStore {
 
       const existing = await this.loadRecord(input.path);
       if (existing) {
-        const existingDigest = digestRecordBody(existing);
-        if (existingDigest === input.canonicalDigest) {
+        const comparison = compareExistingLifecycleRecord(
+          existing,
+          input.canonicalDigest,
+        );
+        if (comparison === "identical") {
           return {
             idempotent: true,
             commitSha: null,
@@ -128,8 +176,11 @@ export class GithubProvenanceLifecycleStore {
           if (!decision.retry) {
             const raced = await this.loadRecord(input.path);
             if (raced) {
-              const racedDigest = digestRecordBody(raced);
-              if (racedDigest === input.canonicalDigest) {
+              const comparison = compareExistingLifecycleRecord(
+                raced,
+                input.canonicalDigest,
+              );
+              if (comparison === "identical") {
                 return {
                   idempotent: true,
                   commitSha: null,
@@ -222,7 +273,21 @@ export class GithubProvenanceLifecycleStore {
 export class InMemoryProvenanceLifecycleStore {
   private readonly records = new Map<string, string>();
   private readonly commitByPath = new Map<string, string>();
+  private readonly writePolicy: LifecycleWritePolicy;
   private commitCounter = 0;
+  private writeAttemptCounter = 0;
+
+  constructor(options?: { writePolicy?: LifecycleWritePolicy }) {
+    this.writePolicy = options?.writePolicy ?? "create_or_adopt";
+  }
+
+  get writeAttemptCount(): number {
+    return this.writeAttemptCounter;
+  }
+
+  get configuredWritePolicy(): LifecycleWritePolicy {
+    return this.writePolicy;
+  }
 
   async loadRecord(path: string): Promise<string | null> {
     return this.records.get(path) ?? null;
@@ -241,10 +306,39 @@ export class InMemoryProvenanceLifecycleStore {
     canonicalDigest: string;
     commitMessage: string;
   }): Promise<PersistImmutableRecordResult> {
+    if (this.writePolicy === "verify_existing_only") {
+      this.writeAttemptCounter += 1;
+      const existing = this.records.get(input.path);
+      if (!existing) {
+        throw new CursorProvenanceError(
+          "cursor_provenance_read_only_violation",
+          `Lifecycle store is read-only; would write ${input.path}.`,
+        );
+      }
+      const comparison = compareExistingLifecycleRecord(
+        existing,
+        input.canonicalDigest,
+      );
+      if (comparison === "identical") {
+        return {
+          idempotent: true,
+          commitSha: null,
+          canonicalDigest: input.canonicalDigest,
+        };
+      }
+      throw new CursorProvenanceError(
+        "cursor_provenance_event_divergence",
+        "Divergent lifecycle record (in-memory).",
+      );
+    }
+
     const existing = this.records.get(input.path);
     if (existing) {
-      const existingDigest = digestRecordBody(existing);
-      if (existingDigest === input.canonicalDigest) {
+      const comparison = compareExistingLifecycleRecord(
+        existing,
+        input.canonicalDigest,
+      );
+      if (comparison === "identical") {
         return {
           idempotent: true,
           commitSha: null,
@@ -258,7 +352,10 @@ export class InMemoryProvenanceLifecycleStore {
     }
     this.records.set(input.path, input.body);
     this.commitCounter += 1;
-    const commitSha = `mem-${this.commitCounter.toString(16).padStart(8, "0")}`;
+    // Deterministic, git-like 40-hex SHA for tests.
+    const commitSha = createHash("sha1")
+      .update(`mem-${this.commitCounter}`, "utf8")
+      .digest("hex");
     this.commitByPath.set(input.path, commitSha);
     return {
       idempotent: false,
@@ -300,41 +397,16 @@ export interface ProvenanceLifecycleStoreInterface {
   resolveCommitShaForPath?(path: string): Promise<string | null>;
 }
 
-function digestRecordBody(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as Record<string, unknown>;
-    const digestKeys = [
-      "canonicalPayloadDigest",
-      "envelopeDigest",
-      "sealDigest",
-      "gapDigest",
-      "supersessionDigest",
-      "evidenceDigest",
-    ] as const;
-    for (const key of digestKeys) {
-      const value = parsed[key];
-      if (typeof value === "string" && value.length > 0) {
-        return value;
-      }
-    }
-    const proofDigest = activationHistoryProofDigestFromBody(parsed);
-    if (proofDigest) {
-      return proofDigest;
-    }
-  } catch {
-    // fall through
+export function compareExistingLifecycleRecord(
+  existingBody: string,
+  intendedCanonicalDigest: string,
+): "identical" | "divergent" {
+  const result = canonicalDigestFromLifecycleRecordBody(existingBody);
+  if (!result.ok) {
+    throw new CursorProvenanceError(
+      "cursor_provenance_coverage_integrity_error",
+      `Lifecycle record integrity failure: ${result.reason}`,
+    );
   }
-  return body;
-}
-
-function activationHistoryProofDigestFromBody(
-  parsed: Record<string, unknown>,
-): string | null {
-  if (parsed.kind !== "p-dev.cursor-cloud-agent-activation-history-proof.v1") {
-    return null;
-  }
-  if (typeof parsed.evidenceDigest === "string" && parsed.evidenceDigest) {
-    return parsed.evidenceDigest;
-  }
-  return null;
+  return result.digest === intendedCanonicalDigest ? "identical" : "divergent";
 }

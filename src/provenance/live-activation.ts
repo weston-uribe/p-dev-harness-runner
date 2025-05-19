@@ -56,6 +56,15 @@ function defaultInstalledFrom(
   return new Date(Date.parse(coverageStart) - 86_400_000).toISOString();
 }
 
+function assertCoverageStartNotBeforeActivation(
+  activatedAt: string,
+  coverageStart: string,
+): void {
+  if (Date.parse(coverageStart) < Date.parse(activatedAt)) {
+    throw new Error("coverageStart must be >= activatedAt");
+  }
+}
+
 export function buildLiveActivationPayload(
   input: BuildLiveActivationPayloadInput,
 ): CanonicalActivationPayload {
@@ -65,6 +74,10 @@ export function buildLiveActivationPayload(
   const sendPin = productionSendSurfacesManifestPin();
   const workflowManifest = getProductionWorkflowInstallManifest();
   const slots = getExpectedRunnerDeploymentSlots();
+  assertCoverageStartNotBeforeActivation(
+    input.activatedAt,
+    input.interval.coverageStart,
+  );
   const installedFrom =
     input.installedFrom ??
     defaultInstalledFrom(input.activatedAt, input.interval.coverageStart);
@@ -149,7 +162,7 @@ export function buildLiveActivationPayload(
       {
         lifecycleKind: "activation",
         epochId: input.epochId,
-        effectiveAt: installedFrom,
+        effectiveAt: input.activatedAt,
         reasonCode: "operator_required_activation",
         producerSchemaVersion: "1",
         evidenceSource: "operator_attestation",

@@ -1,4 +1,5 @@
 import type { CoverageInterval, CoverageSnapshot } from "../../../provenance/coverage.js";
+import type { EpochInvalidationRecord } from "../../../provenance/coverage-lifecycle-schemas.js";
 import type { CoverageSealRecord } from "../../../provenance/coverage-lifecycle-schemas.js";
 
 /** Registry reader output contract version. */
@@ -101,6 +102,8 @@ export interface RegistryReadResult {
   includedRunOperationSetDigest: string;
   integrityFailures: RegistryIntegrityFailure[];
   integrityOk: boolean;
+  epochInvalidation: EpochInvalidationRecord | null;
+  epochInvalidated: boolean;
 }
 
 export interface SourceSegmentRef {

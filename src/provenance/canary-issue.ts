@@ -11,6 +11,13 @@ import type { LinearIssueSnapshot } from "../linear/client.js";
 import { fetchLinearIssue } from "../linear/client.js";
 import { createLinearClient, transitionIssueStatus } from "../linear/writer.js";
 import { resolveWorkspaceDir } from "../p-dev/workspace.js";
+import { resolveProvenanceMode } from "./mode.js";
+import type { ProvenanceLifecycleStoreInterface } from "./lifecycle-store.js";
+import {
+  activationReadinessRemotePath,
+  activationRecordRemotePath,
+} from "./paths.js";
+import { parseActivationReadinessRecord } from "./coverage-lifecycle-schemas.js";
 
 export const PROVENANCE_CANARY_TEAM_ID = "abe28dd5-59a4-49b6-a867-1301a9ba5185";
 export const PROVENANCE_CANARY_PROJECT_ID =
@@ -389,11 +396,21 @@ export async function canaryCreateOrAdopt(input: {
   linearApiKey: string;
   operationId?: string;
   replacementForIssueKey?: string | null;
+  recoveryStageContext?: {
+    recoveryOperationId: string;
+    epochId: string;
+    stage: string;
+    attemptOrdinal?: number;
+    attemptOperationId?: string;
+  } | null;
   now?: () => string;
   client?: LinearClient;
 }): Promise<CanaryCreateResult> {
   const now = input.now ?? (() => new Date().toISOString());
-  const operationId = input.operationId?.trim() || randomUUID();
+  const operationId =
+    input.recoveryStageContext?.attemptOperationId?.trim() ||
+    input.operationId?.trim() ||
+    randomUUID();
   const opMarker = marker(operationId);
 
   const client = input.client ?? createLinearClient(input.linearApiKey);
@@ -561,7 +578,15 @@ export async function canaryTrigger(input: {
   issueKey: string;
   priorProvenanceEventCount?: number;
   client?: LinearClient;
+  epochId?: string;
+  lifecycleStore?: ProvenanceLifecycleStoreInterface;
+  env?: Record<string, string | undefined>;
+  now?: () => string;
 }): Promise<CanaryTriggerResult> {
+  const env = input.env ?? process.env;
+  const now = input.now ?? (() => new Date().toISOString());
+  const mode = resolveProvenanceMode(env);
+
   const issue = await fetchLinearIssue(input.issueKey, input.linearApiKey);
   const validation = await canaryValidate({
     configPath: input.configPath,
@@ -589,6 +614,98 @@ export async function canaryTrigger(input: {
       validation,
       failClosedReason: validation.failClosedReason ?? "validation_failed",
     };
+  }
+
+  if (mode === "required") {
+    const epochId = input.epochId?.trim();
+    if (!epochId) {
+      return {
+        ok: false,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        transitioned: false,
+        fromStatus: issue.status,
+        toStatus: PROVENANCE_CANARY_TRIGGER_STATUS,
+        validation,
+        failClosedReason: "activation_epoch_required",
+      };
+    }
+    const store = input.lifecycleStore;
+    if (!store) {
+      throw new CursorProvenanceError(
+        "cursor_provenance_state_unavailable",
+        "Lifecycle store required to validate activation readiness in required mode.",
+      );
+    }
+    const activationPath = activationRecordRemotePath(epochId);
+    const activationCommitSha =
+      (store.resolveCommitShaForPath
+        ? await store.resolveCommitShaForPath(activationPath)
+        : store.commitShaForPath?.(activationPath)) ?? null;
+    if (!activationCommitSha) {
+      return {
+        ok: false,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        transitioned: false,
+        fromStatus: issue.status,
+        toStatus: PROVENANCE_CANARY_TRIGGER_STATUS,
+        validation,
+        failClosedReason: "activation_missing",
+      };
+    }
+    const readinessPath = activationReadinessRemotePath(epochId);
+    const readinessBody = await store.loadRecord(readinessPath);
+    if (!readinessBody) {
+      return {
+        ok: false,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        transitioned: false,
+        fromStatus: issue.status,
+        toStatus: PROVENANCE_CANARY_TRIGGER_STATUS,
+        validation,
+        failClosedReason: "activation_readiness_missing",
+      };
+    }
+    const readiness = parseActivationReadinessRecord(readinessBody);
+    if (readiness.activationCommitSha !== activationCommitSha) {
+      return {
+        ok: false,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        transitioned: false,
+        fromStatus: issue.status,
+        toStatus: PROVENANCE_CANARY_TRIGGER_STATUS,
+        validation,
+        failClosedReason: "activation_readiness_stale",
+      };
+    }
+    const nowIso = now();
+    if (Date.parse(nowIso) >= Date.parse(readiness.cutoff)) {
+      return {
+        ok: false,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        transitioned: false,
+        fromStatus: issue.status,
+        toStatus: PROVENANCE_CANARY_TRIGGER_STATUS,
+        validation,
+        failClosedReason: "activation_readiness_cutoff_elapsed",
+      };
+    }
+    if (Date.parse(nowIso) >= Date.parse(readiness.activatedAt)) {
+      return {
+        ok: false,
+        issueKey: issue.identifier,
+        issueId: issue.id,
+        transitioned: false,
+        fromStatus: issue.status,
+        toStatus: PROVENANCE_CANARY_TRIGGER_STATUS,
+        validation,
+        failClosedReason: "activation_readiness_after_activation",
+      };
+    }
   }
 
   if (issue.status !== PROVENANCE_CANARY_INITIAL_STATUS) {
