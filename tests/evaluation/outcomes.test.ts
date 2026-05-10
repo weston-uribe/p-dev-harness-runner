@@ -210,18 +210,23 @@ describe("deterministic score ids", () => {
       milestone: "production_verified",
       productionCompletionId,
       timestamp: "2026-07-20T21:41:18.000Z",
+      traceId: "a".repeat(32),
     });
     expect(verified.name).toBe("production_verified");
     expect(verified.dataType).toBe("BOOLEAN");
+    expect(verified.target).toBe("trace");
+    expect(verified.traceId).toBe("a".repeat(32));
 
     const finalOutcome = buildFinalProductionDeliveryOutcomeScore({
       namespace: "dogfood",
       sessionId,
       productionCompletionId,
       timestamp: "2026-07-20T21:41:18.000Z",
+      traceId: "a".repeat(32),
     });
     expect(finalOutcome.name).toBe("delivery_outcome");
     expect(finalOutcome.value).toBe("merged_to_production_deployed");
+    expect(finalOutcome.target).toBe("trace");
     expect(finalOutcome.id).not.toBe(verified.id);
   });
 });

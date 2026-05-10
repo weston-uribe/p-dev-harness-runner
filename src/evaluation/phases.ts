@@ -23,6 +23,10 @@ export const EVALUATION_PHASES = {
     traceName: "p-dev.integration-repair",
     machineKey: "p-dev.integration-repair",
   },
+  production_sync: {
+    traceName: "p-dev.production-sync",
+    machineKey: "p-dev.production-sync",
+  },
 } as const;
 
 export type EvaluationPhase = keyof typeof EVALUATION_PHASES;
