@@ -11,7 +11,7 @@ jobs:
   canary:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Resolve runtime provenance
         run: npx tsx src/workflow/write-github-provenance-env.ts
       - uses: actions/setup-node@v4
