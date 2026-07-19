@@ -1,0 +1,37 @@
+name: private-state-canary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      P_DEV_PUBLIC_RUNNER_MODE: "1"
+      P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github
+      P_DEV_WORKFLOW_STATE_REPOSITORY: ${{ vars.P_DEV_WORKFLOW_STATE_REPOSITORY }}
+      P_DEV_WORKFLOW_STATE_BRANCH: ${{ vars.P_DEV_WORKFLOW_STATE_BRANCH }}
+      P_DEV_JOB_REQUEST_REPOSITORY: ${{ vars.P_DEV_JOB_REQUEST_REPOSITORY }}
+      P_DEV_STATE_GITHUB_TOKEN: ${{ secrets.P_DEV_STATE_GITHUB_TOKEN }}
+    steps:
+      - name: Checkout harness repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run private state canary
+        run: npm run harness:private-state-canary -- --json

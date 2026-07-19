@@ -1,0 +1,134 @@
+name: Harness Reconcile Stranded Issues
+
+# Recovers stranded workflow issues when webhooks were missed.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: "Optional opaque job request id to reconcile a single envelope"
+        required: false
+      dry_run:
+        description: "Evaluate only; no Linear writes or dispatch"
+        required: false
+        default: "false"
+      dispatch:
+        description: "When eligible, send repository_dispatch"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}
+      GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}
+      HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
+      HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
+      GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}
+      P_DEV_PUBLIC_RUNNER_MODE: "1"
+      P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github
+      P_DEV_WORKFLOW_STATE_REPOSITORY: ${{ vars.P_DEV_WORKFLOW_STATE_REPOSITORY }}
+      P_DEV_WORKFLOW_STATE_BRANCH: ${{ vars.P_DEV_WORKFLOW_STATE_BRANCH }}
+      P_DEV_JOB_REQUEST_REPOSITORY: ${{ vars.P_DEV_JOB_REQUEST_REPOSITORY }}
+      P_DEV_STATE_GITHUB_TOKEN: ${{ secrets.P_DEV_STATE_GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout harness repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Claim scoped job request
+        if: github.event.inputs.request_id != ''
+        env:
+          REQUEST_ID: ${{ github.event.inputs.request_id }}
+        run: |
+          npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
+
+      - name: Reconcile workflow issues
+        id: reconcile
+        env:
+          REQUEST_ID: ${{ github.event.inputs.request_id || '' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          DO_DISPATCH: ${{ github.event.inputs.dispatch || 'true' }}
+        run: |
+          set -euo pipefail
+          ARGS=(--json)
+          if [ -n "$REQUEST_ID" ]; then
+            npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
+            ARGS+=(--issue "$HARNESS_ISSUE_KEY")
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          if [ "$DO_DISPATCH" = "true" ]; then
+            ARGS+=(--dispatch)
+          fi
+          npm run harness:reconcile-workflow -- "${ARGS[@]}" | tee reconcile-output.json
+
+      - name: Write reconcile summary
+        if: always()
+        env:
+          REQUEST_ID: ${{ github.event.inputs.request_id || '' }}
+        run: |
+          node <<'EOF'
+          import { appendFileSync, readFileSync } from "node:fs";
+          let summary = {
+            requestId: process.env.REQUEST_ID || undefined,
+            candidatesFound: 0,
+            dispatched: 0,
+            pendingRecorded: 0,
+            noops: 0,
+          };
+          try {
+            const parsed = JSON.parse(readFileSync("reconcile-output.json", "utf8"));
+            summary = {
+              requestId: process.env.REQUEST_ID || undefined,
+              candidatesFound: parsed.candidatesFound ?? 0,
+              dispatched: Array.isArray(parsed.results)
+                ? parsed.results.filter((entry) => entry?.dispatched).length
+                : 0,
+              pendingRecorded: Array.isArray(parsed.results)
+                ? parsed.results.filter((entry) => entry?.pendingRecorded).length
+                : 0,
+              noops: Array.isArray(parsed.results)
+                ? parsed.results.filter((entry) => entry?.action === "noop").length
+                : 0,
+            };
+          } catch {
+            // Keep zeroed aggregate summary when reconcile output is unavailable.
+          }
+          const lines = [
+            "## Harness Reconcile",
+            "",
+            `- Scoped request id: \`${summary.requestId ?? "(all)"}\``,
+            `- Candidates found: \`${summary.candidatesFound}\``,
+            `- Dispatched: \`${summary.dispatched}\``,
+            `- Pending recorded: \`${summary.pendingRecorded}\``,
+            `- Noops: \`${summary.noops}\``,
+          ];
+          const output = `${lines.join("\n")}\n`;
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          if (summaryPath) {
+            appendFileSync(summaryPath, output);
+          } else {
+            console.log(output);
+          }
+          EOF

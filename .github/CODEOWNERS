@@ -1,0 +1,4 @@
+# Security-sensitive workflow and policy changes require owner review
+.github/workflows/ @weston-uribe
+.github/dependabot.yml @weston-uribe
+docs/security.md @weston-uribe

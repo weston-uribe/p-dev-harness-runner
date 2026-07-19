@@ -1,0 +1,83 @@
+# Maintainer-only: disposable synthetic Langfuse Complete Session projection canary.
+name: evaluation-canary-langfuse-projection
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: P_DEV_EVALUATION_NAMESPACE
+        required: false
+        default: weston-dogfood
+        type: string
+      apply:
+        description: Write synthetic session to Langfuse
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Verify eval config names present
+        env:
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_TRACING_ENVIRONMENT: ${{ vars.LANGFUSE_TRACING_ENVIRONMENT }}
+          P_DEV_EVALUATION_PROVIDER: ${{ vars.P_DEV_EVALUATION_PROVIDER }}
+          P_DEV_EVALUATION_CAPTURE_PROFILE: ${{ vars.P_DEV_EVALUATION_CAPTURE_PROFILE }}
+          P_DEV_EVALUATION_NAMESPACE: ${{ inputs.namespace }}
+        run: |
+          missing=0
+          for name in LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_BASE_URL P_DEV_EVALUATION_PROVIDER; do
+            if [ -z "${!name}" ]; then
+              echo "missing_config_name=$name"
+              missing=1
+            else
+              echo "present_config_name=$name"
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Required evaluation config names are missing (values not printed)."
+            exit 1
+          fi
+      - name: Run synthetic Langfuse projection canary
+        env:
+          P_DEV_EVALUATION_PROVIDER: langfuse
+          P_DEV_EVALUATION_CAPTURE_PROFILE: ${{ vars.P_DEV_EVALUATION_CAPTURE_PROFILE || 'content-v1' }}
+          P_DEV_EVALUATION_NAMESPACE: ${{ inputs.namespace }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_TRACING_ENVIRONMENT: ${{ vars.LANGFUSE_TRACING_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          mkdir -p runs/evaluation-reports
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            npm run evaluation:canary-langfuse-projection -- \
+              --apply \
+              --namespace "${{ inputs.namespace }}" \
+              --out runs/evaluation-reports/synthetic-langfuse-projection-canary.json \
+              --json | tee runs/evaluation-reports/synthetic-langfuse-projection-canary.stdout.json
+          else
+            npm run evaluation:canary-langfuse-projection -- \
+              --namespace "${{ inputs.namespace }}" \
+              --out runs/evaluation-reports/synthetic-langfuse-projection-canary.json \
+              --json | tee runs/evaluation-reports/synthetic-langfuse-projection-canary.stdout.json
+          fi
+      - name: Upload canary report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-langfuse-projection-canary
+          path: runs/evaluation-reports/
+          if-no-files-found: warn

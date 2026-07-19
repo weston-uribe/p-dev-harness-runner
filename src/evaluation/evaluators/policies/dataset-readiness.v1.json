@@ -1,0 +1,90 @@
+{
+  "policyId": "dataset-readiness",
+  "policyVersion": "1",
+  "description": "Versioned required deterministic evaluator set for dataset readiness. Adding registry evaluators does not retroactively change this policy.",
+  "notApplicableSatisfiesCompletion": true,
+  "insufficientEvidenceBlocksReadiness": true,
+  "dependencyUnavailableBlocksReadiness": true,
+  "evaluatorErrorBlocksReadiness": true,
+  "failureBlocksEligibility": true,
+  "requiredEvaluators": [
+    {
+      "evaluatorId": "telemetry.canonical_correlation_present",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["phase_execution", "agent_run"],
+      "applicablePhases": null
+    },
+    {
+      "evaluatorId": "telemetry.event_ids_unique",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["phase_execution", "agent_run"],
+      "applicablePhases": null
+    },
+    {
+      "evaluatorId": "telemetry.event_order_valid",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["phase_execution", "agent_run"],
+      "applicablePhases": null
+    },
+    {
+      "evaluatorId": "execution.phase_completed_successfully",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["phase_execution", "agent_run"],
+      "applicablePhases": null
+    },
+    {
+      "evaluatorId": "execution.prompt_artifact_present",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["phase_execution", "agent_run"],
+      "applicablePhases": ["planning", "implementation", "revision", "integration_repair"]
+    },
+    {
+      "evaluatorId": "execution.output_artifact_present",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["phase_execution", "agent_run"],
+      "applicablePhases": ["planning", "implementation", "revision"]
+    },
+    {
+      "evaluatorId": "revision.feedback_identity_present",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["revision_cycle"],
+      "applicablePhases": ["revision"]
+    },
+    {
+      "evaluatorId": "revision.feedback_artifact_present",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["revision_cycle"],
+      "applicablePhases": ["revision"]
+    },
+    {
+      "evaluatorId": "revision.revision_processed_once",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["revision_cycle"],
+      "applicablePhases": ["revision"]
+    },
+    {
+      "evaluatorId": "revision.revision_output_present",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["revision_cycle"],
+      "applicablePhases": ["revision"]
+    },
+    {
+      "evaluatorId": "workflow.phase_sequence_valid",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["workflow_session"],
+      "applicablePhases": null
+    },
+    {
+      "evaluatorId": "workflow.phase_links_consistent",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["workflow_session"],
+      "applicablePhases": null
+    },
+    {
+      "evaluatorId": "workflow.terminal_state_consistent",
+      "evaluatorVersion": "1",
+      "applicableSubjectTypes": ["workflow_session"],
+      "applicablePhases": null
+    }
+  ]
+}

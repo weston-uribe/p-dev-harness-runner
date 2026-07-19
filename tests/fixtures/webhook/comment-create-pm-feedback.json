@@ -1,0 +1,17 @@
+{
+  "action": "create",
+  "type": "Comment",
+  "url": "https://linear.app/weston-product-lab/issue/FRE-3/add-light-and-dark-mode-toggle-to-portfolio-top-nav#comment-ab390a10",
+  "data": {
+    "id": "ab390a10-00eb-419d-ab91-0d9d846c85af",
+    "body": "When I flip to light mode, I can't see the text.",
+    "issueId": "issue-fre-3",
+    "issue": {
+      "id": "issue-fre-3",
+      "identifier": "FRE-3",
+      "url": "https://linear.app/weston-product-lab/issue/FRE-3/add-light-and-dark-mode-toggle-to-portfolio-top-nav"
+    }
+  },
+  "webhookId": "webhook-1",
+  "webhookTimestamp": 1721327154000
+}

@@ -1,0 +1,33 @@
+# Manual final-cycle hook only. Default job is dry-run/preflight.
+# Does not create Cursor Cloud Agents. Do not enable on push/PR.
+name: evaluation-canary-native-skill
+
+on:
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Request live Cloud Agent canary (refused unless final-cycle operator overrides in code)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Native skill canary dry-run/preflight
+        run: |
+          if [ "${{ inputs.live }}" = "true" ]; then
+            npm run evaluation:canary-native-skill -- --live --json
+          else
+            npm run evaluation:canary-native-skill -- --json
+          fi

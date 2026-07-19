@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "product": "p-dev",
+  "role": "harness-workspace",
+  "managedBy": "p-dev",
+  "repository": "weston-uribe/p-dev-harness-runner",
+  "repositoryId": 1305920544,
+  "markerVersion": 3,
+  "operationId": "chunk8b-public-runner-snapshot",
+  "pDevVersion": "0.4.0",
+  "createdFromPackageSnapshot": {
+    "packageName": "p-dev-harness",
+    "packageVersion": "0.4.0",
+    "sourceRepository": "weston-uribe/agentic-product-development-harness",
+    "sourceCommit": "602914d3224580c9de8b1396b3956e5f533829fd",
+    "manifestSchemaVersion": 1,
+    "snapshotContentId": "0f291fab03338bea7853b044ab9a0fed0d284df3c91fd6111ddc8d42eafe2c12",
+    "snapshotSha256": "6434b71b569fde7e4c938786090cfdaaa23df605452171704bdf9bdb87cdd729",
+    "snapshotGitTreeSha1": "a1a18ab16d5f71e8a03f8597f038a43572511c9c",
+    "snapshotCommitSha": "pending",
+    "generationFormatVersion": 1,
+    "defaultBranch": "main"
+  }
+}

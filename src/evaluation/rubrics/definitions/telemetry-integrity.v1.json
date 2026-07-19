@@ -1,0 +1,357 @@
+{
+  "rubricId": "telemetry-integrity",
+  "rubricVersion": "1",
+  "name": "Telemetry integrity",
+  "description": "Machine-verifiable telemetry completeness and correlation for phase_execution and agent_run.",
+  "judgmentChannel": "machine",
+  "applicableSubjectTypes": [
+    "phase_execution",
+    "agent_run"
+  ],
+  "applicablePhases": [
+    "planning",
+    "implementation",
+    "handoff",
+    "revision",
+    "integration_repair",
+    "merge"
+  ],
+  "dimensions": [
+    {
+      "dimensionId": "canonical_correlation_present",
+      "name": "Canonical correlation present",
+      "description": "Required canonical correlation IDs are present on telemetry events.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check canonical_correlation_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check canonical_correlation_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "handoff",
+        "revision",
+        "integration_repair",
+        "merge"
+      ]
+    },
+    {
+      "dimensionId": "event_ids_unique",
+      "name": "Event IDs unique",
+      "description": "Telemetry event IDs are unique within the phase execution.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check event_ids_unique is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check event_ids_unique is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "handoff",
+        "revision",
+        "integration_repair",
+        "merge"
+      ]
+    },
+    {
+      "dimensionId": "event_order_valid",
+      "name": "Event order valid",
+      "description": "Event timestamps are non-decreasing where required.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check event_order_valid is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check event_order_valid is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "handoff",
+        "revision",
+        "integration_repair",
+        "merge"
+      ]
+    },
+    {
+      "dimensionId": "agent_start_finish_paired",
+      "name": "Agent start/finish paired",
+      "description": "Agent start and finish events are paired.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check agent_start_finish_paired is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check agent_start_finish_paired is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "tool_events_correlated",
+      "name": "Tool events correlated",
+      "description": "Tool calls correlate by call ID.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check tool_events_correlated is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check tool_events_correlated is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "telemetry_completeness_artifact_present",
+      "name": "Telemetry completeness artifact present",
+      "description": "Completeness artifact exists and agrees with observed events.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check telemetry_completeness_artifact_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check telemetry_completeness_artifact_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry_completeness"
+      ],
+      "optionalEvidence": [
+        "telemetry"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "handoff",
+        "revision",
+        "integration_repair",
+        "merge"
+      ]
+    },
+    {
+      "dimensionId": "artifact_references_resolve",
+      "name": "Artifact references resolve",
+      "description": "Artifact references resolve under path-confined roots.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check artifact_references_resolve is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check artifact_references_resolve is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [
+        "prompt",
+        "agent_output",
+        "cursor_run_result",
+        "pm_feedback"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "handoff",
+        "revision",
+        "integration_repair",
+        "merge"
+      ]
+    },
+    {
+      "dimensionId": "artifact_hashes_match",
+      "name": "Artifact hashes match",
+      "description": "Referenced artifact SHA-256 matches on-disk content.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check artifact_hashes_match is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check artifact_hashes_match is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [
+        "prompt",
+        "agent_output",
+        "cursor_run_result",
+        "pm_feedback"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "handoff",
+        "revision",
+        "integration_repair",
+        "merge"
+      ]
+    }
+  ]
+}

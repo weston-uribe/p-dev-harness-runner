@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "orchestratorMarker": "harness-orchestrator-v1",
+  "logDirectory": "runs",
+  "agentProvider": {
+    "id": "cursor",
+    "model": { "id": "composer-2.5" }
+  },
+  "defaultModel": { "id": "composer-2.5" },
+  "linear": {
+    "teamKey": "WES",
+    "eligibleStatuses": {
+      "planning": ["Ready for Planning"],
+      "implementation": ["Ready for Build"],
+      "handoff": ["PR Open"],
+      "revision": ["Needs Revision"],
+      "merge": ["Ready to Merge"]
+    },
+    "transitionalStatuses": {
+      "planningInProgress": "Planning",
+      "buildingInProgress": "Building",
+      "prOpen": "PR Open",
+      "pmReview": "PM Review",
+      "blocked": "Blocked",
+      "readyForBuild": "Ready for Build",
+      "needsRevision": "Needs Revision",
+      "revisingInProgress": "Revising",
+      "readyToMerge": "Ready to Merge",
+      "mergingInProgress": "Merging",
+      "mergedToDev": "Merged to Dev",
+      "mergedDeployed": "Merged / Deployed"
+    }
+  },
+  "planning": {
+    "timeoutSeconds": 1800
+  },
+  "implementation": {
+    "timeoutSeconds": 3600,
+    "branchPrefix": "cursor"
+  },
+  "handoff": {
+    "allowPmReviewWithoutPreview": true,
+    "previewRequiredForSuccess": false
+  },
+  "revision": {
+    "timeoutSeconds": 3600
+  },
+  "merge": {
+    "mergeMethod": "squash",
+    "deleteBranchAfterMerge": false,
+    "allowPendingChecks": false,
+    "allowUnknownChecks": false,
+    "allowNeutralChecks": true,
+    "deploymentRequiredForSuccess": false,
+    "deploymentPollTimeoutSeconds": 300,
+    "deploymentPollIntervalSeconds": 15,
+    "checkPollTimeoutSeconds": 120
+  },
+  "preview": {
+    "pollTimeoutSeconds": 300,
+    "pollIntervalSeconds": 15
+  },
+  "repos": [
+    {
+      "id": "target-app",
+      "linearProjects": ["Example Target App"],
+      "targetRepo": "https://github.com/owner/example-target-app",
+      "baseBranch": "dev",
+      "productionBranch": "main",
+      "previewProvider": "vercel",
+      "integrationSuccessStatus": "Merged to Dev",
+      "productionSuccessStatus": "Merged / Deployed",
+      "productionUrl": "https://www.example.com",
+      "integrationPreviewUrl": "https://staging.example.com",
+      "validation": {
+        "commands": ["npm run lint", "npm run build"]
+      }
+    },
+    {
+      "id": "harness",
+      "linearProjects": ["Agentic Product Development Harness"],
+      "targetRepo": "https://github.com/weston-uribe/agentic-product-development-harness",
+      "baseBranch": "main",
+      "productionBranch": "main",
+      "previewProvider": "none"
+    }
+  ],
+  "allowedTargetRepos": [
+    "https://github.com/owner/example-target-app",
+    "https://github.com/weston-uribe/agentic-product-development-harness"
+  ]
+}

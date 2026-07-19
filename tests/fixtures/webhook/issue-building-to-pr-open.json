@@ -1,0 +1,27 @@
+{
+  "action": "update",
+  "type": "Issue",
+  "url": "https://linear.app/weston/issue/WES-13/target-app-link",
+  "webhookId": "000042e3-d123-4980-b49f-8e140eef9330",
+  "webhookTimestamp": 1700000000000,
+  "actor": {
+    "id": "integration-1",
+    "type": "integration",
+    "name": "Harness"
+  },
+  "data": {
+    "id": "539068e2-ae88-4d09-bd75-22eb4a59612f",
+    "identifier": "WES-13",
+    "url": "https://linear.app/weston/issue/WES-13/target-app-link",
+    "state": {
+      "id": "state-pr-open",
+      "name": "PR Open"
+    }
+  },
+  "updatedFrom": {
+    "stateId": "state-building",
+    "state": {
+      "name": "Building"
+    }
+  }
+}

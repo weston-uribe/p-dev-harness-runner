@@ -1,0 +1,6 @@
+{
+  "observabilitySchemaVersion": 1,
+  "sentryPublicDsn": "https://07411796c702eb5c5965e77c7a1e4501@o4510627843407872.ingest.us.sentry.io/4511740568338432",
+  "posthogProjectToken": "phc_t8dFikTMnKyjvnKV7jRKVZMGUu7zXSwoRzaanSQ6qC2n",
+  "posthogIngestionHost": "https://us.i.posthog.com"
+}

@@ -1,0 +1,284 @@
+{
+  "rubricId": "workflow-quality",
+  "rubricVersion": "1",
+  "name": "End-to-end workflow quality",
+  "description": "Human review of a complete workflow_session across phases. Dimension-level judgments only; no aggregate quality score.",
+  "judgmentChannel": "human",
+  "applicableSubjectTypes": [
+    "workflow_session"
+  ],
+  "applicablePhases": null,
+  "dimensions": [
+    {
+      "dimensionId": "desired_outcome_delivered",
+      "name": "Desired outcome delivered",
+      "description": "Was the desired issue outcome delivered by the end of the workflow?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Not delivered",
+          "definition": "Desired outcome was not delivered."
+        },
+        {
+          "value": 2,
+          "label": "Mostly not delivered",
+          "definition": "Only incidental progress toward the outcome."
+        },
+        {
+          "value": 3,
+          "label": "Partially delivered",
+          "definition": "Outcome is incomplete in material ways."
+        },
+        {
+          "value": 4,
+          "label": "Mostly delivered",
+          "definition": "Outcome largely achieved with minor gaps."
+        },
+        {
+          "value": 5,
+          "label": "Delivered",
+          "definition": "Desired outcome was delivered."
+        }
+      ],
+      "requiredEvidence": [],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "avoidable_revision_count",
+      "name": "Avoidable revision count",
+      "description": "How much of the revision churn was avoidable?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Very high avoidable churn",
+          "definition": "Many avoidable revision cycles."
+        },
+        {
+          "value": 2,
+          "label": "High avoidable churn",
+          "definition": "Repeated avoidable feedback loops."
+        },
+        {
+          "value": 3,
+          "label": "Moderate",
+          "definition": "Some avoidable revisions occurred."
+        },
+        {
+          "value": 4,
+          "label": "Low",
+          "definition": "Little avoidable revision churn."
+        },
+        {
+          "value": 5,
+          "label": "Minimal",
+          "definition": "No meaningful avoidable revision churn."
+        }
+      ],
+      "requiredEvidence": [],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "notApplicableSatisfiesCompletion": true,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "workflow_efficiency",
+      "name": "Workflow efficiency",
+      "description": "Was the overall workflow efficient relative to the outcome?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Very inefficient",
+          "definition": "Workflow was heavily wasteful."
+        },
+        {
+          "value": 2,
+          "label": "Inefficient",
+          "definition": "Large avoidable delays or rework."
+        },
+        {
+          "value": 3,
+          "label": "Mixed",
+          "definition": "Outcome reached with notable inefficiency."
+        },
+        {
+          "value": 4,
+          "label": "Efficient",
+          "definition": "Mostly efficient path to outcome."
+        },
+        {
+          "value": 5,
+          "label": "Highly efficient",
+          "definition": "Tight path with little waste."
+        }
+      ],
+      "requiredEvidence": [],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "evidence_completeness",
+      "name": "Evidence completeness",
+      "description": "Was durable evidence complete enough for review and later evaluation?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Severely incomplete",
+          "definition": "Critical evidence is missing across phases."
+        },
+        {
+          "value": 2,
+          "label": "Incomplete",
+          "definition": "Multiple important evidence gaps."
+        },
+        {
+          "value": 3,
+          "label": "Partial",
+          "definition": "Reviewable with material gaps."
+        },
+        {
+          "value": 4,
+          "label": "Mostly complete",
+          "definition": "Minor evidence gaps only."
+        },
+        {
+          "value": 5,
+          "label": "Complete",
+          "definition": "Evidence is sufficient for durable review."
+        }
+      ],
+      "requiredEvidence": [],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "delivery_reliability",
+      "name": "Delivery reliability",
+      "description": "How reliable was delivery through handoff/merge outcomes?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Unreliable",
+          "definition": "Delivery failed or required heavy recovery."
+        },
+        {
+          "value": 2,
+          "label": "Fragile",
+          "definition": "Delivery completed only after major issues."
+        },
+        {
+          "value": 3,
+          "label": "Uneven",
+          "definition": "Delivery succeeded with notable instability."
+        },
+        {
+          "value": 4,
+          "label": "Reliable",
+          "definition": "Delivery succeeded with minor issues."
+        },
+        {
+          "value": 5,
+          "label": "Highly reliable",
+          "definition": "Delivery path was stable and conclusive."
+        }
+      ],
+      "requiredEvidence": [],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "overall_quality",
+      "name": "Overall quality",
+      "description": "Overall workflow quality judgment (dimension-level only; not a computed aggregate).",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Poor",
+          "definition": "Workflow quality is unacceptable."
+        },
+        {
+          "value": 2,
+          "label": "Weak",
+          "definition": "Significant quality problems dominate."
+        },
+        {
+          "value": 3,
+          "label": "Mixed",
+          "definition": "Usable outcome with notable quality issues."
+        },
+        {
+          "value": 4,
+          "label": "Good",
+          "definition": "Strong overall quality with minor issues."
+        },
+        {
+          "value": 5,
+          "label": "Excellent",
+          "definition": "High-quality end-to-end workflow."
+        }
+      ],
+      "requiredEvidence": [],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    }
+  ]
+}

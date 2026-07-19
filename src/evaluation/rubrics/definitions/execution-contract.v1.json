@@ -1,0 +1,500 @@
+{
+  "rubricId": "execution-contract",
+  "rubricVersion": "1",
+  "name": "Execution contract",
+  "description": "Machine-verifiable operational and contract facts for phase_execution and agent_run subjects.",
+  "judgmentChannel": "machine",
+  "applicableSubjectTypes": [
+    "phase_execution",
+    "agent_run"
+  ],
+  "applicablePhases": [
+    "planning",
+    "implementation",
+    "handoff",
+    "revision",
+    "integration_repair",
+    "merge"
+  ],
+  "dimensions": [
+    {
+      "dimensionId": "phase_completed_successfully",
+      "name": "Phase completed successfully",
+      "description": "Manifest finalOutcome is success for the phase execution.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check phase_completed_successfully is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check phase_completed_successfully is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "handoff",
+        "revision",
+        "integration_repair",
+        "merge"
+      ]
+    },
+    {
+      "dimensionId": "expected_agent_run_present",
+      "name": "Expected agent run present",
+      "description": "Cursor agent run identity is present when an agent phase expects one.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check expected_agent_run_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check expected_agent_run_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "cursor_run_result"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "prompt_artifact_present",
+      "name": "Prompt artifact present",
+      "description": "Rendered prompt artifact exists with verified hash.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check prompt_artifact_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check prompt_artifact_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "prompt"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "output_artifact_present",
+      "name": "Output artifact present",
+      "description": "Agent output artifact exists with verified hash.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check output_artifact_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check output_artifact_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "model_identity_present",
+      "name": "Model identity present",
+      "description": "Model identity is present and consistent across evidence.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check model_identity_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check model_identity_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "cursor_run_result",
+        "telemetry"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "usage_evidence_present",
+      "name": "Usage evidence present",
+      "description": "Token usage values are finite and internally consistent when present.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check usage_evidence_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check usage_evidence_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "cursor_run_result",
+        "telemetry"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "pr_created_when_required",
+      "name": "PR created when required",
+      "description": "PR identity exists when the phase requires a pull request.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check pr_created_when_required is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check pr_created_when_required is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "pr_metadata"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution"
+      ],
+      "applicablePhases": [
+        "implementation",
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "target_repository_consistent",
+      "name": "Target repository consistent",
+      "description": "Repository identity agrees across manifest and PR evidence.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check target_repository_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check target_repository_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "pr_metadata"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution"
+      ],
+      "applicablePhases": [
+        "implementation",
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "base_branch_consistent",
+      "name": "Base branch consistent",
+      "description": "Base branch agrees across available PR evidence.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check base_branch_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check base_branch_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "pr_metadata"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution"
+      ],
+      "applicablePhases": [
+        "implementation",
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "validation_commands_observed",
+      "name": "Validation commands observed",
+      "description": "Expected validation commands appear in normalized tool telemetry.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check validation_commands_observed is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check validation_commands_observed is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [
+        "prompt",
+        "manifest"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "validation_commands_succeeded",
+      "name": "Validation commands succeeded",
+      "description": "Observed required validation commands completed successfully.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check validation_commands_succeeded is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check validation_commands_succeeded is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [
+        "prompt",
+        "manifest"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution",
+        "agent_run"
+      ],
+      "applicablePhases": [
+        "implementation",
+        "revision",
+        "integration_repair"
+      ]
+    },
+    {
+      "dimensionId": "final_report_identifiers_consistent",
+      "name": "Final report identifiers consistent",
+      "description": "Report identifiers agree with manifest and subject linkage.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check final_report_identifiers_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check final_report_identifiers_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output",
+        "manifest"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "phase_execution"
+      ],
+      "applicablePhases": [
+        "planning",
+        "implementation",
+        "revision",
+        "handoff",
+        "merge"
+      ]
+    }
+  ]
+}

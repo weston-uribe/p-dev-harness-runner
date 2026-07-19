@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "orchestratorMarker": "harness-orchestrator-v1",
+  "logDirectory": "runs",
+  "repos": [
+    {
+      "id": "target-app",
+      "linearProjects": ["Example Target App"],
+      "targetRepo": "https://github.com/owner/example-target-app",
+      "baseBranch": "main"
+    }
+  ],
+  "allowedTargetRepos": [
+    "https://github.com/owner/example-target-app"
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "schemaNote": "Synthetic SDKMessage shapes matching @cursor/sdk@1.0.23 messages.d.ts",
+  "messages": [
+    {
+      "type": "system",
+      "subtype": "init",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "model": { "id": "composer-2.5" },
+      "tools": ["shell", "read", "write", "edit", "grep", "glob"]
+    },
+    {
+      "type": "request",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "request_id": "req-abc"
+    },
+    {
+      "type": "assistant",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "message": {
+        "role": "assistant",
+        "content": [{ "type": "text", "text": "I will inspect the repo." }]
+      }
+    },
+    {
+      "type": "tool_call",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "call_id": "call-shell-1",
+      "name": "shell",
+      "status": "running",
+      "args": { "command": "npm test", "working_directory": "." }
+    },
+    {
+      "type": "tool_call",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "call_id": "call-shell-1",
+      "name": "shell",
+      "status": "completed",
+      "args": { "command": "npm test", "working_directory": "." },
+      "result": { "exitCode": 0, "stdout": "ok", "stderr": "" }
+    },
+    {
+      "type": "tool_call",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "call_id": "call-read-1",
+      "name": "read",
+      "status": "running",
+      "args": { "path": "src/index.ts" }
+    },
+    {
+      "type": "tool_call",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "call_id": "call-read-unmatched",
+      "name": "read",
+      "status": "running",
+      "args": { "path": "src/missing.ts" }
+    },
+    {
+      "type": "usage",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 50,
+        "cacheReadTokens": 10,
+        "cacheWriteTokens": 5,
+        "totalTokens": 150,
+        "reasoningTokens": 20
+      }
+    },
+    {
+      "type": "status",
+      "agent_id": "bc-agent-1",
+      "run_id": "run-1",
+      "status": "FINISHED"
+    }
+  ],
+  "runResult": {
+    "id": "run-1",
+    "requestId": "req-abc",
+    "status": "finished",
+    "result": "Done.",
+    "model": { "id": "composer-2.5" },
+    "durationMs": 1200,
+    "usage": {
+      "inputTokens": 100,
+      "outputTokens": 50,
+      "cacheReadTokens": 10,
+      "cacheWriteTokens": 5,
+      "totalTokens": 150,
+      "reasoningTokens": 20
+    },
+    "git": { "branches": [] }
+  }
+}

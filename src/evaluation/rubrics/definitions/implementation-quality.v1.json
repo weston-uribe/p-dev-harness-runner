@@ -1,0 +1,408 @@
+{
+  "rubricId": "implementation-quality",
+  "rubricVersion": "1",
+  "name": "Implementation quality",
+  "description": "Human review of a single implementation phase_execution for task completion, scope, validation, and report accuracy.",
+  "judgmentChannel": "human",
+  "applicableSubjectTypes": [
+    "phase_execution"
+  ],
+  "applicablePhases": [
+    "implementation"
+  ],
+  "dimensions": [
+    {
+      "dimensionId": "task_completed",
+      "name": "Task completed",
+      "description": "Did the implementation complete the requested task?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Not completed",
+          "definition": "Core requested work is missing or abandoned."
+        },
+        {
+          "value": 2,
+          "label": "Mostly incomplete",
+          "definition": "Only minor fragments of the task are present."
+        },
+        {
+          "value": 3,
+          "label": "Partially completed",
+          "definition": "Main path exists but material gaps remain."
+        },
+        {
+          "value": 4,
+          "label": "Mostly completed",
+          "definition": "Task is done with only minor unfinished edges."
+        },
+        {
+          "value": 5,
+          "label": "Fully completed",
+          "definition": "Requested task is complete and usable."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output",
+        "prompt"
+      ],
+      "optionalEvidence": [
+        "pr_metadata",
+        "cursor_run_result"
+      ],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "acceptance_criteria_satisfied",
+      "name": "Acceptance criteria satisfied",
+      "description": "Were issue acceptance criteria satisfied?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "None satisfied",
+          "definition": "Acceptance criteria are unmet."
+        },
+        {
+          "value": 2,
+          "label": "Few satisfied",
+          "definition": "Only incidental criteria appear met."
+        },
+        {
+          "value": 3,
+          "label": "Some satisfied",
+          "definition": "Important criteria remain open."
+        },
+        {
+          "value": 4,
+          "label": "Mostly satisfied",
+          "definition": "Nearly all criteria are met with minor gaps."
+        },
+        {
+          "value": 5,
+          "label": "Fully satisfied",
+          "definition": "All stated acceptance criteria are met with evidence."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output",
+        "prompt"
+      ],
+      "optionalEvidence": [
+        "pr_metadata"
+      ],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "scope_adherence",
+      "name": "Scope adherence",
+      "description": "Did the work stay within the requested scope?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Severe scope break",
+          "definition": "Large unrelated changes dominate the diff."
+        },
+        {
+          "value": 2,
+          "label": "Major drift",
+          "definition": "Significant unrequested work is present."
+        },
+        {
+          "value": 3,
+          "label": "Moderate drift",
+          "definition": "Some unrequested changes are present."
+        },
+        {
+          "value": 4,
+          "label": "Minor drift",
+          "definition": "Almost entirely in scope with small extras."
+        },
+        {
+          "value": 5,
+          "label": "In scope",
+          "definition": "Changes match the requested scope."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "pr_metadata"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "implementation_appropriateness",
+      "name": "Implementation appropriateness",
+      "description": "Was the technical approach appropriate for the codebase and problem?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Inappropriate",
+          "definition": "Approach conflicts with architecture or requirements."
+        },
+        {
+          "value": 2,
+          "label": "Weak",
+          "definition": "Approach is fragile or poorly fitted."
+        },
+        {
+          "value": 3,
+          "label": "Acceptable",
+          "definition": "Works but with notable design concerns."
+        },
+        {
+          "value": 4,
+          "label": "Good",
+          "definition": "Sound approach with minor concerns."
+        },
+        {
+          "value": 5,
+          "label": "Excellent",
+          "definition": "Approach fits conventions and constraints well."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "prompt"
+      ],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "validation_adequacy",
+      "name": "Validation adequacy",
+      "description": "Was validation adequate for the change?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "No validation",
+          "definition": "No meaningful validation evidence."
+        },
+        {
+          "value": 2,
+          "label": "Inadequate",
+          "definition": "Validation is superficial or mismatched."
+        },
+        {
+          "value": 3,
+          "label": "Partial",
+          "definition": "Some relevant checks ran; gaps remain."
+        },
+        {
+          "value": 4,
+          "label": "Mostly adequate",
+          "definition": "Key checks covered with minor gaps."
+        },
+        {
+          "value": 5,
+          "label": "Adequate",
+          "definition": "Validation matches risk and change surface."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "cursor_run_result"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "final_report_accuracy",
+      "name": "Final report accuracy",
+      "description": "Did the final report accurately describe what was done and validated?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Inaccurate",
+          "definition": "Report materially misstates outcomes."
+        },
+        {
+          "value": 2,
+          "label": "Mostly inaccurate",
+          "definition": "Major claims are unsupported."
+        },
+        {
+          "value": 3,
+          "label": "Mixed",
+          "definition": "Some accurate claims with notable omissions or errors."
+        },
+        {
+          "value": 4,
+          "label": "Mostly accurate",
+          "definition": "Report is largely correct with minor issues."
+        },
+        {
+          "value": 5,
+          "label": "Accurate",
+          "definition": "Report matches evidence and outcomes."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "pr_clarity",
+      "name": "PR clarity",
+      "description": "Is the PR clear enough for review and merge decisions?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Unclear",
+          "definition": "PR cannot be understood or reviewed."
+        },
+        {
+          "value": 2,
+          "label": "Poor",
+          "definition": "PR description/diff organization is hard to follow."
+        },
+        {
+          "value": 3,
+          "label": "Adequate",
+          "definition": "Reviewable with effort."
+        },
+        {
+          "value": 4,
+          "label": "Clear",
+          "definition": "PR is easy to review with minor gaps."
+        },
+        {
+          "value": 5,
+          "label": "Excellent",
+          "definition": "PR intent, scope, and validation are clear."
+        }
+      ],
+      "requiredEvidence": [
+        "pr_metadata"
+      ],
+      "optionalEvidence": [
+        "agent_output"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "notApplicableSatisfiesCompletion": true,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "tool_use_efficiency",
+      "name": "Tool use efficiency",
+      "description": "Was tool use efficient and purposeful rather than wasteful or confused?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Highly inefficient",
+          "definition": "Tool use is chaotic or largely wasted."
+        },
+        {
+          "value": 2,
+          "label": "Inefficient",
+          "definition": "Many avoidable retries or irrelevant tools."
+        },
+        {
+          "value": 3,
+          "label": "Mixed",
+          "definition": "Useful progress with notable inefficiency."
+        },
+        {
+          "value": 4,
+          "label": "Efficient",
+          "definition": "Mostly purposeful tool use."
+        },
+        {
+          "value": 5,
+          "label": "Highly efficient",
+          "definition": "Tight, purposeful tool use with little waste."
+        }
+      ],
+      "requiredEvidence": [],
+      "optionalEvidence": [
+        "cursor_run_result"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "notApplicableSatisfiesCompletion": true,
+      "unscoredCommentRequired": true
+    }
+  ]
+}

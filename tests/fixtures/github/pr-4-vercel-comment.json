@@ -1,0 +1,10 @@
+{
+  "comments": [
+    {
+      "author": "vercel[bot]",
+      "body": "The latest updates on your projects. Learn more about [Vercel for GitHub](https://vercel.link/github-learn-more).\n\n| Project | Deployment | Actions | Updated (UTC) |\n| :--- | :----- | :------ | :------ |\n| [example-target-app](https://vercel.com/example/example-target-app) | ![Ready](https://vercel.com/static/status/ready.svg) [Ready](https://vercel.com/example/deployment-id) | [Preview](https://staging-git-cursor-example.vercel.app), [Comment](https://vercel.live/open-feedback/example) | Jul 7, 2026 4:53am |",
+      "createdAt": "2026-07-07T04:53:36Z"
+    }
+  ],
+  "expectedPreviewUrl": "https://staging-git-cursor-example.vercel.app"
+}

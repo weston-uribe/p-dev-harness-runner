@@ -1,0 +1,12 @@
+name: public-runner-smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - run: echo "public_runner_smoke_ok"
