@@ -1,0 +1,301 @@
+{
+  "rubricId": "planning-quality",
+  "rubricVersion": "1",
+  "name": "Planning quality",
+  "description": "Human review of a planning phase_execution for problem understanding, feasibility, and validation planning.",
+  "judgmentChannel": "human",
+  "applicableSubjectTypes": [
+    "phase_execution"
+  ],
+  "applicablePhases": [
+    "planning"
+  ],
+  "dimensions": [
+    {
+      "dimensionId": "problem_understood",
+      "name": "Problem understood",
+      "description": "Does the plan demonstrate understanding of the problem?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Misunderstood",
+          "definition": "Plan addresses the wrong problem."
+        },
+        {
+          "value": 2,
+          "label": "Weak",
+          "definition": "Problem framing is shallow or confused."
+        },
+        {
+          "value": 3,
+          "label": "Partial",
+          "definition": "Core problem is partly understood."
+        },
+        {
+          "value": 4,
+          "label": "Good",
+          "definition": "Problem is largely understood."
+        },
+        {
+          "value": 5,
+          "label": "Excellent",
+          "definition": "Problem and constraints are clearly understood."
+        }
+      ],
+      "requiredEvidence": [
+        "prompt",
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "requirements_covered",
+      "name": "Requirements covered",
+      "description": "Are stated requirements covered by the plan?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Missing",
+          "definition": "Requirements are largely ignored."
+        },
+        {
+          "value": 2,
+          "label": "Sparse",
+          "definition": "Only incidental requirements appear."
+        },
+        {
+          "value": 3,
+          "label": "Partial",
+          "definition": "Important requirements are missing."
+        },
+        {
+          "value": 4,
+          "label": "Mostly covered",
+          "definition": "Nearly all requirements are addressed."
+        },
+        {
+          "value": 5,
+          "label": "Covered",
+          "definition": "Requirements are clearly covered."
+        }
+      ],
+      "requiredEvidence": [
+        "prompt",
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "plan_feasible",
+      "name": "Plan feasible",
+      "description": "Is the plan feasible given the repo and constraints?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Infeasible",
+          "definition": "Plan cannot be executed as written."
+        },
+        {
+          "value": 2,
+          "label": "Unlikely",
+          "definition": "Major feasibility blockers remain."
+        },
+        {
+          "value": 3,
+          "label": "Uncertain",
+          "definition": "Feasibility is questionable."
+        },
+        {
+          "value": 4,
+          "label": "Likely feasible",
+          "definition": "Plan looks workable with minor risks."
+        },
+        {
+          "value": 5,
+          "label": "Feasible",
+          "definition": "Plan is clearly executable."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "prompt"
+      ],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "scope_clear",
+      "name": "Scope clear",
+      "description": "Is in-scope / out-of-scope clear?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Unclear",
+          "definition": "Scope boundaries are absent."
+        },
+        {
+          "value": 2,
+          "label": "Vague",
+          "definition": "Scope is hard to operationalize."
+        },
+        {
+          "value": 3,
+          "label": "Partially clear",
+          "definition": "Some boundaries exist with ambiguity."
+        },
+        {
+          "value": 4,
+          "label": "Mostly clear",
+          "definition": "Scope is clear with minor ambiguity."
+        },
+        {
+          "value": 5,
+          "label": "Clear",
+          "definition": "In/out of scope is explicit."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "risks_identified",
+      "name": "Risks identified",
+      "description": "Are meaningful risks identified?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "None",
+          "definition": "No relevant risks identified."
+        },
+        {
+          "value": 2,
+          "label": "Token risks",
+          "definition": "Risks are generic or irrelevant."
+        },
+        {
+          "value": 3,
+          "label": "Partial",
+          "definition": "Some real risks noted; gaps remain."
+        },
+        {
+          "value": 4,
+          "label": "Good",
+          "definition": "Key risks are identified."
+        },
+        {
+          "value": 5,
+          "label": "Thorough",
+          "definition": "Material risks and mitigations are clear."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "validation_plan_adequate",
+      "name": "Validation plan adequate",
+      "description": "Is the planned validation adequate for the work?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Missing",
+          "definition": "No validation plan."
+        },
+        {
+          "value": 2,
+          "label": "Inadequate",
+          "definition": "Validation plan is mismatched or token."
+        },
+        {
+          "value": 3,
+          "label": "Partial",
+          "definition": "Some validation planned; gaps remain."
+        },
+        {
+          "value": 4,
+          "label": "Mostly adequate",
+          "definition": "Key validation is planned."
+        },
+        {
+          "value": 5,
+          "label": "Adequate",
+          "definition": "Validation plan matches risk and scope."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    }
+  ]
+}

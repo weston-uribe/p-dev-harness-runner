@@ -1,0 +1,268 @@
+{
+  "rubricId": "revision-contract",
+  "rubricVersion": "1",
+  "name": "Revision contract",
+  "description": "Machine-verifiable identity and continuity facts for revision_cycle subjects.",
+  "judgmentChannel": "machine",
+  "applicableSubjectTypes": [
+    "revision_cycle"
+  ],
+  "applicablePhases": [
+    "revision"
+  ],
+  "dimensions": [
+    {
+      "dimensionId": "feedback_identity_present",
+      "name": "Feedback identity present",
+      "description": "PM feedback comment ID is present on the revision cycle.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check feedback_identity_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check feedback_identity_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "revision_cycle"
+      ],
+      "applicablePhases": [
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "feedback_artifact_present",
+      "name": "Feedback artifact present",
+      "description": "PM feedback artifact reference resolves with verified hash.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check feedback_artifact_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check feedback_artifact_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "pm_feedback"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "revision_cycle"
+      ],
+      "applicablePhases": [
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "revision_processed_once",
+      "name": "Revision processed once",
+      "description": "Exactly one effective revision cycle uses the feedback ID.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check revision_processed_once is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check revision_processed_once is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest",
+        "session_subjects"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "revision_cycle"
+      ],
+      "applicablePhases": [
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "builder_continuity_preserved",
+      "name": "Builder continuity preserved",
+      "description": "Previous implementation/handoff relationships are consistent.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check builder_continuity_preserved is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check builder_continuity_preserved is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "session_subjects"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "revision_cycle"
+      ],
+      "applicablePhases": [
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "same_pr_preserved",
+      "name": "Same PR preserved",
+      "description": "Revision remains attached to the expected PR and branch.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check same_pr_preserved is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check same_pr_preserved is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "manifest"
+      ],
+      "optionalEvidence": [
+        "pr_metadata"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "revision_cycle"
+      ],
+      "applicablePhases": [
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "post_revision_validation_observed",
+      "name": "Post-revision validation observed",
+      "description": "Post-revision validation evidence exists when required.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check post_revision_validation_observed is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check post_revision_validation_observed is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "telemetry"
+      ],
+      "optionalEvidence": [
+        "manifest",
+        "prompt"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "revision_cycle"
+      ],
+      "applicablePhases": [
+        "revision"
+      ]
+    },
+    {
+      "dimensionId": "revision_output_present",
+      "name": "Revision output present",
+      "description": "Revision output artifact exists with verified hash.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check revision_output_present is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check revision_output_present is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "revision_cycle"
+      ],
+      "applicablePhases": [
+        "revision"
+      ]
+    }
+  ]
+}

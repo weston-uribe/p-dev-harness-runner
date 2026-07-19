@@ -1,0 +1,28 @@
+{
+  "stateMachineId": "harness-workflow",
+  "stateMachineVersion": "1",
+  "description": "Versioned workflow state machine for workflow-integrity evaluators.",
+  "optionalPhases": ["planning", "integration_repair"],
+  "requiredCorePhases": ["implementation"],
+  "repeatablePhases": ["revision"],
+  "terminalPhases": ["merge"],
+  "handoffPhases": ["handoff"],
+  "allowedTransitions": [
+    { "from": null, "to": "planning" },
+    { "from": null, "to": "implementation" },
+    { "from": "planning", "to": "implementation" },
+    { "from": "implementation", "to": "handoff" },
+    { "from": "implementation", "to": "revision" },
+    { "from": "implementation", "to": "integration_repair" },
+    { "from": "handoff", "to": "revision" },
+    { "from": "handoff", "to": "merge" },
+    { "from": "revision", "to": "handoff" },
+    { "from": "revision", "to": "revision" },
+    { "from": "revision", "to": "integration_repair" },
+    { "from": "integration_repair", "to": "handoff" },
+    { "from": "integration_repair", "to": "merge" },
+    { "from": "integration_repair", "to": "revision" }
+  ],
+  "terminalOutcomes": ["success", "failed", "skipped", "duplicate"],
+  "deliveryModes": ["integration", "production"]
+}

@@ -1,0 +1,357 @@
+{
+  "rubricId": "revision-quality",
+  "rubricVersion": "1",
+  "name": "Revision quality",
+  "description": "Human review of a revision_cycle: PM feedback plus the revision execution that addresses it.",
+  "judgmentChannel": "human",
+  "applicableSubjectTypes": [
+    "revision_cycle"
+  ],
+  "applicablePhases": [
+    "revision"
+  ],
+  "dimensions": [
+    {
+      "dimensionId": "feedback_understood",
+      "name": "Feedback understood",
+      "description": "Did the revision demonstrate understanding of the PM feedback?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Misunderstood",
+          "definition": "Response addresses the wrong problem."
+        },
+        {
+          "value": 2,
+          "label": "Poor understanding",
+          "definition": "Only superficial acknowledgment of feedback."
+        },
+        {
+          "value": 3,
+          "label": "Partial understanding",
+          "definition": "Core ask is partly recognized."
+        },
+        {
+          "value": 4,
+          "label": "Mostly understood",
+          "definition": "Feedback intent is largely clear in the response."
+        },
+        {
+          "value": 5,
+          "label": "Fully understood",
+          "definition": "Feedback intent is clearly reflected in the changes."
+        }
+      ],
+      "requiredEvidence": [
+        "pm_feedback",
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "prompt"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "requested_change_completed",
+      "name": "Requested change completed",
+      "description": "Was the requested change completed?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Not done",
+          "definition": "Requested change is absent."
+        },
+        {
+          "value": 2,
+          "label": "Mostly not done",
+          "definition": "Only trivial fragments address the request."
+        },
+        {
+          "value": 3,
+          "label": "Partially done",
+          "definition": "Important parts of the request remain open."
+        },
+        {
+          "value": 4,
+          "label": "Mostly done",
+          "definition": "Request is largely complete with minor gaps."
+        },
+        {
+          "value": 5,
+          "label": "Done",
+          "definition": "Requested change is complete."
+        }
+      ],
+      "requiredEvidence": [
+        "pm_feedback",
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "unrequested_changes_avoided",
+      "name": "Unrequested changes avoided",
+      "description": "Were unrequested changes avoided?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Large extras",
+          "definition": "Substantial unrequested work dominates."
+        },
+        {
+          "value": 2,
+          "label": "Many extras",
+          "definition": "Multiple unrequested changes are present."
+        },
+        {
+          "value": 3,
+          "label": "Some extras",
+          "definition": "Noticeable unrequested changes exist."
+        },
+        {
+          "value": 4,
+          "label": "Few extras",
+          "definition": "Only minor unrequested touch-ups."
+        },
+        {
+          "value": 5,
+          "label": "No extras",
+          "definition": "Changes are limited to the request."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "pm_feedback"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "existing_behavior_preserved",
+      "name": "Existing behavior preserved",
+      "description": "Was already-accepted behavior preserved outside the requested change?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Broken",
+          "definition": "Prior accepted behavior is clearly broken."
+        },
+        {
+          "value": 2,
+          "label": "Likely broken",
+          "definition": "High risk of regression without justification."
+        },
+        {
+          "value": 3,
+          "label": "Uncertain",
+          "definition": "Preservation is unclear from evidence."
+        },
+        {
+          "value": 4,
+          "label": "Mostly preserved",
+          "definition": "No clear regressions; minor risk remains."
+        },
+        {
+          "value": 5,
+          "label": "Preserved",
+          "definition": "Existing behavior appears preserved."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "pm_feedback"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "validation_repeated_appropriately",
+      "name": "Validation repeated appropriately",
+      "description": "Was validation re-run appropriately after the revision?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Not repeated",
+          "definition": "No relevant re-validation after changes."
+        },
+        {
+          "value": 2,
+          "label": "Inadequate",
+          "definition": "Re-validation is token or mismatched."
+        },
+        {
+          "value": 3,
+          "label": "Partial",
+          "definition": "Some checks repeated; gaps remain."
+        },
+        {
+          "value": 4,
+          "label": "Mostly adequate",
+          "definition": "Key checks repeated with minor gaps."
+        },
+        {
+          "value": 5,
+          "label": "Appropriate",
+          "definition": "Validation matches the revision risk."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "cursor_run_result"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "revision_report_accuracy",
+      "name": "Revision report accuracy",
+      "description": "Did the revision report accurately describe the response to feedback?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Inaccurate",
+          "definition": "Report misstates what changed."
+        },
+        {
+          "value": 2,
+          "label": "Mostly inaccurate",
+          "definition": "Major claims unsupported."
+        },
+        {
+          "value": 3,
+          "label": "Mixed",
+          "definition": "Partial accuracy with notable gaps."
+        },
+        {
+          "value": 4,
+          "label": "Mostly accurate",
+          "definition": "Largely correct with minor issues."
+        },
+        {
+          "value": 5,
+          "label": "Accurate",
+          "definition": "Report matches evidence and feedback resolution."
+        }
+      ],
+      "requiredEvidence": [
+        "agent_output"
+      ],
+      "optionalEvidence": [
+        "pm_feedback"
+      ],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    },
+    {
+      "dimensionId": "feedback_fully_resolved",
+      "name": "Feedback fully resolved",
+      "description": "Is the PM feedback fully resolved?",
+      "responseType": "ordinal",
+      "allowedValues": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "anchors": [
+        {
+          "value": 1,
+          "label": "Unresolved",
+          "definition": "Feedback remains open."
+        },
+        {
+          "value": 2,
+          "label": "Mostly unresolved",
+          "definition": "Only trivial parts addressed."
+        },
+        {
+          "value": 3,
+          "label": "Partially resolved",
+          "definition": "Material feedback remains open."
+        },
+        {
+          "value": 4,
+          "label": "Mostly resolved",
+          "definition": "Nearly fully resolved with minor leftovers."
+        },
+        {
+          "value": 5,
+          "label": "Fully resolved",
+          "definition": "Feedback is fully addressed."
+        }
+      ],
+      "requiredEvidence": [
+        "pm_feedback",
+        "agent_output"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": true,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": true
+    }
+  ]
+}

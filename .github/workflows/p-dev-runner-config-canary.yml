@@ -1,0 +1,29 @@
+name: PDev runner config canary
+run-name: PDev runner config canary ${{ inputs.canary_operation_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      canary_operation_id:
+        description: Unique operation id used to locate this canary run after dispatch 204
+        required: true
+        type: string
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve runtime provenance
+        run: npx tsx src/workflow/write-github-provenance-env.ts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run build
+      - name: Run config canary
+        env:
+          HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
+          HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
+          GITHUB_ACTIONS: "true"
+        run: npm run harness:canary-runner-config
+      - name: Assert built evaluation assets
+        run: node scripts/assert-built-eval-assets.mjs

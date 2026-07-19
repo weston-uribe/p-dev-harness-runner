@@ -1,0 +1,654 @@
+{
+  "$ref": "#/definitions/HarnessConfig",
+  "definitions": {
+    "HarnessConfig": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "orchestratorMarker": {
+          "type": "string",
+          "default": "harness-orchestrator-v1"
+        },
+        "logDirectory": {
+          "type": "string",
+          "default": "runs"
+        },
+        "agentProvider": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "cursor"
+            },
+            "model": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "defaultModel": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "roleModels": {
+          "type": "object",
+          "properties": {
+            "planner": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            "builder": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            "planReviewer": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            "codeReviewer": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            "codeReviser": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "promptProvider": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "local",
+                "langfuse_with_local_fallback"
+              ],
+              "default": "local"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "cacheTtlSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "preferredSkillMode": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "native_when_supported",
+                "rendered_fallback"
+              ],
+              "default": "automatic"
+            }
+          },
+          "additionalProperties": false
+        },
+        "workflow": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "string",
+              "minLength": 1,
+              "default": "product-development-v2"
+            },
+            "optionalPhases": {
+              "type": "object",
+              "description": "Field defaults match legacy migration (reviews off) when a workflow object is present but fields are omitted. Brand-new first-run configs persist both true via the config builder.",
+              "properties": {
+                "planReview": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "codeReview": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "additionalProperties": false,
+              "default": {
+                "planReview": false,
+                "codeReview": false
+              }
+            },
+            "cycleLimits": {
+              "type": "object",
+              "properties": {
+                "planReview": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "default": 4
+                },
+                "codeReview": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "default": 4
+                }
+              },
+              "additionalProperties": false,
+              "default": {
+                "planReview": 4,
+                "codeReview": 4
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "linear": {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "teamKey": {
+              "type": "string"
+            },
+            "teamId": {
+              "type": "string"
+            },
+            "eligibleStatuses": {
+              "type": "object",
+              "properties": {
+                "planning": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "implementation": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "handoff": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "revision": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "merge": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "transitionalStatuses": {
+              "type": "object",
+              "properties": {
+                "planningInProgress": {
+                  "type": "string"
+                },
+                "buildingInProgress": {
+                  "type": "string"
+                },
+                "prOpen": {
+                  "type": "string"
+                },
+                "pmReview": {
+                  "type": "string"
+                },
+                "blocked": {
+                  "type": "string"
+                },
+                "readyForBuild": {
+                  "type": "string"
+                },
+                "needsRevision": {
+                  "type": "string"
+                },
+                "revisingInProgress": {
+                  "type": "string"
+                },
+                "readyToMerge": {
+                  "type": "string"
+                },
+                "mergingInProgress": {
+                  "type": "string"
+                },
+                "mergedToDev": {
+                  "type": "string"
+                },
+                "mergedDeployed": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "planning": {
+          "type": "object",
+          "properties": {
+            "timeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "implementation": {
+          "type": "object",
+          "properties": {
+            "timeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "branchPrefix": {
+              "type": "string",
+              "minLength": 1,
+              "default": "cursor"
+            }
+          },
+          "additionalProperties": false
+        },
+        "handoff": {
+          "type": "object",
+          "properties": {
+            "allowPmReviewWithoutPreview": {
+              "type": "boolean"
+            },
+            "previewRequiredForSuccess": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "revision": {
+          "type": "object",
+          "properties": {
+            "timeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "merge": {
+          "type": "object",
+          "properties": {
+            "mergeMethod": {
+              "type": "string",
+              "enum": [
+                "squash",
+                "merge",
+                "rebase"
+              ]
+            },
+            "deleteBranchAfterMerge": {
+              "type": "boolean"
+            },
+            "allowPendingChecks": {
+              "type": "boolean"
+            },
+            "allowUnknownChecks": {
+              "type": "boolean"
+            },
+            "allowNeutralChecks": {
+              "type": "boolean"
+            },
+            "deploymentRequiredForSuccess": {
+              "type": "boolean"
+            },
+            "deploymentPollTimeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "deploymentPollIntervalSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "checkPollTimeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "watch": {
+          "type": "object",
+          "properties": {
+            "pollIntervalSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "maxConcurrentRuns": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "preview": {
+          "type": "object",
+          "properties": {
+            "pollTimeoutSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "pollIntervalSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "linearAssociations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "teamId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "teamKey": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "teamName": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "projectName": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "teamId",
+                    "teamKey",
+                    "projectId",
+                    "projectName"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "linearProjects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "linearTeams": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "targetRepo": {
+                "type": "string",
+                "pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+\\/?$"
+              },
+              "baseBranch": {
+                "type": "string",
+                "minLength": 1,
+                "default": "main"
+              },
+              "productionBranch": {
+                "type": "string",
+                "minLength": 1,
+                "default": "main"
+              },
+              "previewProvider": {
+                "type": "string"
+              },
+              "integrationPreviewUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "productionUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "integrationSuccessStatus": {
+                "type": "string",
+                "minLength": 1
+              },
+              "productionSuccessStatus": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "type": "object",
+                "properties": {
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "targetRepo"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "allowedTargetRepos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+\\/?$"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "version",
+        "repos",
+        "allowedTargetRepos"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

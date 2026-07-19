@@ -1,0 +1,494 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "implementations.descriptor.json",
+  "evaluators": [
+    {
+      "evaluatorId": "telemetry.canonical_correlation_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "1c261b64199c4113bc0a601b21aa5e2c90bc7c1ec0b8f3968642865c0ab0301a"
+    },
+    {
+      "evaluatorId": "telemetry.event_ids_unique",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "7dcea07dfbb1cddd0bd0b3ad151fe1e77ff04848130869b6d998d0d5e52d6b92"
+    },
+    {
+      "evaluatorId": "telemetry.event_order_valid",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "c42792caae2cdc9699a3668078f00c8ef4609951b49175b5a47dc878afbc7d6c"
+    },
+    {
+      "evaluatorId": "telemetry.agent_start_finish_paired",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "f6004cacdfa8b311f746dfb12d61263ac9083151b0e4158936ec4ce342a5ed3c"
+    },
+    {
+      "evaluatorId": "telemetry.tool_events_correlated",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "43732000181443f6436ceddf7be077eda63e5ada14bec272724810f2836abac3"
+    },
+    {
+      "evaluatorId": "telemetry.telemetry_completeness_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "060cd1fb94a9318802721f1aaacfa25df6f3e44016e47547096a5c4bae2fadf7"
+    },
+    {
+      "evaluatorId": "telemetry.artifact_references_resolve",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "7018a9735787caaaaa6c052917a2583412be3e5f09551ade15a5c2464a7bfb1c"
+    },
+    {
+      "evaluatorId": "telemetry.artifact_hashes_match",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sourceModuleContentHash": "e2d5d6edc12fa514400d99ff081739730e5c6f0439f8e1eb65c5e7b243fbc723",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "5371fca00c35f4aa998084e2022a71398f4318a1f7f81532acda94ecc5a3bf57"
+    },
+    {
+      "evaluatorId": "execution.phase_completed_successfully",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "9c25be35d061bb4f3645460cb9fae3b13520bbc0bcb34bb55ce6dceae3f2ff53"
+    },
+    {
+      "evaluatorId": "execution.expected_agent_run_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "5ff7385f7d051234ca3f9e9bdf7f3889f40bc2b84154377f0653e588f7e6d3cc"
+    },
+    {
+      "evaluatorId": "execution.prompt_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "fc68b9c359c60db8ab9baa12be53658e1eac23179c241a83c6ce3dbd37dbd5be"
+    },
+    {
+      "evaluatorId": "execution.output_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "06a029e169609f266bcdb085a4cbc73a10a7fba03ecdb98caf329af74279fc3c"
+    },
+    {
+      "evaluatorId": "execution.model_identity_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "06dfeee947cb2a121452e45de517413f120246591e10349e1944c3f6f6d69642"
+    },
+    {
+      "evaluatorId": "execution.usage_evidence_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "d015156071f4797cbc7b7edc0a3802cf0235c9caf0c2919ccb4be2c13b5dd916"
+    },
+    {
+      "evaluatorId": "execution.pr_created_when_required",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "a9b2cd04285e420586728f9655485e00c032f98c0d3afe08305905bef58b12c9"
+    },
+    {
+      "evaluatorId": "execution.target_repository_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "c023804e305f387498d9b269243c2af9ee5dc58c08c0a819301739236601ca87"
+    },
+    {
+      "evaluatorId": "execution.base_branch_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "2f0d36c301ff5064ba403eed0240ee0ba311d76cffb3cdc8cff96d3ec651f690"
+    },
+    {
+      "evaluatorId": "execution.validation_commands_observed",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        },
+        {
+          "module": "impl/validation-match.ts",
+          "contentHash": "88b4f01d200ce6ae80b1cbae2ac5c2ae43edf9f0dd21afcc1dd090f01f41f2e6"
+        }
+      ],
+      "implementationHash": "31025c3075f7e09d2c7eb1e42ac7b86c30cf2ffd51ff236896d4bd8692a435e6"
+    },
+    {
+      "evaluatorId": "execution.validation_commands_succeeded",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        },
+        {
+          "module": "impl/validation-match.ts",
+          "contentHash": "88b4f01d200ce6ae80b1cbae2ac5c2ae43edf9f0dd21afcc1dd090f01f41f2e6"
+        }
+      ],
+      "implementationHash": "1bcd3c25737d779926321b1bde3e4c208a62fe893ea8f803417a885563fd792d"
+    },
+    {
+      "evaluatorId": "execution.final_report_identifiers_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sourceModuleContentHash": "2e37514f9c4cc3e3c0c6a8f4d6047de6cc22f35df4a44ae362bc074df89cc700",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "2722203940a1017898e899639a7fe8873a13561d3f8f1b2ef34bd0a197124e28"
+    },
+    {
+      "evaluatorId": "revision.feedback_identity_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sourceModuleContentHash": "681d90e13c5d95a60a75374701e63447f1818b83849d4520d9ae81478f35b012",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "931869a7b7c32a92aa20e60b90d45c1783b09817fc41e7a259ac7432bd2cf7c3"
+    },
+    {
+      "evaluatorId": "revision.feedback_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sourceModuleContentHash": "681d90e13c5d95a60a75374701e63447f1818b83849d4520d9ae81478f35b012",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "72c760115556b93c16190d04fa434e8df6784068625b6a6434e163ab31862cce"
+    },
+    {
+      "evaluatorId": "revision.revision_processed_once",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sourceModuleContentHash": "681d90e13c5d95a60a75374701e63447f1818b83849d4520d9ae81478f35b012",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "7fd2128533b677abb834407e9252d401dcf20128579da81099660f4715437879"
+    },
+    {
+      "evaluatorId": "revision.builder_continuity_preserved",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sourceModuleContentHash": "681d90e13c5d95a60a75374701e63447f1818b83849d4520d9ae81478f35b012",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "7b0b9d46e16bc5938635c3a736901a53ff6de077cf653978b8e185cdb2bc16e9"
+    },
+    {
+      "evaluatorId": "revision.same_pr_preserved",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sourceModuleContentHash": "681d90e13c5d95a60a75374701e63447f1818b83849d4520d9ae81478f35b012",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "d2ab860f8b74903d83584af20b301b88be9960234e766f644a2864d4f50df7e1"
+    },
+    {
+      "evaluatorId": "revision.post_revision_validation_observed",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sourceModuleContentHash": "681d90e13c5d95a60a75374701e63447f1818b83849d4520d9ae81478f35b012",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        },
+        {
+          "module": "impl/validation-match.ts",
+          "contentHash": "88b4f01d200ce6ae80b1cbae2ac5c2ae43edf9f0dd21afcc1dd090f01f41f2e6"
+        }
+      ],
+      "implementationHash": "c4a6b85c4c02d2def8596a671dc0cbd64ac308842d185a900582c93fa64e5b28"
+    },
+    {
+      "evaluatorId": "revision.revision_output_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sourceModuleContentHash": "681d90e13c5d95a60a75374701e63447f1818b83849d4520d9ae81478f35b012",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "8ea0221422c7c35c267c7dd3653c011fe445b3c11a0db59fb7a5c3fbd3b3d359"
+    },
+    {
+      "evaluatorId": "workflow.phase_sequence_valid",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sourceModuleContentHash": "5c7683310ee618c2957fc63f594a6fa5d0f451d58271c572633816a8731244fd",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "27c20c8fc5faffdcab85e966049fda535de8b5e3af047d5d6a116c0610495cb4"
+    },
+    {
+      "evaluatorId": "workflow.phase_links_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sourceModuleContentHash": "5c7683310ee618c2957fc63f594a6fa5d0f451d58271c572633816a8731244fd",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "8724f4dcfaa8da8994494175e15cdaecda2c46e30931ae532899748128952878"
+    },
+    {
+      "evaluatorId": "workflow.duplicate_execution_prevented",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sourceModuleContentHash": "5c7683310ee618c2957fc63f594a6fa5d0f451d58271c572633816a8731244fd",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "bea877f4b250e5d303ca8c04e5de7e14d39730f49f708e06ffe51e2e9893fd04"
+    },
+    {
+      "evaluatorId": "workflow.review_outcome_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sourceModuleContentHash": "5c7683310ee618c2957fc63f594a6fa5d0f451d58271c572633816a8731244fd",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "a295de4e7ec629502bb6c8b79853d45b5b1f0d9eba70c615a6fb802aed1d01a3"
+    },
+    {
+      "evaluatorId": "workflow.merge_outcome_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sourceModuleContentHash": "5c7683310ee618c2957fc63f594a6fa5d0f451d58271c572633816a8731244fd",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "dbe9837a220d8ced1a70a908e43c9a9b062ca8392942b9b5d07daadff33461d3"
+    },
+    {
+      "evaluatorId": "workflow.delivery_outcome_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sourceModuleContentHash": "5c7683310ee618c2957fc63f594a6fa5d0f451d58271c572633816a8731244fd",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "677a7c8fcfeb18acb1eb6b6ecf4110018049eb65999eda981403b6a1a73431c4"
+    },
+    {
+      "evaluatorId": "workflow.terminal_state_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sourceModuleContentHash": "5c7683310ee618c2957fc63f594a6fa5d0f451d58271c572633816a8731244fd",
+      "sharedDependencies": [
+        {
+          "module": "impl/shared.ts",
+          "contentHash": "d54ad10514145b72758c41de150f06e448f2834b56393768f61a0ba68c05edb3"
+        }
+      ],
+      "implementationHash": "60d47f3273a6b42fa6d1583c12b790b4c1557cdb4c2431f08d5bbacbedcf0ff8"
+    }
+  ]
+}

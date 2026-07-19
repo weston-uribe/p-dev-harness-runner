@@ -1,0 +1,246 @@
+{
+  "rubricId": "workflow-integrity",
+  "rubricVersion": "1",
+  "name": "Workflow integrity",
+  "description": "Machine-verifiable workflow session integrity against a versioned state machine.",
+  "judgmentChannel": "machine",
+  "applicableSubjectTypes": [
+    "workflow_session"
+  ],
+  "applicablePhases": null,
+  "dimensions": [
+    {
+      "dimensionId": "phase_sequence_valid",
+      "name": "Phase sequence valid",
+      "description": "Observed phases form a valid sequence under the workflow state machine.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check phase_sequence_valid is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check phase_sequence_valid is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "session_subjects",
+        "manifests"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "workflow_session"
+      ]
+    },
+    {
+      "dimensionId": "phase_links_consistent",
+      "name": "Phase links consistent",
+      "description": "Phase lineage links are internally consistent.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check phase_links_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check phase_links_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "session_subjects",
+        "manifests"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "workflow_session"
+      ]
+    },
+    {
+      "dimensionId": "duplicate_execution_prevented",
+      "name": "Duplicate execution prevented",
+      "description": "Duplicate phase results do not contradict the effective successful result.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check duplicate_execution_prevented is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check duplicate_execution_prevented is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "session_subjects",
+        "manifests"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "workflow_session"
+      ]
+    },
+    {
+      "dimensionId": "review_outcome_consistent",
+      "name": "Review outcome consistent",
+      "description": "Review outcome agrees with revision count evidence.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check review_outcome_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check review_outcome_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "session_subjects",
+        "manifests"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "workflow_session"
+      ]
+    },
+    {
+      "dimensionId": "merge_outcome_consistent",
+      "name": "Merge outcome consistent",
+      "description": "Merge outcome agrees with merge fields.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check merge_outcome_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check merge_outcome_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "session_subjects",
+        "manifests"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "workflow_session"
+      ]
+    },
+    {
+      "dimensionId": "delivery_outcome_consistent",
+      "name": "Delivery outcome consistent",
+      "description": "Delivery outcome agrees with destination and deployment evidence.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check delivery_outcome_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check delivery_outcome_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "session_subjects",
+        "manifests"
+      ],
+      "optionalEvidence": [
+        "deployment"
+      ],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "workflow_session"
+      ]
+    },
+    {
+      "dimensionId": "terminal_state_consistent",
+      "name": "Terminal state consistent",
+      "description": "Terminal workflow state is consistent with observed outcomes.",
+      "responseType": "boolean",
+      "allowedValues": [
+        true,
+        false
+      ],
+      "anchors": [
+        {
+          "value": true,
+          "label": "Pass",
+          "definition": "Contract check terminal_state_consistent is satisfied."
+        },
+        {
+          "value": false,
+          "label": "Fail",
+          "definition": "Contract check terminal_state_consistent is violated."
+        }
+      ],
+      "requiredEvidence": [
+        "session_subjects",
+        "manifests"
+      ],
+      "optionalEvidence": [],
+      "allowCorrectedOutput": false,
+      "reviewerCommentRequired": false,
+      "unscoredCommentRequired": false,
+      "applicableSubjectTypes": [
+        "workflow_session"
+      ]
+    }
+  ]
+}

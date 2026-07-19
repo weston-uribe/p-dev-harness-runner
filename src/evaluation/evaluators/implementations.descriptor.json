@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "modules": [
+    {
+      "evaluatorId": "telemetry.canonical_correlation_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "telemetry.event_ids_unique",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "telemetry.event_order_valid",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "telemetry.agent_start_finish_paired",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "telemetry.tool_events_correlated",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "telemetry.telemetry_completeness_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "telemetry.artifact_references_resolve",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "telemetry.artifact_hashes_match",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/telemetry.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.phase_completed_successfully",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.expected_agent_run_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.prompt_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.output_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.model_identity_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.usage_evidence_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.pr_created_when_required",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.target_repository_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.base_branch_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "execution.validation_commands_observed",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts", "impl/validation-match.ts"]
+    },
+    {
+      "evaluatorId": "execution.validation_commands_succeeded",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts", "impl/validation-match.ts"]
+    },
+    {
+      "evaluatorId": "execution.final_report_identifiers_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/execution.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "revision.feedback_identity_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "revision.feedback_artifact_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "revision.revision_processed_once",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "revision.builder_continuity_preserved",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "revision.same_pr_preserved",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "revision.post_revision_validation_observed",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sharedDependencies": ["impl/shared.ts", "impl/validation-match.ts"]
+    },
+    {
+      "evaluatorId": "revision.revision_output_present",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/revision.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "workflow.phase_sequence_valid",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "workflow.phase_links_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "workflow.duplicate_execution_prevented",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "workflow.review_outcome_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "workflow.merge_outcome_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "workflow.delivery_outcome_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    },
+    {
+      "evaluatorId": "workflow.terminal_state_consistent",
+      "evaluatorVersion": "1",
+      "implementationVersion": "1",
+      "sourceModule": "impl/workflow.ts",
+      "sharedDependencies": ["impl/shared.ts"]
+    }
+  ]
+}

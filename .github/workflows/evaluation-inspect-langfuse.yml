@@ -1,0 +1,173 @@
+# Maintainer-only diagnostic: inventory Langfuse session for a job request and upload
+# a redacted gap report. Uses existing Langfuse secrets; never prints credentials.
+name: evaluation-inspect-langfuse
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Opaque job request id
+        required: true
+        type: string
+      namespace:
+        description: P_DEV_EVALUATION_NAMESPACE
+        required: false
+        default: weston-dogfood
+        type: string
+      mode:
+        description: inspect, reproject-dry-run, or reproject-apply
+        required: false
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - reproject-dry-run
+          - reproject-apply
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      P_DEV_PUBLIC_RUNNER_MODE: "1"
+      P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github
+      P_DEV_WORKFLOW_STATE_REPOSITORY: ${{ vars.P_DEV_WORKFLOW_STATE_REPOSITORY }}
+      P_DEV_WORKFLOW_STATE_BRANCH: ${{ vars.P_DEV_WORKFLOW_STATE_BRANCH }}
+      P_DEV_JOB_REQUEST_REPOSITORY: ${{ vars.P_DEV_JOB_REQUEST_REPOSITORY }}
+      P_DEV_STATE_GITHUB_TOKEN: ${{ secrets.P_DEV_STATE_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Claim job request
+        env:
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
+      - name: Run Langfuse inspect
+        if: ${{ inputs.mode == 'inspect' }}
+        env:
+          P_DEV_EVALUATION_PROVIDER: langfuse
+          P_DEV_EVALUATION_CAPTURE_PROFILE: content-v1
+          P_DEV_EVALUATION_NAMESPACE: ${{ inputs.namespace }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_TRACING_ENVIRONMENT: ${{ vars.LANGFUSE_TRACING_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          mkdir -p runs/evaluation-reports
+          REPORT="runs/evaluation-reports/langfuse-inspect-${{ github.run_id }}.json"
+          STDOUT="runs/evaluation-reports/langfuse-inspect-${{ github.run_id }}.stdout.json"
+          npm run evaluation:inspect-langfuse -- \
+            --namespace "${{ inputs.namespace }}" \
+            --out "$REPORT" \
+            --safe-content \
+            --json > "$STDOUT"
+      - name: Download run artifacts for reprojection
+        if: ${{ inputs.mode == 'reproject-dry-run' || inputs.mode == 'reproject-apply' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p runs/.artifact-cache
+          cd /tmp
+          rm -rf eval-arts && mkdir eval-arts && cd eval-arts
+          gh run list -R "${{ github.repository }}" --limit 5 --json databaseId --jq '.[].databaseId' | while read -r run_id; do
+            gh run download "$run_id" -R "${{ github.repository }}" || true
+          done
+          for d in /tmp/eval-arts/*/runs; do
+            if [ -d "$d" ]; then
+              cp -R "$d"/* "$GITHUB_WORKSPACE/runs/.artifact-cache/" 2>/dev/null || true
+            fi
+          done
+      - name: Run Langfuse reproject dry-run
+        if: ${{ inputs.mode == 'reproject-dry-run' }}
+        env:
+          P_DEV_EVALUATION_PROVIDER: langfuse
+          P_DEV_EVALUATION_CAPTURE_PROFILE: content-v1
+          P_DEV_EVALUATION_NAMESPACE: ${{ inputs.namespace }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_TRACING_ENVIRONMENT: ${{ vars.LANGFUSE_TRACING_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          mkdir -p runs/evaluation-reports
+          npm run evaluation:reproject-langfuse -- \
+            --namespace "${{ inputs.namespace }}" \
+            --artifact-cache runs/.artifact-cache \
+            --out "runs/evaluation-reports/langfuse-reproject-${{ github.run_id }}.json" \
+            --json
+      - name: Run Langfuse reproject apply + post inspect
+        if: ${{ inputs.mode == 'reproject-apply' }}
+        env:
+          P_DEV_EVALUATION_PROVIDER: langfuse
+          P_DEV_EVALUATION_CAPTURE_PROFILE: content-v1
+          P_DEV_EVALUATION_NAMESPACE: ${{ inputs.namespace }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_TRACING_ENVIRONMENT: ${{ vars.LANGFUSE_TRACING_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          mkdir -p runs/evaluation-reports
+          npm run evaluation:reproject-langfuse -- \
+            --namespace "${{ inputs.namespace }}" \
+            --artifact-cache runs/.artifact-cache \
+            --apply \
+            --out "runs/evaluation-reports/langfuse-reproject-apply-${{ github.run_id }}.json" \
+            --json
+          sleep 20
+          npm run evaluation:inspect-langfuse -- \
+            --namespace "${{ inputs.namespace }}" \
+            --out "runs/evaluation-reports/langfuse-inspect-post-${{ github.run_id }}.json" \
+            --safe-content \
+            --json | tee "runs/evaluation-reports/langfuse-inspect-post-${{ github.run_id }}.stdout.json"
+      - name: Assert Langfuse inspect acceptance
+        if: ${{ inputs.mode == 'inspect' || inputs.mode == 'reproject-apply' }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.mode }}" = "inspect" ]; then
+            REPORT="runs/evaluation-reports/langfuse-inspect-${{ github.run_id }}.json"
+          else
+            REPORT="runs/evaluation-reports/langfuse-inspect-post-${{ github.run_id }}.json"
+          fi
+          if [ ! -f "$REPORT" ]; then
+            echo "Missing Langfuse inspect report."
+            exit 1
+          fi
+          node <<'EOF' "$REPORT"
+          import { readFileSync } from "node:fs";
+          const reportPath = process.argv[2];
+          let parsed;
+          try {
+            parsed = JSON.parse(readFileSync(reportPath, "utf8"));
+          } catch (error) {
+            console.error("Malformed Langfuse inspect report JSON.");
+            console.error(error instanceof Error ? error.message : String(error));
+            process.exit(1);
+          }
+          if (parsed?.acceptance?.complete !== true) {
+            console.error("Langfuse inspect acceptance failed.");
+            console.error(`acceptance.complete=${String(parsed?.acceptance?.complete)}`);
+            const gaps = Array.isArray(parsed?.gaps) ? parsed.gaps : [];
+            for (const gap of gaps.filter((entry) => entry?.severity === "error").slice(0, 20)) {
+              console.error(`- [${String(gap.code ?? "unknown")}]`);
+            }
+            process.exit(1);
+          }
+          console.log("Langfuse inspect acceptance passed.");
+          EOF
+      - name: Upload redacted report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: langfuse-inspect-${{ github.run_id }}
+          path: runs/evaluation-reports/
+          if-no-files-found: warn
