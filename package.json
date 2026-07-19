@@ -104,7 +104,7 @@
     "@types/node": "^22.13.10",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
-    "tailwindcss": "^4.1.8",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "vitest": "^3.0.9",
