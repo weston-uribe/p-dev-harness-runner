@@ -71,7 +71,8 @@ export interface LangfuseInspectGap {
 
 export type GenerationExclusionReason =
   | "not_associated_with_expected_phase"
-  | "unnamed_without_durable_phase_correlation";
+  | "unnamed_without_durable_phase_correlation"
+  | "non_generation_container";
 
 export interface LangfuseInspectReport {
   schemaVersion: 1;

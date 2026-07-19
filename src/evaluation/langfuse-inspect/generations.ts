@@ -9,10 +9,14 @@ export function isGenerationCandidate(
   obs: LangfuseInspectObservation,
 ): boolean {
   const type = obs.type?.toUpperCase() ?? "";
-  // Agent/span/event containers are not generation candidates unless they also
-  // carry generation-like model/token/cost/Cursor-run signals.
-  const isAgentLike =
-    type === "AGENT" || type === "SPAN" || type === "EVENT" || type === "TOOL";
+  // Tool/event/span/agent containers are never generation candidates by type.
+  // Only GENERATION rows (or Cursor-run named rows) participate in cost gates.
+  if (type === "TOOL" || type === "EVENT" || type === "SPAN") {
+    return Boolean(obs.name?.includes("Cursor run"));
+  }
+  if (type === "AGENT") {
+    return Boolean(obs.name?.includes("Cursor run"));
+  }
 
   if (type === "GENERATION") return true;
   if (obs.name?.includes("Cursor run")) return true;
@@ -20,12 +24,17 @@ export function isGenerationCandidate(
   const hasModel =
     Boolean(obs.model?.trim()) || Boolean(metadataString(obs.metadata, "modelId"));
   const hasCost =
-    Boolean(obs.costSource?.trim()) ||
-    typeof obs.costUsd === "number" ||
+    (Boolean(obs.costSource?.trim()) && obs.costSource !== "unavailable") ||
+    (typeof obs.costUsd === "number" && obs.costUsd > 0) ||
     metadataNumber(obs.metadata, "providerReportedCostUsd") != null ||
     metadataNumber(obs.metadata, "estimatedCostUsd") != null;
   const hasTokens =
-    Boolean(obs.usage && Object.keys(obs.usage).length > 0) ||
+    Boolean(
+      obs.usage &&
+        Object.keys(obs.usage).some(
+          (key) => typeof obs.usage?.[key] === "number" && obs.usage[key]! > 0,
+        ),
+    ) ||
     metadataNumber(obs.metadata, "cursorUsageInputTokens") != null ||
     metadataNumber(obs.metadata, "cursorUsageOutputTokens") != null;
   const hasRunCorrelation =
@@ -34,17 +43,31 @@ export function isGenerationCandidate(
     Boolean(metadataString(obs.metadata, "cursorRunId"));
 
   if (hasModel || hasCost || hasTokens) return true;
-  // Correlation alone only counts for non-agent containers (fail-closed for
-  // unnamed generation rows that omit type but carry phase/run ids).
-  if (!isAgentLike && hasRunCorrelation) return true;
+  // Unnamed generation-like rows may omit type but carry phase/run correlation.
+  if (hasRunCorrelation && !obs.name?.startsWith("p-dev.tool.")) return true;
   return false;
+}
+
+function phaseFromTraceDisplayName(
+  name: string | null | undefined,
+): string | null {
+  if (!name) return null;
+  const sep = name.indexOf(" · ");
+  if (sep < 0) return null;
+  const rest = name.slice(sep + 3).trim();
+  const phase = rest.split(" · ")[0]?.trim();
+  return phase || null;
 }
 
 export function observationPhase(
   obs: LangfuseInspectObservation,
   trace: LangfuseInspectTrace,
 ): string | null {
-  return obs.phase?.trim() || trace.phase?.trim() || null;
+  return (
+    obs.phase?.trim() ||
+    trace.phase?.trim() ||
+    phaseFromTraceDisplayName(trace.name)
+  );
 }
 
 export function hasDurablePhaseCorrelation(
