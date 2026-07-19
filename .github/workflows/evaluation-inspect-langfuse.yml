@@ -142,9 +142,14 @@ jobs:
             echo "Missing Langfuse inspect report."
             exit 1
           fi
-          node <<'EOF' "$REPORT"
+          # Pass path via env: `node <<EOF "$REPORT"` makes Node treat the JSON as an ESM entry.
+          REPORT_PATH="$REPORT" node <<'EOF'
           import { readFileSync } from "node:fs";
-          const reportPath = process.argv[2];
+          const reportPath = process.env.REPORT_PATH;
+          if (!reportPath) {
+            console.error("Missing REPORT_PATH.");
+            process.exit(1);
+          }
           let parsed;
           try {
             parsed = JSON.parse(readFileSync(reportPath, "utf8"));
