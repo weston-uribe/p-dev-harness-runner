@@ -19,6 +19,7 @@ describe("langfuse inspect report", () => {
       namespace: "weston-dogfood",
       sessionId,
       session: { id: sessionId },
+      expectedPhases: ["planning"],
       traces: [
         {
           id: "t1",
@@ -32,6 +33,7 @@ describe("langfuse inspect report", () => {
     });
     expect(report.acceptance.hasPlanningTrace).toBe(false);
     expect(report.acceptance.hasPlannerAgent).toBe(false);
+    expect(report.acceptance.coreComplete).toBe(false);
     expect(report.acceptance.complete).toBe(false);
     expect(report.gaps.some((g) => g.code === "missing_planning_trace")).toBe(
       true,
@@ -51,6 +53,7 @@ describe("langfuse inspect report", () => {
       namespace: "weston-dogfood",
       sessionId,
       session: { id: sessionId, name: "FRE-3" },
+      expectedPhases: ["planning"],
       traces: [
         {
           id: "plan",
@@ -103,6 +106,7 @@ describe("langfuse inspect report", () => {
       report.gaps.some((g) => g.code === "incomplete_cost_record"),
     ).toBe(false);
     expect(report.acceptance.generationCostComplete).toBe(true);
+    expect(report.acceptance.coreComplete).toBe(true);
   });
 
   it("accepts provider-reported cost without requiring pricing registry version", () => {
@@ -151,6 +155,7 @@ describe("langfuse inspect report", () => {
       namespace: "weston-dogfood",
       sessionId,
       session: null,
+      expectedPhases: ["planning"],
       traces: [
         {
           id: "plan",
@@ -276,6 +281,7 @@ describe("langfuse inspect report", () => {
       namespace: "weston-dogfood",
       sessionId,
       session: { id: sessionId, name: "FRE-3" },
+      expectedPhases: ["planning"],
       traces: [
         {
           id: "plan",
@@ -336,7 +342,7 @@ describe("langfuse inspect report", () => {
     expect(
       report.gaps.some((g) => g.code === "false_skill_provenance"),
     ).toBe(true);
-    expect(report.acceptance.complete).toBe(false);
+    expect(report.acceptance.coreComplete).toBe(false);
   });
 
   it("accepts honest historical skillProvenanceStatus=none on reprojected observations", () => {
@@ -346,6 +352,7 @@ describe("langfuse inspect report", () => {
       namespace: "weston-dogfood",
       sessionId,
       session: { id: sessionId, name: "FRE-3" },
+      expectedPhases: ["planning"],
       traces: [
         {
           id: "plan",
@@ -405,7 +412,55 @@ describe("langfuse inspect report", () => {
     expect(
       report.gaps.some((g) => g.code === "false_skill_provenance"),
     ).toBe(false);
-    expect(report.acceptance.complete).toBe(true);
+    expect(report.acceptance.coreComplete).toBe(true);
+  });
+
+  it("does not treat unnamed incomplete generations as cost-complete", () => {
+    const sessionId = deriveSessionId("weston-dogfood", "FRE-3");
+    const report = buildInspectReport({
+      issueKey: "FRE-3",
+      namespace: "weston-dogfood",
+      sessionId,
+      session: { id: sessionId, name: "FRE-3" },
+      expectedPhases: ["planning"],
+      traces: [
+        {
+          id: "plan",
+          name: "FRE-3 · planning",
+          metadata: {
+            linearIssueKey: "FRE-3",
+            phase: "planning",
+            phaseExecutionId: "pe-plan",
+          },
+          observations: [
+            {
+              id: "planner",
+              name: "FRE-3 · planner",
+              type: "AGENT",
+              metadata: { linearIssueKey: "FRE-3", phase: "planning" },
+            },
+            {
+              id: "unnamed-gen",
+              name: null,
+              type: "GENERATION",
+              metadata: {
+                linearIssueKey: "FRE-3",
+                phase: "planning",
+                phaseExecutionId: "pe-plan",
+              },
+            },
+          ],
+        },
+      ],
+      observations: [],
+      scores: [],
+    });
+    expect(report.acceptance.generationCostComplete).toBe(false);
+    expect(report.acceptance.requiredGenerationCount).toBeGreaterThan(0);
+    expect(report.acceptance.incompleteRequiredGenerationCount).toBeGreaterThan(
+      0,
+    );
+    expect(report.acceptance.coreComplete).toBe(false);
   });
 });
 

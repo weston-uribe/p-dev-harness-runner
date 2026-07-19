@@ -615,6 +615,13 @@ export async function runLangfuseReproject(options: {
   if (resolved.ok) {
     const client = await createLangfuseApiClient(resolved.config);
     const bundle = await fetchSessionBundle(client, sessionId);
+    const reprojectPhases = [
+      ...new Set(
+        artifactRuns
+          .map((r) => r.phase?.trim())
+          .filter((p): p is string => Boolean(p)),
+      ),
+    ];
     const inspect = buildInspectReport({
       issueKey,
       namespace,
@@ -631,8 +638,11 @@ export async function runLangfuseReproject(options: {
         skillIds: r.skillsUsed.map((s) => s.skillId),
         skillProvenanceStatus: r.skillProvenanceStatus,
       })),
+      // Reprojection acceptance is scoped to phases present in local artifacts.
+      expectedPhases:
+        reprojectPhases.length > 0 ? reprojectPhases : ["planning"],
     });
-    acceptanceComplete = inspect.acceptance.complete;
+    acceptanceComplete = inspect.acceptance.coreComplete;
   }
 
   const report: ReprojectReport = {

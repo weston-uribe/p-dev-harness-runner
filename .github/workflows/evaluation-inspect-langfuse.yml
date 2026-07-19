@@ -1,5 +1,6 @@
 # Maintainer-only diagnostic: inventory Langfuse session for a job request and upload
-# a redacted gap report. Uses existing Langfuse secrets; never prints credentials.
+# a public-safe acceptance summary only. Uses existing Langfuse secrets; never prints credentials.
+# Read-only inspect — no reprojection, no public artifact downloads, no private report upload.
 name: evaluation-inspect-langfuse
 
 on:
@@ -14,15 +15,6 @@ on:
         required: false
         default: weston-dogfood
         type: string
-      mode:
-        description: inspect, reproject-dry-run, or reproject-apply
-        required: false
-        default: inspect
-        type: choice
-        options:
-          - inspect
-          - reproject-dry-run
-          - reproject-apply
 
 jobs:
   inspect:
@@ -37,6 +29,7 @@ jobs:
       P_DEV_WORKFLOW_STATE_BRANCH: ${{ vars.P_DEV_WORKFLOW_STATE_BRANCH }}
       P_DEV_JOB_REQUEST_REPOSITORY: ${{ vars.P_DEV_JOB_REQUEST_REPOSITORY }}
       P_DEV_STATE_GITHUB_TOKEN: ${{ secrets.P_DEV_STATE_GITHUB_TOKEN }}
+      REQUEST_ID: ${{ inputs.request_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,12 +39,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Claim job request
-        env:
-          REQUEST_ID: ${{ inputs.request_id }}
         run: |
           npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
       - name: Run Langfuse inspect
-        if: ${{ inputs.mode == 'inspect' }}
         env:
           P_DEV_EVALUATION_PROVIDER: langfuse
           P_DEV_EVALUATION_CAPTURE_PROFILE: content-v1
@@ -63,116 +53,88 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p runs/evaluation-reports
-          REPORT="runs/evaluation-reports/langfuse-inspect-${{ github.run_id }}.json"
-          STDOUT="runs/evaluation-reports/langfuse-inspect-${{ github.run_id }}.stdout.json"
+          REPORT="runs/evaluation-reports/public-inspect-${{ github.run_id }}.json"
           npm run evaluation:inspect-langfuse -- \
             --namespace "${{ inputs.namespace }}" \
             --out "$REPORT" \
-            --safe-content \
-            --json > "$STDOUT"
-      - name: Download run artifacts for reprojection
-        if: ${{ inputs.mode == 'reproject-dry-run' || inputs.mode == 'reproject-apply' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p runs/.artifact-cache
-          cd /tmp
-          rm -rf eval-arts && mkdir eval-arts && cd eval-arts
-          gh run list -R "${{ github.repository }}" --limit 5 --json databaseId --jq '.[].databaseId' | while read -r run_id; do
-            gh run download "$run_id" -R "${{ github.repository }}" || true
-          done
-          for d in /tmp/eval-arts/*/runs; do
-            if [ -d "$d" ]; then
-              cp -R "$d"/* "$GITHUB_WORKSPACE/runs/.artifact-cache/" 2>/dev/null || true
-            fi
-          done
-      - name: Run Langfuse reproject dry-run
-        if: ${{ inputs.mode == 'reproject-dry-run' }}
-        env:
-          P_DEV_EVALUATION_PROVIDER: langfuse
-          P_DEV_EVALUATION_CAPTURE_PROFILE: content-v1
-          P_DEV_EVALUATION_NAMESPACE: ${{ inputs.namespace }}
-          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
-          LANGFUSE_TRACING_ENVIRONMENT: ${{ vars.LANGFUSE_TRACING_ENVIRONMENT }}
-        run: |
-          set -euo pipefail
-          mkdir -p runs/evaluation-reports
-          npm run evaluation:reproject-langfuse -- \
-            --namespace "${{ inputs.namespace }}" \
-            --artifact-cache runs/.artifact-cache \
-            --out "runs/evaluation-reports/langfuse-reproject-${{ github.run_id }}.json" \
             --json
-      - name: Run Langfuse reproject apply + post inspect
-        if: ${{ inputs.mode == 'reproject-apply' }}
-        env:
-          P_DEV_EVALUATION_PROVIDER: langfuse
-          P_DEV_EVALUATION_CAPTURE_PROFILE: content-v1
-          P_DEV_EVALUATION_NAMESPACE: ${{ inputs.namespace }}
-          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
-          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
-          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
-          LANGFUSE_TRACING_ENVIRONMENT: ${{ vars.LANGFUSE_TRACING_ENVIRONMENT }}
-        run: |
-          set -euo pipefail
-          mkdir -p runs/evaluation-reports
-          npm run evaluation:reproject-langfuse -- \
-            --namespace "${{ inputs.namespace }}" \
-            --artifact-cache runs/.artifact-cache \
-            --apply \
-            --out "runs/evaluation-reports/langfuse-reproject-apply-${{ github.run_id }}.json" \
-            --json
-          sleep 20
-          npm run evaluation:inspect-langfuse -- \
-            --namespace "${{ inputs.namespace }}" \
-            --out "runs/evaluation-reports/langfuse-inspect-post-${{ github.run_id }}.json" \
-            --safe-content \
-            --json | tee "runs/evaluation-reports/langfuse-inspect-post-${{ github.run_id }}.stdout.json"
       - name: Assert Langfuse inspect acceptance
-        if: ${{ inputs.mode == 'inspect' || inputs.mode == 'reproject-apply' }}
         run: |
           set -euo pipefail
-          if [ "${{ inputs.mode }}" = "inspect" ]; then
-            REPORT="runs/evaluation-reports/langfuse-inspect-${{ github.run_id }}.json"
-          else
-            REPORT="runs/evaluation-reports/langfuse-inspect-post-${{ github.run_id }}.json"
-          fi
+          REPORT="runs/evaluation-reports/public-inspect-${{ github.run_id }}.json"
           if [ ! -f "$REPORT" ]; then
-            echo "Missing Langfuse inspect report."
+            echo "Missing Langfuse public inspect summary."
             exit 1
           fi
           # Pass path via env: `node <<EOF "$REPORT"` makes Node treat the JSON as an ESM entry.
-          REPORT_PATH="$REPORT" node <<'EOF'
+          REPORT_PATH="$REPORT" npx tsx <<'EOF'
           import { readFileSync } from "node:fs";
+          import { assertPublicSafe } from "./src/public-execution/redaction-validator.ts";
+          import { publicSummaryAcceptancePassed } from "./src/evaluation/langfuse-inspect/public-summary.ts";
+          import type { LangfuseInspectPublicSummary } from "./src/evaluation/langfuse-inspect/types.ts";
+
           const reportPath = process.env.REPORT_PATH;
           if (!reportPath) {
             console.error("Missing REPORT_PATH.");
             process.exit(1);
           }
-          let parsed;
+          const bytes = readFileSync(reportPath, "utf8");
+          let parsed: LangfuseInspectPublicSummary;
           try {
-            parsed = JSON.parse(readFileSync(reportPath, "utf8"));
+            parsed = JSON.parse(bytes) as LangfuseInspectPublicSummary;
           } catch (error) {
             console.error("Malformed Langfuse inspect report JSON.");
             console.error(error instanceof Error ? error.message : String(error));
             process.exit(1);
           }
-          if (parsed?.acceptance?.complete !== true) {
+          try {
+            assertPublicSafe(bytes);
+          } catch (error) {
+            console.error("Public summary failed assertPublicSafe.");
+            console.error(error instanceof Error ? error.message : String(error));
+            process.exit(1);
+          }
+          const acceptance = parsed.acceptance;
+          const requiredGenerationCount = Number(acceptance?.requiredGenerationCount ?? 0);
+          const incompleteRequiredGenerationCount = Number(
+            acceptance?.incompleteRequiredGenerationCount ?? -1,
+          );
+          const errorGapCount = Number(acceptance?.errorGapCount ?? -1);
+          const privacyOk = acceptance?.privacyValidationPassed === true;
+          const complete = acceptance?.complete === true;
+          const generationCostComplete = acceptance?.generationCostComplete === true;
+          if (
+            !complete ||
+            !generationCostComplete ||
+            !(requiredGenerationCount > 0) ||
+            incompleteRequiredGenerationCount !== 0 ||
+            errorGapCount !== 0 ||
+            !privacyOk ||
+            !publicSummaryAcceptancePassed(parsed)
+          ) {
             console.error("Langfuse inspect acceptance failed.");
-            console.error(`acceptance.complete=${String(parsed?.acceptance?.complete)}`);
-            const gaps = Array.isArray(parsed?.gaps) ? parsed.gaps : [];
-            for (const gap of gaps.filter((entry) => entry?.severity === "error").slice(0, 20)) {
-              console.error(`- [${String(gap.code ?? "unknown")}]`);
+            console.error(`acceptance.complete=${String(complete)}`);
+            console.error(`acceptance.generationCostComplete=${String(generationCostComplete)}`);
+            console.error(`requiredGenerationCount=${String(requiredGenerationCount)}`);
+            console.error(`incompleteRequiredGenerationCount=${String(incompleteRequiredGenerationCount)}`);
+            console.error(`errorGapCount=${String(errorGapCount)}`);
+            console.error(`privacyValidationPassed=${String(privacyOk)}`);
+            const gapCodeCounts =
+              parsed.gapCodeCounts && typeof parsed.gapCodeCounts === "object"
+                ? parsed.gapCodeCounts
+                : {};
+            for (const [code, count] of Object.entries(gapCodeCounts).slice(0, 20)) {
+              console.error(`- [${code}] x${count}`);
             }
             process.exit(1);
           }
           console.log("Langfuse inspect acceptance passed.");
           EOF
-      - name: Upload redacted report
+      - name: Upload public-safe summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: langfuse-inspect-${{ github.run_id }}
-          path: runs/evaluation-reports/
-          if-no-files-found: warn
+          name: eval-inspect-${{ github.run_id }}
+          path: runs/evaluation-reports/public-inspect-${{ github.run_id }}.json
+          if-no-files-found: error
+          retention-days: 1

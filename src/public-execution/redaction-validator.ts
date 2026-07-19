@@ -10,6 +10,12 @@ const PUBLIC_UNSAFE_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string }>
     { pattern: /sk-/i, reason: "Secret key prefix" },
     { pattern: /Bearer\s+/i, reason: "Bearer token" },
     { pattern: /pull\//i, reason: "Pull request URL" },
+    { pattern: /\bPR\s*#?\d+\b/i, reason: "Pull request number" },
+    { pattern: /\bfinding\s*:/i, reason: "Finding text" },
+    {
+      pattern: /\b(?:src|apps|tests|docs)\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+\b/,
+      reason: "Source path",
+    },
   ];
 
 export class PublicationRejectedError extends Error {

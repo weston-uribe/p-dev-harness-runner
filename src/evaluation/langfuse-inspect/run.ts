@@ -1,10 +1,18 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isPublicRunnerMode } from "../../public-execution/mode.js";
 import { deriveSessionId } from "../identifiers.js";
 import { resolveEvaluationConfig } from "../runtime.js";
 import { createLangfuseApiClient, fetchSessionBundle } from "./client.js";
+import {
+  publicSummaryAcceptancePassed,
+  toPublicSafeInspectSummary,
+} from "./public-summary.js";
 import { buildInspectReport } from "./report.js";
-import type { LangfuseInspectReport } from "./types.js";
+import type {
+  LangfuseInspectPublicSummary,
+  LangfuseInspectReport,
+} from "./types.js";
 
 export interface LangfuseInspectOptions {
   issueKey: string;
@@ -12,6 +20,9 @@ export interface LangfuseInspectOptions {
   logDirectory?: string;
   outPath?: string;
   safeContent?: boolean;
+  expectedPhases?: string[];
+  requestId?: string | null;
+  githubRunId?: string | null;
   /** When true, skip live Langfuse and only validate report builder inputs (tests). */
   dryBundle?: {
     session: Record<string, unknown> | null;
@@ -68,7 +79,11 @@ async function loadLocalArtifactRuns(
 
 export async function runLangfuseInspect(
   options: LangfuseInspectOptions,
-): Promise<{ report: LangfuseInspectReport; exitCode: number }> {
+): Promise<{
+  report: LangfuseInspectReport;
+  publicSummary: LangfuseInspectPublicSummary | null;
+  exitCode: number;
+}> {
   const issueKey = options.issueKey.trim();
   const namespace =
     options.namespace ??
@@ -114,16 +129,52 @@ export async function runLangfuseInspect(
     scores,
     artifactRuns,
     includeSafeContent: options.safeContent === true,
+    expectedPhases: options.expectedPhases,
   });
+
+  const publicMode = isPublicRunnerMode();
+  let publicSummary: LangfuseInspectPublicSummary | null = null;
 
   if (options.outPath) {
     const out = path.resolve(options.outPath);
     await mkdir(path.dirname(out), { recursive: true });
-    await writeFile(out, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    if (publicMode) {
+      const built = toPublicSafeInspectSummary(report, {
+        requestId:
+          options.requestId ??
+          process.env.REQUEST_ID ??
+          process.env.P_DEV_JOB_REQUEST_ID ??
+          null,
+        githubRunId:
+          options.githubRunId ?? process.env.GITHUB_RUN_ID ?? null,
+      });
+      publicSummary = built.summary;
+      await writeFile(out, built.bytes, "utf8");
+    } else {
+      await writeFile(out, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    }
+  } else if (publicMode) {
+    publicSummary = toPublicSafeInspectSummary(report, {
+      requestId:
+        options.requestId ??
+        process.env.REQUEST_ID ??
+        process.env.P_DEV_JOB_REQUEST_ID ??
+        null,
+      githubRunId: options.githubRunId ?? process.env.GITHUB_RUN_ID ?? null,
+    }).summary;
   }
+
+  const exitCode = publicMode
+    ? publicSummary && publicSummaryAcceptancePassed(publicSummary)
+      ? 0
+      : 2
+    : report.acceptance.coreComplete
+      ? 0
+      : 2;
 
   return {
     report,
-    exitCode: report.acceptance.complete ? 0 : 2,
+    publicSummary,
+    exitCode,
   };
 }

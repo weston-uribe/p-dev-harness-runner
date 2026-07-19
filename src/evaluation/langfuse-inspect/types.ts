@@ -65,7 +65,13 @@ export interface LangfuseInspectGap {
   message: string;
   traceId?: string;
   observationId?: string;
+  /** Bounded normalized reason used for gap identity (not the human message). */
+  reasonCode?: string;
 }
+
+export type GenerationExclusionReason =
+  | "not_associated_with_expected_phase"
+  | "unnamed_without_durable_phase_correlation";
 
 export interface LangfuseInspectReport {
   schemaVersion: 1;
@@ -74,18 +80,39 @@ export interface LangfuseInspectReport {
   sessionId: string;
   sessionDisplayName: string | null;
   inspectedAt: string;
+  expectedPhases: string[];
   traces: LangfuseInspectTrace[];
   scores: LangfuseInspectScore[];
   gaps: LangfuseInspectGap[];
   acceptance: {
+    /** Private core acceptance — does not include public-summary privacy validation. */
+    coreComplete: boolean;
+    /**
+     * Private/local alias of coreComplete (does not include privacy).
+     * Public workflow must use LangfuseInspectPublicSummary.acceptance.complete.
+     */
     complete: boolean;
     missingVisibleIssueKey: boolean;
     hasPlanningTrace: boolean;
     hasPlannerAgent: boolean;
+    hasPlanReviewTrace: boolean;
+    hasPlanReviewerAgent: boolean;
+    requiredTracesPresent: boolean;
+    requiredAgentsPresent: boolean;
+    requiredGenerationsPresent: boolean;
     planningTraceNames: string[];
     plannerAgentNames: string[];
+    planReviewTraceNames: string[];
+    planReviewerAgentNames: string[];
     agentObservationNames: string[];
     generationCostComplete: boolean;
+    requiredGenerationCount: number;
+    costCompleteGenerationCount: number;
+    incompleteRequiredGenerationCount: number;
+    uniqueGenerationCandidateCount: number;
+    excludedGenerationCandidateCount: number;
+    errorGapCount: number;
+    warningGapCount: number;
     scoreNames: string[];
   };
   artifactComparison: {
@@ -106,5 +133,33 @@ export interface LangfuseInspectReport {
       outputByteCount: number | null;
       redactionStatus: string | null;
     }>;
+  };
+}
+
+/** Allowlisted public Actions artifact — no private identifiers or messages. */
+export interface LangfuseInspectPublicSummary {
+  schemaVersion: 1;
+  kind: "langfuse_inspect_public_summary";
+  requestId: string | null;
+  githubRunId: string | null;
+  inspectedAt: string;
+  expectedPhaseCount: number;
+  traceCount: number;
+  uniqueGenerationCount: number;
+  requiredGenerationCount: number;
+  costCompleteGenerationCount: number;
+  incompleteRequiredGenerationCount: number;
+  errorGapCount: number;
+  warningGapCount: number;
+  gapCodeCounts: Record<string, number>;
+  privacyValidationPassed: boolean;
+  acceptance: {
+    coreComplete: boolean;
+    generationCostComplete: boolean;
+    privacyValidationPassed: boolean;
+    requiredGenerationCount: number;
+    incompleteRequiredGenerationCount: number;
+    errorGapCount: number;
+    complete: boolean;
   };
 }

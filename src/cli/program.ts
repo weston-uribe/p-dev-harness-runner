@@ -927,13 +927,20 @@ export function createProgram(): Command {
     )
     .option("--namespace <namespace>", "Evaluation namespace")
     .option("--log-directory <path>", "Override harness logDirectory")
-    .option("--out <path>", "Write redacted report JSON to this path")
+    .option(
+      "--out <path>",
+      "Write report JSON (private full report locally; public-safe summary in public runner mode)",
+    )
     .option(
       "--safe-content",
-      "Include content hashes/byte counts (never raw bodies)",
+      "Include content hashes/byte counts on private reports (never raw bodies)",
       false,
     )
-    .option("--json", "Print full report JSON to stdout", false)
+    .option(
+      "--expected-phases <phases>",
+      "Comma-separated expected agent phases (default: planning,plan_review)",
+    )
+    .option("--json", "Print full private report JSON to stdout (private mode)", false)
     .action(
       async (opts: {
         issue?: string;
@@ -941,6 +948,7 @@ export function createProgram(): Command {
         logDirectory?: string;
         out?: string;
         safeContent?: boolean;
+        expectedPhases?: string;
         json?: boolean;
       }) => {
         const configPath = program.opts<{ config: string }>().config;
@@ -951,6 +959,7 @@ export function createProgram(): Command {
           logDirectory: opts.logDirectory,
           out: opts.out,
           safeContent: opts.safeContent === true,
+          expectedPhases: opts.expectedPhases,
           json: opts.json === true,
         });
       },

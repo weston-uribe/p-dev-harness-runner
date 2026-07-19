@@ -135,3 +135,34 @@ export function isPlannerAgentDisplayName(
   });
   return name.trim() === expected || name.includes(`${issueKey} · planner`);
 }
+
+export function isPlanReviewTraceDisplayName(
+  name: string | null | undefined,
+  issueKey: string,
+): boolean {
+  if (!name) return false;
+  const expected = phaseTraceDisplayName({ issueKey, phase: "plan_review" });
+  return (
+    name.trim() === expected || name.includes(`${issueKey} · plan_review`)
+  );
+}
+
+export function isPlanReviewerAgentDisplayName(
+  name: string | null | undefined,
+  issueKey: string,
+): boolean {
+  if (!name) return false;
+  const expected = agentObservationDisplayName({
+    issueKey,
+    role: "plan_reviewer",
+  });
+  return (
+    name.trim() === expected || name.includes(`${issueKey} · plan_reviewer`)
+  );
+}
+
+/** Default expected agent phases for ordinary Ready-for-Build path (Chunk 8C). */
+export const DEFAULT_EXPECTED_INSPECT_PHASES = [
+  "planning",
+  "plan_review",
+] as const;
