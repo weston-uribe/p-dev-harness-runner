@@ -44,6 +44,8 @@ import { runEvaluationReprojectLangfuse } from "./commands/evaluation-reproject-
 import { runPromptsValidate } from "./commands/prompts-validate.js";
 import { runPromptsLangfuseSync } from "./commands/prompts-langfuse-sync.js";
 import { runEvaluationCanaryNativeSkill } from "./commands/evaluation-canary-native-skill.js";
+import { runEvaluationProbeCursorSdkUsage } from "./commands/evaluation-probe-cursor-sdk-usage.js";
+import { runEvaluationImportCursorUsage } from "./commands/evaluation-import-cursor-usage.js";
 
 export function createProgram(): Command {
   const program = new Command();
@@ -1067,6 +1069,97 @@ export function createProgram(): Command {
           out: opts.out,
           json: opts.json !== false,
           targetRepo: opts.targetRepo,
+        });
+      },
+    );
+
+  evalCmd
+    .command("import-cursor-usage")
+    .description(
+      "Operator CSV import: scores-only Cursor usage + cost proxies on phase traces (no observation mutation)",
+    )
+    .requiredOption("--csv <path>", "Path to official Cursor usage CSV")
+    .requiredOption(
+      "--inspect-report <path>",
+      "Path to private Langfuse inspect report JSON",
+    )
+    .requiredOption("--issue <key>", "Linear issue key (e.g. TT-14)")
+    .option("--namespace <ns>", "Langfuse namespace")
+    .option(
+      "--phases <list>",
+      "Comma-separated phases to attach (default: planning,plan_review)",
+      "planning,plan_review",
+    )
+    .option("--dry-run", "Compute join/proxies without Langfuse writes", false)
+    .option("--out <path>", "Write private import report JSON")
+    .option("--public-out <path>", "Write public-safe summary JSON")
+    .option("--json", "Print public summary JSON to stdout", true)
+    .option(
+      "--skip-second-import-verify",
+      "Skip second-import idempotency check",
+      false,
+    )
+    .action(
+      async (opts: {
+        csv: string;
+        inspectReport: string;
+        issue: string;
+        namespace?: string;
+        phases?: string;
+        dryRun?: boolean;
+        out?: string;
+        publicOut?: string;
+        json?: boolean;
+        skipSecondImportVerify?: boolean;
+      }) => {
+        process.exitCode = await runEvaluationImportCursorUsage({
+          csv: opts.csv,
+          inspectReport: opts.inspectReport,
+          issueKey: opts.issue,
+          namespace: opts.namespace,
+          phases: opts.phases,
+          dryRun: opts.dryRun === true,
+          out: opts.out,
+          publicOut: opts.publicOut,
+          json: opts.json !== false,
+          skipSecondImportVerify: opts.skipSecondImportVerify === true,
+        });
+      },
+    );
+
+  evalCmd
+    .command("probe-cursor-sdk-usage")
+    .description(
+      "Bounded maintainer probe: Cursor SDK usage surfaces (private report; public-safe summary)",
+    )
+    .option(
+      "--target-repo <url>",
+      "Cloud target repo URL (or P_DEV_CURSOR_SDK_USAGE_PROBE_REPO)",
+    )
+    .option("--starting-ref <ref>", "Cloud starting ref", "main")
+    .option("--include-local", "Also run a local runtime probe for shape comparison", false)
+    .option("--out <path>", "Write private report JSON")
+    .option("--public-out <path>", "Write public-safe summary JSON")
+    .option("--public-only", "Print only public-safe summary to stdout", false)
+    .option("--json", "Print JSON to stdout", true)
+    .action(
+      async (opts: {
+        targetRepo?: string;
+        startingRef?: string;
+        includeLocal?: boolean;
+        out?: string;
+        publicOut?: string;
+        publicOnly?: boolean;
+        json?: boolean;
+      }) => {
+        process.exitCode = await runEvaluationProbeCursorSdkUsage({
+          targetRepo: opts.targetRepo,
+          startingRef: opts.startingRef,
+          includeLocal: opts.includeLocal === true,
+          out: opts.out,
+          publicOut: opts.publicOut,
+          publicOnly: opts.publicOnly === true,
+          json: opts.json !== false,
         });
       },
     );

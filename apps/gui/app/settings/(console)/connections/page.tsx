@@ -1,3 +1,4 @@
+import { AutomationHealthFacts } from "@/components/settings/automation-health-facts";
 import { ConnectionsSettingsEditor } from "@/components/settings/editors/connections-settings-editor";
 import { loadConnectionsEditorData } from "@/lib/settings/load-settings-editor-data";
 
@@ -21,6 +22,7 @@ export default async function SettingsConnectionsPage({
           after save.
         </p>
       </div>
+      <AutomationHealthFacts snapshot={data.workspaceHealth} />
       <ConnectionsSettingsEditor
         initialPresence={data.presence}
         initialServiceConnectionSummaries={data.serviceConnectionSummaries}
@@ -30,6 +32,11 @@ export default async function SettingsConnectionsPage({
         }}
         repairVercel={repairVercel}
         envContentFingerprint={data.envContentFingerprint}
+        controlPlaneFingerprint={data.workspaceHealth.controlPlaneFingerprint}
+        initialRecoveryActive={data.workspaceHealth.vercel.recovery.active}
+        promptScopeSelection={
+          data.workspaceHealth.vercel.recovery.promptScopeSelection
+        }
       />
     </div>
   );

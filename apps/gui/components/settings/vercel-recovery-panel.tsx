@@ -66,6 +66,7 @@ export function VercelRecoveryPanel({
   credentialSuccessMessage,
   onCredentialHealthRefresh,
   onActiveChange,
+  suppressScopePrompt = false,
 }: {
   active: boolean;
   variant?: "card" | "embedded";
@@ -73,6 +74,8 @@ export function VercelRecoveryPanel({
   onCredentialHealthRefresh?: () => void;
   /** Notify parent when a durable nonterminal op is present. */
   onActiveChange?: (active: boolean) => void;
+  /** When true, do not ask to re-select a scope already stored and in use. */
+  suppressScopePrompt?: boolean;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<VercelRecoveryPublicStatus | null>(null);
@@ -420,7 +423,9 @@ export function VercelRecoveryPanel({
         </p>
       ) : null}
 
-      {currentStage === "needs_scope" && operation?.scopeOptions?.length ? (
+      {currentStage === "needs_scope" &&
+      operation?.scopeOptions?.length &&
+      !suppressScopePrompt ? (
         <div className="space-y-2" data-recovery-input="scope">
           {operation.humanProblem ? (
             <p className="text-sm text-foreground">{operation.humanProblem}</p>

@@ -834,7 +834,7 @@ export async function executeCodeRevisionPhase(
           branch: branch ?? undefined,
           prUrl: prUrl ?? latestImplementation.prUrl,
         },
-        "handoff",
+        "code_revision",
       );
     } catch {
       // best-effort

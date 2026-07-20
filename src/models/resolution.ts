@@ -13,6 +13,10 @@ import type {
   ParameterEvidenceSource,
   ResolvedModelSelection,
 } from "./types.js";
+import {
+  defaultEffortValueIfSupported,
+  filterParamsForSdkPropagation,
+} from "./sdk-param-propagation.js";
 
 export function cloneParams(
   params: readonly ModelParameterValue[] | undefined,
@@ -155,6 +159,30 @@ export function resolveModelParameters(input: {
     if (parameterEvidenceSource !== "stored") {
       parameterEvidenceSource = "harness_default_pin";
     }
+  }
+
+  // Capability-advertised effort/reasoning defaults (medium) when unset.
+  for (const parameter of capability.supportedParameters) {
+    const defaultValue = defaultEffortValueIfSupported(
+      parameter,
+      effectiveRequestedParams,
+    );
+    if (!defaultValue) continue;
+    if (hasStoredParam(effectiveRequestedParams, parameter.id)) continue;
+    effectiveRequestedParams = [
+      ...effectiveRequestedParams,
+      { id: parameter.id, value: defaultValue },
+    ];
+    if (parameterEvidenceSource !== "stored") {
+      parameterEvidenceSource = "harness_default_pin";
+    }
+  }
+
+  if (capability.supportedParameters.length > 0) {
+    effectiveRequestedParams = filterParamsForSdkPropagation({
+      supportedParameters: capability.supportedParameters,
+      requestedParams: effectiveRequestedParams,
+    });
   }
 
   const fastValue = getParamValue(effectiveRequestedParams, "fast");

@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CONNECTIONS_VERCEL_REPAIR_ROUTE } from "@harness/setup/gui-routes";
-import type { CredentialHealthStatus } from "@harness/setup/workspace-health";
+import {
+  shouldAcceptHealthRefresh,
+  type CredentialHealthStatus,
+} from "@harness/setup/workspace-health";
 
 type SavedCredentialHealth = {
   status: CredentialHealthStatus;
@@ -14,10 +17,19 @@ type SavedCredentialHealth = {
  * Visible when Workflow opens with a verified durable bridge but degraded
  * Vercel credential health (e.g. revoked token). Does not block Workflow.
  */
-export function VercelConnectionWarning() {
+export function VercelConnectionWarning({
+  durableBridgeVerified = false,
+  controlPlaneFingerprint,
+}: {
+  durableBridgeVerified?: boolean;
+  controlPlaneFingerprint?: string;
+}) {
   const [health, setHealth] = useState<SavedCredentialHealth | null>(null);
 
   useEffect(() => {
+    if (!durableBridgeVerified) {
+      return;
+    }
     void (async () => {
       try {
         const response = await fetch("/api/setup/verify-saved-connections", {
@@ -26,12 +38,10 @@ export function VercelConnectionWarning() {
           body: JSON.stringify({ key: "VERCEL_TOKEN" }),
         });
         if (!response.ok) {
-          // Local runtime / module failures must not look like bad credentials.
           const contentType = response.headers.get("content-type");
           setHealth({
             status:
-              response.status >= 500 ||
-              contentType?.includes("text/html")
+              response.status >= 500 || contentType?.includes("text/html")
                 ? "local_runtime_error"
                 : "unknown",
             message:
@@ -43,7 +53,17 @@ export function VercelConnectionWarning() {
         }
         const body = (await response.json()) as {
           health?: SavedCredentialHealth;
+          controlPlaneFingerprint?: string;
         };
+        if (
+          controlPlaneFingerprint &&
+          !shouldAcceptHealthRefresh({
+            mountedControlPlaneFingerprint: controlPlaneFingerprint,
+            responseControlPlaneFingerprint: body.controlPlaneFingerprint,
+          })
+        ) {
+          return;
+        }
         if (body.health) {
           setHealth(body.health);
         }
@@ -51,9 +71,9 @@ export function VercelConnectionWarning() {
         // Non-blocking warning.
       }
     })();
-  }, []);
+  }, [controlPlaneFingerprint, durableBridgeVerified]);
 
-  if (!health) {
+  if (!durableBridgeVerified || !health) {
     return null;
   }
   if (health.status === "local_runtime_error") {

@@ -60,11 +60,26 @@ export interface PhaseExecutionFreeze {
   configurationSource?: "default" | "validation_run_override";
 }
 
+/** Recoverable exclusive claim for a paid agent subject. */
+export interface ActiveRunLease {
+  /** e.g. code_review:{subjectIdentity} */
+  identity: string;
+  ownerRunId: string;
+  phaseId: string;
+  subjectIdentity: string;
+  acquiredAt: string;
+  expiresAt: string;
+  heartbeatAt: string;
+}
+
 export type WorkflowSideEffectKind =
   | "linear_decision_comment"
   | "linear_status_transition"
   | "manifest_telemetry"
-  | "handoff_marker";
+  | "handoff_marker"
+  | "build_complete_marker"
+  | "pm_handoff_marker"
+  | "code_review_dispatch";
 
 export type WorkflowSideEffectStatus = "pending" | "completed";
 
@@ -93,6 +108,8 @@ export interface WorkflowStateRecord {
   lastAcceptedReviewDecision: AcceptedReviewDecision | null;
   returnDestination: string | null;
   activeRunIdentities: string[];
+  /** Bounded lease metadata for the active agent claim (stale recovery). */
+  activeRunLease?: ActiveRunLease | null;
   completedPhaseIdentities: string[];
   supersededGenerationIdentities: string[];
   lastTransitionIdentity: string | null;
@@ -147,6 +164,7 @@ export function createEmptyWorkflowState(input: {
     lastAcceptedReviewDecision: null,
     returnDestination: null,
     activeRunIdentities: [],
+    activeRunLease: null,
     completedPhaseIdentities: [],
     supersededGenerationIdentities: [],
     lastTransitionIdentity: null,

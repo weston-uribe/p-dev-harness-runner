@@ -8,6 +8,23 @@ export type JobRequestState =
   | "failed"
   | "expired";
 
+export type JobRequestAckSource = "bridge" | "runner_fallback";
+
+export type JobRequestAckFailureCategory =
+  | "missing_linear_api_key"
+  | "linear_write_failed"
+  | "issue_resolve_failed"
+  | "unknown";
+
+export interface JobRequestAckLifecycle {
+  ackRequired: boolean;
+  acceptedAt: string;
+  ackAttemptedAt: string | null;
+  ackConfirmedAt: string | null;
+  ackSource: JobRequestAckSource | null;
+  ackFailureCategory: JobRequestAckFailureCategory | null;
+}
+
 export interface JobRequestRecord {
   kind: typeof JOB_REQUEST_KIND;
   schemaVersion: typeof JOB_REQUEST_SCHEMA_VERSION;
@@ -24,4 +41,7 @@ export interface JobRequestRecord {
   completionState: string | null;
   dedupeIdentity: string;
   revision: number;
+  /** Review-subject identity for explicit code_review handoff jobs. */
+  reviewSubjectIdentity?: string | null;
+  ack?: JobRequestAckLifecycle;
 }

@@ -21,15 +21,26 @@ import {
   createLinearClient,
   listIssueComments,
   postErrorComment,
+  postHandoffComment,
   postIssueComment,
   transitionIssueStatus,
 } from "../../linear/writer.js";
 import { formatCodeReviewComment } from "../../linear/code-review-comment.js";
 import {
+  buildHandoffCommentBody,
+  hasPmHandoffMarker,
+} from "../../linear/comments.js";
+import {
   createCodeReviewAgent,
   disposeAgent,
   sendAndObserve,
 } from "../../agents/index.js";
+import { buildCodeReviewSubjectIdentity } from "../../workflow/subject-identities.js";
+import {
+  claimAgentRun,
+  DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
+} from "../../workflow/state/index.js";
+import { resolveDefinitionForConfig } from "../workflow-transition.js";
 import { manifestModelEvidence } from "../../cursor/model.js";
 import { buildCodeReviewPrompt } from "../../prompts/builder.js";
 import { CodeReviewError } from "../errors.js";
@@ -185,6 +196,7 @@ export async function executeCodeReviewPhase(
   const model = reviewerModel.model;
   let finalOutcome: FinalOutcome = "failed";
   let errorClassification: ErrorClassification = "cursor_run_failed";
+  let ownedActiveClaim = false;
   let linearStatusAfter: string | null = issue.status;
   let phaseTrace: PhaseTraceHandle | null = null;
   let reviewerObs: NestedObservationHandle | null = null;
@@ -384,12 +396,81 @@ export async function executeCodeReviewPhase(
     });
   }
 
+  const reviewCycle = state.cycleCounters.code_review_cycles ?? 0;
+  const reviewSubjectIdentity = buildCodeReviewSubjectIdentity({
+    issueKey: options.issueKey,
+    prNumber: latestImplementation.prNumber,
+    headSha: latestImplementation.headSha,
+    diffHash: latestImplementation.diffHash,
+    reviewCycle,
+  });
+  const acceptedForSubject =
+    state.acceptedReviewSubjects?.[reviewSubjectIdentity] ??
+    (state.lastAcceptedReviewDecision?.reviewedPrNumber ===
+      latestImplementation.prNumber &&
+    state.lastAcceptedReviewDecision.reviewedHeadSha ===
+      latestImplementation.headSha &&
+    state.lastAcceptedReviewDecision.reviewedDiffHash ===
+      latestImplementation.diffHash
+      ? state.lastAcceptedReviewDecision.decisionIdentity
+      : null);
+
+  if (acceptedForSubject) {
+    await events.log("idempotency_skip", "info", {
+      reason: "code_review_subject_already_accepted",
+      reviewSubjectIdentity,
+      decisionIdentity: acceptedForSubject,
+    });
+    finalOutcome = "duplicate";
+    errorClassification = "duplicate_phase_completed";
+    const manifest: RunManifest = {
+      runId,
+      issueKey: options.issueKey,
+      phase: "code_review",
+      phaseInferredFromStatus: issue.status,
+      linearStatusBefore: issue.status,
+      linearStatusAfter: issue.status,
+      targetRepo: resolved.targetRepo,
+      baseBranch: resolved.baseBranch,
+      resolutionSource: resolved.resolutionSource,
+      dryRun: false,
+      finalOutcome,
+      errorClassification,
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      milestone: MILESTONE,
+      promptVersion: null,
+      cursorAgentId: null,
+      cursorRunId: null,
+      branch: null,
+      prUrl: latestImplementation.prUrl,
+      previewUrl: null,
+      validationSummary: null,
+      changedFiles: null,
+      checkSummary: null,
+      previousImplementationRunId: latestImplementation.builderRunId,
+      previousHandoffRunId: null,
+      pmFeedbackCommentId: null,
+      ...emptyMergeManifestFields(),
+      model,
+      deliveryId,
+      runGeneration,
+      runOwnedStatuses: [],
+    };
+    await writeManifest(runDirectory, manifest);
+    await writeRunSummary(runDirectory, manifest, parsed, resolved);
+    return { manifest, runDirectory, exitCode: 0 };
+  }
+
   const eligibility = evaluateCodeReviewExecutionEligibility({
     latestImplementation,
     liveEvidence,
     activeRunIdentities: state.activeRunIdentities,
+    activeRunLeaseIdentity: state.activeRunLease?.identity ?? null,
     completedPhaseIdentities: state.completedPhaseIdentities,
     supersededGenerationIds: state.supersededGenerationIdentities,
+    reviewSubjectIdentity,
+    acceptedDecisionIdentityForSubject: acceptedForSubject,
   });
   const eligibilityDiag = buildCodeReviewExecutionEligibilityDiagnostic({
     eligibility,
@@ -397,12 +478,137 @@ export async function executeCodeReviewPhase(
   });
   captureWorkflowAnalyticsEvent(eligibilityDiag.event, eligibilityDiag.properties);
 
+  if (
+    !eligibility.executionEligible &&
+    eligibility.failureCodes.includes("reviewer_identity_already_owns_generation")
+  ) {
+    await events.log("idempotency_skip", "info", {
+      reason: "code_review_subject_lease_active_or_accepted",
+      reviewSubjectIdentity,
+      failureCodes: eligibility.failureCodes,
+    });
+    finalOutcome = "duplicate";
+    errorClassification = "duplicate_phase_completed";
+    const manifest: RunManifest = {
+      runId,
+      issueKey: options.issueKey,
+      phase: "code_review",
+      phaseInferredFromStatus: issue.status,
+      linearStatusBefore: issue.status,
+      linearStatusAfter: issue.status,
+      targetRepo: resolved.targetRepo,
+      baseBranch: resolved.baseBranch,
+      resolutionSource: resolved.resolutionSource,
+      dryRun: false,
+      finalOutcome,
+      errorClassification,
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      milestone: MILESTONE,
+      promptVersion: null,
+      cursorAgentId: null,
+      cursorRunId: null,
+      branch: null,
+      prUrl: latestImplementation.prUrl,
+      previewUrl: null,
+      validationSummary: null,
+      changedFiles: null,
+      checkSummary: null,
+      previousImplementationRunId: latestImplementation.builderRunId,
+      previousHandoffRunId: null,
+      pmFeedbackCommentId: null,
+      ...emptyMergeManifestFields(),
+      model,
+      deliveryId,
+      runGeneration,
+      runOwnedStatuses: [],
+    };
+    await writeManifest(runDirectory, manifest);
+    await writeRunSummary(runDirectory, manifest, parsed, resolved);
+    return { manifest, runDirectory, exitCode: 0 };
+  }
+
   if (!eligibility.executionEligible) {
     throw new CodeReviewError(
       "validation_failed",
       `Code Review execution is not eligible: ${eligibility.failureMessages.join(" ")}`,
     );
   }
+
+  const definition = resolveDefinitionForConfig({
+    config,
+    codeReviewEffectiveEnabled: true,
+    linearStatuses,
+  });
+  const leaseIdentity = `code_review:${reviewSubjectIdentity}`;
+  const claimResult = await claimAgentRun({
+    store,
+    issueKey: options.issueKey,
+    definition,
+    expectedStateRevision: state.stateRevision,
+    currentPhaseId: "code_review",
+    runId,
+    evidence: {
+      linearStatusName: issue.status ?? readiness.codeReviewStatusName,
+      latestPrNumber: latestImplementation.prNumber,
+      latestHeadSha: latestImplementation.headSha,
+      latestBaseSha: latestImplementation.baseSha,
+      latestDiffHash: latestImplementation.diffHash,
+      latestImplementationGenerationId:
+        latestImplementation.implementationGenerationId,
+    },
+    leaseIdentity,
+    subjectIdentity: reviewSubjectIdentity,
+    leaseTtlMs: DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
+  });
+  if (!claimResult.ok) {
+    await events.log("idempotency_skip", "info", {
+      reason: "code_review_claim_conflict",
+      reviewSubjectIdentity,
+      claimReason: claimResult.reason,
+    });
+    finalOutcome = "duplicate";
+    errorClassification = "duplicate_phase_completed";
+    const manifest: RunManifest = {
+      runId,
+      issueKey: options.issueKey,
+      phase: "code_review",
+      phaseInferredFromStatus: issue.status,
+      linearStatusBefore: issue.status,
+      linearStatusAfter: issue.status,
+      targetRepo: resolved.targetRepo,
+      baseBranch: resolved.baseBranch,
+      resolutionSource: resolved.resolutionSource,
+      dryRun: false,
+      finalOutcome,
+      errorClassification,
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      milestone: MILESTONE,
+      promptVersion: null,
+      cursorAgentId: null,
+      cursorRunId: null,
+      branch: null,
+      prUrl: latestImplementation.prUrl,
+      previewUrl: null,
+      validationSummary: null,
+      changedFiles: null,
+      checkSummary: null,
+      previousImplementationRunId: latestImplementation.builderRunId,
+      previousHandoffRunId: null,
+      pmFeedbackCommentId: null,
+      ...emptyMergeManifestFields(),
+      model,
+      deliveryId,
+      runGeneration,
+      runOwnedStatuses: [],
+    };
+    await writeManifest(runDirectory, manifest);
+    await writeRunSummary(runDirectory, manifest, parsed, resolved);
+    return { manifest, runDirectory, exitCode: 0 };
+  }
+  state = claimResult.state ?? state;
+  ownedActiveClaim = true;
 
   const previousFeedback =
     state.lastAcceptedReviewDecision?.decision === "needs_revision" &&
@@ -698,13 +904,20 @@ export async function executeCodeReviewPhase(
         clearActiveRunId: runId,
       });
 
-      if (!applied.applyOk || !applied.statusName) {
+      if (applied.reason === "duplicate_transition") {
+        await events.log("idempotency_skip", "info", {
+          reason: "code_review_duplicate_transition",
+          reviewSubjectIdentity,
+        });
+        finalOutcome = "duplicate";
+        errorClassification = "duplicate_phase_completed";
+        ownedActiveClaim = false;
+      } else if (!applied.applyOk || !applied.statusName) {
         throw new CodeReviewError(
           "linear_write_failure",
           `Code Review transition rejected: ${applied.reason}`,
         );
-      }
-
+      } else {
       const commentBody = formatCodeReviewComment({
         outcome: validated.outcome,
         footer: {
@@ -746,6 +959,43 @@ export async function executeCodeReviewPhase(
       }
       await transitionIssueStatus(client, issue, applied.statusName);
       linearStatusAfter = applied.statusName;
+
+      if (review.decision === "approved" && applied.statusName) {
+        const existingComments = await listIssueComments(client, issue.id);
+        const alreadyPosted = existingComments.some((comment) =>
+          hasPmHandoffMarker(comment.body, reviewSubjectIdentity),
+        );
+        if (!alreadyPosted) {
+          const pmBody = buildHandoffCommentBody({
+            prTitle: `PR #${latestImplementation.prNumber}`,
+            prUrl: latestImplementation.prUrl,
+            branch: branchName || `pr-${latestImplementation.prNumber}`,
+            targetRepo: markerTargetRepo,
+            baseBranch: resolved.baseBranch,
+            previewUrl: null,
+            previewWarning: null,
+            changedFiles: [],
+            checkSummary: "See Code Review decision above.",
+            harnessRunId: runId,
+            previousImplementationRunId: latestImplementation.builderRunId,
+            subjectIdentity: reviewSubjectIdentity,
+          });
+          await postHandoffComment(client, issue.id, pmBody, {
+            orchestratorMarker: config.orchestratorMarker,
+            phase: "handoff",
+            runId,
+            model,
+            promptVersion: "handoff@1",
+            targetRepo: resolved.targetRepo,
+            baseBranch: resolved.baseBranch,
+            prUrl: latestImplementation.prUrl,
+            prNumber: String(latestImplementation.prNumber),
+            prHeadSha: latestImplementation.headSha,
+            diffHash: latestImplementation.diffHash,
+            handoffSubjectIdentity: reviewSubjectIdentity,
+          });
+        }
+      }
 
       const decisionType = applied.result?.decisionType ?? review.decision;
       captureWorkflowAnalyticsEvent(
@@ -817,6 +1067,7 @@ export async function executeCodeReviewPhase(
       extraEvalMetadata = endMeta;
       finalOutcome = "success";
       errorClassification = null;
+      } // end non-duplicate transition path
     } finally {
       await disposeAgent(agent);
     }
@@ -831,29 +1082,33 @@ export async function executeCodeReviewPhase(
       message,
       errorClassification,
     });
-    try {
-      await postErrorComment(
-        client,
-        issue.id,
-        message,
-        {
-          orchestratorMarker: config.orchestratorMarker,
-          phase: "code_review",
-          runId,
-          model,
-          promptVersion: promptVersion ?? "code-review@1",
-          targetRepo: resolved.targetRepo,
-          baseBranch: resolved.baseBranch,
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
-          prUrl: latestImplementation.prUrl,
-        },
-        "handoff",
-      );
-    } catch {
-      // best-effort
+    if (finalOutcome !== "duplicate" && ownedActiveClaim) {
+      try {
+        await postErrorComment(
+          client,
+          issue.id,
+          message,
+          {
+            orchestratorMarker: config.orchestratorMarker,
+            phase: "code_review",
+            runId,
+            model,
+            promptVersion: promptVersion ?? "code-review@1",
+            targetRepo: resolved.targetRepo,
+            baseBranch: resolved.baseBranch,
+            cursorAgentId: cursorAgentId ?? undefined,
+            cursorRunId: cursorRunId ?? undefined,
+            prUrl: latestImplementation.prUrl,
+          },
+          "code_review",
+        );
+      } catch {
+        // best-effort
+      }
     }
-    finalOutcome = "failed";
+    if (finalOutcome !== "duplicate") {
+      finalOutcome = "failed";
+    }
   }
 
   const afterIssue = await fetchLinearIssue(options.issueKey, linearApiKey);
@@ -911,6 +1166,7 @@ export async function executeCodeReviewPhase(
   return {
     manifest: finalManifest,
     runDirectory,
-    exitCode: finalOutcome === "success" ? 0 : 1,
+    exitCode:
+      finalOutcome === "success" || finalOutcome === "duplicate" ? 0 : 1,
   };
 }

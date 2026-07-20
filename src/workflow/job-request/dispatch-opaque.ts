@@ -16,8 +16,10 @@ import {
 } from "../../webhook/dispatch-github.js";
 import type { OpaqueJobDispatchPayload } from "../../webhook/types.js";
 import { JOB_REQUEST_SCHEMA_VERSION } from "./types.js";
-import { createJobRequest } from "./create.js";
-import { GithubJobRequestStore } from "./store.js";
+import { createJobRequest, buildJobRequestRecord } from "./create.js";
+import { GithubJobRequestStore, JobRequestStoreError } from "./store.js";
+import { attemptJobRequestAcknowledgement } from "./acknowledge.js";
+import { resolveJobRequestId } from "./request-id.js";
 
 export interface CreateEnvelopeAndDispatchInput {
   issueKey: string;
@@ -30,6 +32,11 @@ export interface CreateEnvelopeAndDispatchInput {
   githubClient?: GitHubClient;
   /** Override dispatch token (defaults to GITHUB_DISPATCH_TOKEN). */
   dispatchToken?: string;
+  reviewSubjectIdentity?: string | null;
+  /** When false, skip ack lifecycle (internal/harness-owned dispatches). */
+  ackRequired?: boolean;
+  /** Skip repository_dispatch (e.g. dry create). */
+  skipDispatch?: boolean;
 }
 
 export interface CreateEnvelopeAndDispatchResult {
@@ -37,6 +44,9 @@ export interface CreateEnvelopeAndDispatchResult {
   envelopeSchemaVersion: number;
   publicEventType: string;
   executionRepository: string;
+  duplicate: boolean;
+  dispatched: boolean;
+  ackConfirmed: boolean;
 }
 
 export async function createEnvelopeAndDispatch(
@@ -79,13 +89,64 @@ export async function createEnvelopeAndDispatch(
   });
   await store.ensureBranch();
 
-  const record = await createJobRequest(store, {
-    issueKey: input.issueKey,
-    phase: input.phase ?? "auto",
-    triggerSource: input.triggerSource,
+  const requestId = resolveJobRequestId({
     linearDeliveryId: input.linearDeliveryId,
-    force: input.force,
   });
+  const existing = await store.load(requestId);
+  if (existing) {
+    return {
+      requestId: existing.requestId,
+      envelopeSchemaVersion: JOB_REQUEST_SCHEMA_VERSION,
+      publicEventType: getDispatchEventType(),
+      executionRepository: `${execution.owner}/${execution.repo}`,
+      duplicate: true,
+      dispatched: false,
+      ackConfirmed: Boolean(existing.ack?.ackConfirmedAt),
+    };
+  }
+
+  let record;
+  try {
+    record = await createJobRequest(store, {
+      issueKey: input.issueKey,
+      phase: input.phase ?? "auto",
+      triggerSource: input.triggerSource,
+      linearDeliveryId: input.linearDeliveryId,
+      force: input.force,
+      requestId,
+      reviewSubjectIdentity: input.reviewSubjectIdentity,
+      ackRequired: input.ackRequired ?? true,
+    });
+  } catch (error) {
+    if (error instanceof JobRequestStoreError && error.code === "already_exists") {
+      const raced = await store.load(requestId);
+      if (raced) {
+        return {
+          requestId: raced.requestId,
+          envelopeSchemaVersion: JOB_REQUEST_SCHEMA_VERSION,
+          publicEventType: getDispatchEventType(),
+          executionRepository: `${execution.owner}/${execution.repo}`,
+          duplicate: true,
+          dispatched: false,
+          ackConfirmed: Boolean(raced.ack?.ackConfirmedAt),
+        };
+      }
+    }
+    throw error;
+  }
+
+  let ackConfirmed = false;
+  if (record.ack?.ackRequired) {
+    const ackResult = await attemptJobRequestAcknowledgement({
+      store,
+      record,
+      linearApiKey: env.LINEAR_API_KEY,
+      source: "bridge",
+      generation: Date.parse(record.createdAt) || Date.now(),
+    });
+    record = ackResult.record;
+    ackConfirmed = ackResult.confirmed;
+  }
 
   const publicEventType = getDispatchEventType();
   const clientPayload: OpaqueJobDispatchPayload = {
@@ -95,18 +156,50 @@ export async function createEnvelopeAndDispatch(
   };
 
   const executionSlug = `${execution.owner}/${execution.repo}`;
-  await dispatchRepositoryEvent({
-    token: dispatchToken,
-    repository: executionSlug,
-    eventType: publicEventType,
-    clientPayload,
-    fetchImpl: input.fetchImpl,
-  });
+  let dispatched = false;
+  if (!input.skipDispatch) {
+    await dispatchRepositoryEvent({
+      token: dispatchToken,
+      repository: executionSlug,
+      eventType: publicEventType,
+      clientPayload,
+      fetchImpl: input.fetchImpl,
+    });
+    dispatched = true;
+  }
 
   return {
     requestId: record.requestId,
     envelopeSchemaVersion: JOB_REQUEST_SCHEMA_VERSION,
     publicEventType,
     executionRepository: executionSlug,
+    duplicate: false,
+    dispatched,
+    ackConfirmed,
   };
 }
+
+/** Create + dispatch an explicit code_review job (no Linear ack; harness-owned). */
+export async function createCodeReviewJobAndDispatch(input: {
+  issueKey: string;
+  reviewSubjectIdentity: string;
+  env?: Record<string, string | undefined>;
+  fetchImpl?: typeof fetch;
+  githubClient?: GitHubClient;
+  dispatchToken?: string;
+}): Promise<CreateEnvelopeAndDispatchResult> {
+  return createEnvelopeAndDispatch({
+    issueKey: input.issueKey,
+    phase: "code_review",
+    triggerSource: "harness_code_review_handoff",
+    linearDeliveryId: `cr-subject:${input.reviewSubjectIdentity}`,
+    reviewSubjectIdentity: input.reviewSubjectIdentity,
+    ackRequired: false,
+    env: input.env,
+    fetchImpl: input.fetchImpl,
+    githubClient: input.githubClient,
+    dispatchToken: input.dispatchToken,
+  });
+}
+
+export { buildJobRequestRecord };

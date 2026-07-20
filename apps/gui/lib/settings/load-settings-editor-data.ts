@@ -11,17 +11,20 @@ import {
 } from "@/lib/setup-server";
 import { loadDurableServiceConnectionSummaries } from "@/lib/verification-state";
 import { createRunnerUpgradeCheckingSkeleton } from "@/lib/settings/runner-upgrade-ssr";
+import { loadWorkspaceHealthSnapshot } from "@/lib/workspace-health-server";
 
 export { loadDurableServiceConnectionSummaries };
 export { createRunnerUpgradeCheckingSkeleton } from "@/lib/settings/runner-upgrade-ssr";
 
 export async function loadConnectionsEditorData() {
   const cwd = resolveHarnessWorkspaceDir();
-  const [summary, formDefaults, envFingerprint] = await Promise.all([
-    loadSetupSummary(),
-    loadSetupFormDefaults(),
-    readEnvLocalContentFingerprint(cwd),
-  ]);
+  const [summary, formDefaults, envFingerprint, workspaceHealth] =
+    await Promise.all([
+      loadSetupSummary(),
+      loadSetupFormDefaults(),
+      readEnvLocalContentFingerprint(cwd),
+      loadWorkspaceHealthSnapshot(),
+    ]);
   return {
     presence: summary.envKeyPresence,
     envDefaults: formDefaults.env,
@@ -29,18 +32,30 @@ export async function loadConnectionsEditorData() {
       summary.envKeyPresence,
     ),
     envContentFingerprint: envFingerprint.fingerprint,
+    workspaceHealth,
   };
 }
 
 export async function loadLinearEditorData() {
-  return loadLinearWorkspaceEditorState();
+  const [editor, workspaceHealth] = await Promise.all([
+    loadLinearWorkspaceEditorState(),
+    loadWorkspaceHealthSnapshot(),
+  ]);
+  return {
+    ...editor,
+    workspaceHealth,
+  };
 }
 
 export async function loadDeploymentsEditorData() {
-  const summary = await loadVercelSetupSummary();
+  const [summary, workspaceHealth] = await Promise.all([
+    loadVercelSetupSummary(),
+    loadWorkspaceHealthSnapshot(),
+  ]);
   return {
     summary,
     runnerUpgradeStatus: createRunnerUpgradeCheckingSkeleton(),
+    workspaceHealth,
   };
 }
 

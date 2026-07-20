@@ -59,6 +59,7 @@ jobs:
             --out "$REPORT" \
             --json
       - name: Assert Langfuse inspect acceptance
+        if: always()
         run: |
           set -euo pipefail
           REPORT="runs/evaluation-reports/public-inspect-${{ github.run_id }}.json"

@@ -206,12 +206,49 @@ export async function runPreflight(
 
       if (!options.fixturePath) {
         try {
-          const client = createLinearClient(apiKey);
-          await acknowledgeIssueReceived(client, issue.id, {
-            runId,
-            deliveryId: deliveryId ?? null,
-            generation: resolveRunGeneration(),
-          });
+          const requestId = process.env.REQUEST_ID?.trim();
+          if (requestId) {
+            const { createGithubJobRequestStoreFromEnv } = await import(
+              "../workflow/job-request/runtime-store.js"
+            );
+            const { attemptJobRequestAcknowledgement } = await import(
+              "../workflow/job-request/acknowledge.js"
+            );
+            const store = await createGithubJobRequestStoreFromEnv();
+            const record = await store.load(requestId);
+            if (record && record.ack?.ackRequired && !record.ack.ackConfirmedAt) {
+              await attemptJobRequestAcknowledgement({
+                store,
+                record,
+                linearApiKey: apiKey,
+                source: "runner_fallback",
+                generation:
+                  Date.parse(record.createdAt) || resolveRunGeneration(),
+              });
+            } else if (!record?.ack?.ackConfirmedAt) {
+              const client = createLinearClient(apiKey);
+              await acknowledgeIssueReceived(client, issue.id, {
+                runId,
+                deliveryId: deliveryId ?? null,
+                generation: resolveRunGeneration(),
+                stateRevision: 0,
+                phase: "accepted",
+                outcomeClass: "accepted",
+                ownedActiveClaim: true,
+              });
+            }
+          } else {
+            const client = createLinearClient(apiKey);
+            await acknowledgeIssueReceived(client, issue.id, {
+              runId,
+              deliveryId: deliveryId ?? null,
+              generation: resolveRunGeneration(),
+              stateRevision: 0,
+              phase: "accepted",
+              outcomeClass: "accepted",
+              ownedActiveClaim: true,
+            });
+          }
         } catch {
           // Best-effort progress comment only.
         }

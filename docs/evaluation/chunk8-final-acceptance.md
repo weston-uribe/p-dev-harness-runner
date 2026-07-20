@@ -6,103 +6,150 @@ Workflow schema: `product-development-v2`
 
 ## Recommendation
 
-**Not ready — Chunk 8C validation pending.**
+**Not ready — exact monetary cost still blocked** (native cloud SDK usage absent; CSV scores-only tokens/proxies available).
 
-Chunk 8B Ready was a false positive: public Actions artifacts leaked Linear issue identifiers (runs `29703385200`, `29703386098`); cost/`acceptance.complete` gates treated incomplete unnamed generations as complete; and TT-13 live Langfuse emit was projection-repaired after `UnauthorizedError`, which is not proof of ordinary live telemetry. Chunk 8C must correct privacy, acceptance, and prove untouched Planning + Plan Review emission before Ready is restored.
+Chunk 8C fixed public artifact privacy and false-positive acceptance gates. Chunk 8D confirmed cloud `@cursor/sdk@1.0.23` does not expose documented usage on finished cloud runs. Chunk 8E validated official usage CSV arithmetic and `Cloud Agent ID` ↔ `cursorAgentId` joins. Chunk 8F imports CSV aggregates as **deterministic Langfuse trace scores only** (no observation mutation).
+
+| Verdict (TT-14 Planning + Plan Review) | Result |
+|----------------------------------------|--------|
+| Score-backed token acceptance | **Pass** |
+| Cost-proxy availability | **Pass** (honest proxies; not billed cost) |
+| Exact monetary / `generationCostComplete` | **Fail** (intentionally unchanged) |
+
+Hard exact-cost acceptance correctly remains fail-closed. Ready is not restored.
 
 ## Identities (do not conflate)
 
 | Identity | Value |
 |----------|--------|
-| Feature branch acceptance commit | `66ba840d7d81aedc70b143fb898c31f3b4f86845` (plus tip SHA follow-ups on `feat/eval-pipeline`) |
-| Privacy fix source commit | `e8b119aeb878727480647b6c59cff6fd8e925a70` |
-| Packaged snapshot content ID | `60bb267bac7b38b784cd31d45bd323ee01f750b3e1d638682ac3dc5fdcc694bd` |
-| Snapshot source commit | `e8b119aeb878727480647b6c59cff6fd8e925a70` |
-| Public execution tip | `weston-uribe/p-dev-harness-runner@e339b1795cec35daed313a8accbd48da6a972415` (Langfuse inspect assert fix on tip; privacy snapshot content still `60bb267…`) |
-| Private state tip | `weston-uribe/p-dev-harness-state@f3da00c5336e6a5953211c472fe8012a68343107` (`p-dev-runtime-state`) |
-| Old private runner | `weston-uribe/p-dev-harness` — **archived** (notice commit `2e2ba86`); retained for rollback history |
-| Cloud config fingerprint | `c426a818db0932428a8d8d19b2fa2e85c814641484f072b606b760a4a4457e2b` |
+| Feature branch tip (Chunk 8C) | `5da4a8eb33f5b6d2b23fa5db352f024830fde18b` |
+| Chunk 8C primary commit | `b3df8593d7774f36cd54e3e784c6cf2f38c32d6e` |
+| Packaged snapshot content ID | `b9b5bad4e30fd5aad3a29f7f926a8f14cf08da0dcf46a9de9c656006f5184ff0` |
+| Public execution tip | `weston-uribe/p-dev-harness-runner@5bbd214e704451b1fc63eda4e17e45bc808b8f10` |
+| Private state tip | `weston-uribe/p-dev-harness-state` (`p-dev-runtime-state`) |
+| Old private runner | `weston-uribe/p-dev-harness` — **archived** |
+| Cloud config fingerprint | unchanged from Chunk 8B (`c426a818…`) |
 
-## Chunk 8B cutover (implemented)
+## Chunk 8C corrections (implemented)
 
-| Component | Status | Evidence |
-|-----------|--------|----------|
-| Public free Actions smoke | Pass | Smoke run `29697826424` |
-| Private state migration | Pass | TT-7/TT-8 state copied; Actions disabled on state repo |
-| Opaque job-request envelopes | Pass | Bridge/operator dispatch carry `requestId` only |
-| Public privacy fix (no issue key in `GITHUB_ENV`) | Pass | Source `e8b119a`; Auto Runner `29700575985` leak counts = 0 |
-| Config / private-state canaries | Pass | Config `29700575919`; state canary `29698431934` |
-| Managed sync CLI | Fail / bypassed | `release:sync-managed-runner --apply` timed out; snapshot force-push + Contents API marker used |
-| Old private runner archive | **Done** | `weston-uribe/p-dev-harness` archived; `ARCHIVAL_NOTICE.md` on `main` |
+| Item | Result |
+|------|--------|
+| Public leak (full inspect JSON) | **Fixed** — public workflow uploads only `langfuse_inspect_public_summary` |
+| Affected leak runs | `29703385200`, `29703386098` — artifacts **deleted**; API remaining count `0` |
+| Legacy `langfuse-inspect-*` artifacts | **3 deleted** (aggregate); runs kept |
+| Cost-gate false positive | **Fixed** — unnamed existence bypass removed; required generations fail-closed |
+| Observation / score / gap merge | **Fixed** — deterministic merge + `duplicate_*_identity_conflict` |
+| Two-stage acceptance | **Fixed** — private `coreComplete` vs public `acceptance.complete` after exact-byte `assertPublicSafe` |
+| Public workflow reprojection | **Removed** — inspect-only; no artifact-cache download; retention 1 day |
+| Managed sync CLI | **Worked** for Chunk 8C (`release:sync-managed-runner --apply`) |
 
-## Fresh regression fixtures
+## Fresh live issue (TT-14)
 
-Defined in [`chunk8-regression-fixtures.md`](./chunk8-regression-fixtures.md).
+Ordinary globally enabled workflow. No validation-run override. No projection / reproject / manual traces / status repair after entry.
 
-### Regression A — Plan Review — **pass** (TT-13)
+Path observed:
 
-| Attempt | Result |
-|---------|--------|
-| TT-9 / TT-10 / TT-11 / TT-12 | Failed or canceled (see earlier notes) |
-| **TT-13** | **Pass** — required revision path reached Ready for Build |
+`Ready for Planning → Planning → Plan Review → Ready for Build` (one clean Plan Review approval)
 
-Required path observed (with mid-cycle description rewrite after first `needs_revision`):
+Continued automatically into Building / Code Review / PM Review (out of Chunk 8C Langfuse gate scope).
 
-`Ready for Planning → Planning → Plan Review → … → Ready for Build`
+Linear: [TT-14](https://linear.app/weston-product-lab/issue/TT-14/chunk-8c-live-langfuse-emission-canary) — **Canceled** after evidence.  
+Portfolio PR [#48](https://github.com/weston-uribe/weston-uribe-portfolio/pull/48) — **Closed** without merge.
 
-Linear: [TT-13](https://linear.app/weston-product-lab/issue/TT-13/chunk-8b-tt-plan-review-revision-approve-path) (canceled after acceptance).  
-Portfolio PR [#47](https://github.com/weston-uribe/weston-uribe-portfolio/pull/47) closed without merge.
+### Langfuse private inspect (untouched session)
 
-### Regression B — Code Review (TT-8) — **pass** (pre-cutover Linear path)
-
-Issue TT-8 completed on the private runner before billing block:
-
-`Building → PR Open → Code Review → Code Revision → Code Review → PM Review`
-
-Fresh Code Review re-run after cutover: **skipped** — TT-8 Linear path remains sufficient; Langfuse hard-complete for that historical session is separately documented as insufficient (see observability report). Fresh cost completeness for new sessions is proven by TT-13 + projection canary.
-
-## Langfuse / cost / privacy
-
-See [`chunk8-observability-acceptance.md`](./chunk8-observability-acceptance.md).
-
-| Check | Status |
+| Check | Result |
 |-------|--------|
-| Public Actions issue/target privacy | **Pass** |
-| Langfuse secrets on public runner | **Set** (`LANGFUSE_*` + eval vars) |
-| Public-runner projection canary | **Pass** — `29702463278` |
-| Fresh Plan Review session (TT-13) GHA inspect | **Invalidated (Chunk 8C)** — run `29703385200` uploaded a full private inspect report (issue keys / trace names); cost gate was a false positive |
-| Historical TT-8 hard inspect | **Fail** — `incomplete_cost_record` / `missing_input_token_usage` (GHA `29703386098`; also leaked private report artifact) |
-| GHA inspect assert (Node ESM argv) | **Fixed** — workflow tip `e339b17` (insufficient; Chunk 8C expands assert + public-safe artifact) |
+| Planning trace / planner agent / planner Cursor-run generation | **Present** |
+| Plan Review trace / plan_reviewer agent / plan_reviewer Cursor-run generation | **Present** |
+| Required generation count | `2` |
+| Generation cost complete | **Fail** — both required gens `missing_input_token_usage` / `costSource=unavailable` (`provider_did_not_report`) |
+| `coreComplete` | `false` |
+
+### Public GHA inspect + remote artifact verification
+
+| Check | Result |
+|-------|--------|
+| Public inspect run | `29706749603` — CLI exit non-zero (incomplete acceptance); public summary uploaded |
+| Artifact name | `eval-inspect-29706749603` |
+| Artifact ID | `8448159354` |
+| Contents | Exactly one file: `public-inspect-29706749603.json` |
+| Digest (sha256) | `3f693daf9242c88073adf9c235469dce8d616d81cc2ad925cea0437eb90aeeb9` |
+| Size | 561 bytes compressed / 857 bytes JSON |
+| Expiration | `2026-07-20T22:48:59Z` (1-day retention) |
+| `assertPublicSafe` on exact bytes | **Pass** |
+| ZIP/file leak scan (issue keys, `TT-`, repo slugs, GitHub/PR URLs, names, paths, secrets) | **Pass** (no matches) |
+| Public counts vs private | Match (`requiredGenerationCount=2`, `incompleteRequiredGenerationCount=2`, `errorGapCount=2`) |
+| `privacyValidationPassed` | `true` |
+| Public `acceptance.complete` | `false` (correct hard fail) |
 
 ## Synthetic cleanup
 
 | Artifact | Status |
 |----------|--------|
-| Validation-run overrides | `zeroActive: true` (`2026-07-19T20:59:28.284Z`) |
-| TT-9 / TT-10 / TT-11 / TT-12 / TT-13 | Canceled |
-| Portfolio PR #47 | Closed without merge |
+| Validation-run overrides | `zeroActive: true` (`2026-07-19T22:49:41.167Z`) |
+| TT-14 | Canceled |
+| Portfolio PR #48 | Closed without merge |
+| TT-9 / TT-10 / TT-11 / TT-12 / TT-13 | Canceled (prior) |
 | Global reviews remain enabled | Yes |
-| Required Linear statuses remain | Yes |
 
 ## Live gates summary
 
 | Gate | Status |
 |------|--------|
-| Public runner free minutes | Pass |
+| Public runner free minutes / smoke | Pass (`29705672762`) |
 | Private state split + opaque dispatch | Pass |
 | Public log privacy (issue/target) | Pass |
-| Config / private-state canaries | Pass |
-| Plan Review revision → Ready for Build | **Pass** (TT-13 Linear path; Langfuse live emit not proven) |
-| Langfuse acceptance (fresh session + canary) | **Not ready — Chunk 8C validation pending** |
-| Historical TT-8 Langfuse hard-complete | **Fail** (documented limitation) |
-| Archive old `p-dev-harness` | **Done** |
+| Public Langfuse **artifact** privacy | **Pass** (remote download + leak scan) |
+| Untouched live Planning + Plan Review traces/agents/gens | **Pass** (TT-14) |
+| Untouched live required-generation cost completeness | **Fail** |
+| Hard public acceptance | **Fail** (correct) |
+| Historical leak artifact deletion | **Done** |
+
+## Chunk 8D probe (go/no-go)
+
+| Item | Result |
+|------|--------|
+| SDK lockfile version | `1.0.23` (not upgraded) |
+| Probe CLI | `npm run evaluation:probe-cursor-sdk-usage` |
+| Cloud `RunResult.usage` | Absent |
+| Cloud `run.usage` after `wait()` | Absent |
+| Cloud stream `usage` events | Absent (types: `status`, `thinking`, `assistant`; stream completed clean) |
+| Local comparison (same SDK) | Present — terminal + handle + one stream `usage`; input/output agree; `totalTokens = input + output + cacheRead + cacheWrite` |
+| Stream stable turn/event identity | Absent (`agent_id` / `run_id` only) |
+| Go/no-go | **no-go** (cloud authoritative cumulative usage missing) |
+| Production adapter / fresh issue | **Not built / not created** |
+
+Private evidence (maintainer only): `.harness/chunk8d-sdk-usage-probe.private.json`, `.harness/chunk8d-sdk-usage-surface.note.md`.  
+Checklist: [chunk8d-cursor-sdk-usage-todo.md](chunk8d-cursor-sdk-usage-todo.md).
+
+## Chunk 8F / 8F.1 — scores-only CSV import (TT-14 proof)
+
+Chunk 8F.1 made acceptance fail-closed: exact deterministic IDs, physical uniqueness, paginated raw fetch (no by-ID collapse), per-phase inspect gates, dry-run preview-only.
+
+| Item | Result |
+|------|--------|
+| Write surface | Trace scores only — `observationMutationAttempted=false` |
+| Canonical traces | Exactly one Planning + one Plan Review score-target trace |
+| Phases attached | `planning` (11 scores), `plan_review` (11 scores) |
+| Read-after-write | Verified; logical **22→22**, physical **22→22**; retrieval completeness proven |
+| Exact-ID verification | Pass (no by-name fallback for acceptance) |
+| Token acceptance | **Pass** (`score_backed_verified`) |
+| Cost-proxy availability | **Pass** |
+| Exact monetary | **Fail** (`generationCostComplete` unchanged / false) |
+| Dry-run | Exit 0 on local preview; `tokenAcceptance=false`, `previewOnly=true` |
+| CLI / importer | `npm run evaluation:import-cursor-usage` (`8f.1.1`) |
+
+Private evidence (maintainer only): `runs/evaluation-reports/TT-14-cursor-usage-import.private.json`.  
+Escalation: [cursor-composer-2-5-cache-pricing-escalation.md](cursor-composer-2-5-cache-pricing-escalation.md).  
+Follow-on sketch updated: [chunk8e-csv-token-import-followon.md](chunk8e-csv-token-import-followon.md).
 
 ## Remaining limitations
 
-1. Historical TT-8 Langfuse session cannot hard-complete (`missing_input_token_usage` on implementer generation). Does not block new ordinary issues after Chunk 8C gates pass.
-2. Managed sync CLI still unreliable (`fetch failed` / timeout); use packaged snapshot push + marker restore when redeploying the public runner.
-3. Live Auto Runner Langfuse emit for ordinary issues is **unproven** after the TT-13 `UnauthorizedError` + projection-repair episode. Chunk 8C requires a fresh untouched live session.
-4. No public harness source PR, npm publish, or tag was created (not authorized).
-5. Chunk 8C in progress: public-safe inspect artifacts, corrected cost/hard acceptance, remote artifact leak scan, historical artifact deletion.
+1. **Cursor cloud SDK does not report token usage** on documented surfaces for finished cloud runs (`@cursor/sdk@1.0.23`). Native generation `usageDetails` remain incomplete.
+2. **Exact USD cost** remains unavailable: CSV `Cost` is Included/non-numeric; cache rates unpublished ([escalation](cursor-composer-2-5-cache-pricing-escalation.md)).
+3. Score-backed tokens and proxies do **not** satisfy `generationCostComplete` / exact-cost `coreComplete` (by design).
+4. Historical TT-8 Langfuse hard-complete remains fail (documented).
+5. No public harness source PR, npm publish, or tag (not authorized).
 
 Do not open a public harness source PR, merge `feat/eval-pipeline` to a public source tree, publish npm, or tag without explicit authorization.

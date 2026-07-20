@@ -136,10 +136,10 @@ export const DUPLICATE_STATUS_CONTRACT = {
 
 export const DEPRECATED_CANONICAL_STATUS_NAMES = [] as const;
 
+/** Human-owned Linear entry statuses that may create bridge job requests. */
 export const CANONICAL_DISPATCH_TRIGGER_STATUS_NAMES = [
   "Ready for Planning",
   "Ready for Build",
-  "PR Open",
   "Needs Revision",
   "Ready to Merge",
 ] as const;
@@ -229,10 +229,10 @@ export const CANONICAL_STATUSES: readonly CanonicalStatusDefinition[] = [
     key: "pr-open",
     name: "PR Open",
     category: "started",
-    role: "dispatch-trigger",
+    role: "transitional",
     creatable: true,
     systemManaged: false,
-    automationTrigger: true,
+    automationTrigger: false,
     actorRole: "handoff-runner",
     suggestedPosition: { x: 1400, y: 0 },
     graphGroup: "build",

@@ -101,8 +101,14 @@ export interface EvaluateCodeReviewExecutionEligibilityInput {
     diffHash?: string | null;
   } | null;
   activeRunIdentities?: readonly string[];
+  /** Active lease identity when present (code_review:{subject}). */
+  activeRunLeaseIdentity?: string | null;
   completedPhaseIdentities?: readonly string[];
   supersededGenerationIds?: readonly string[];
+  /** Subject identity for the review under consideration. */
+  reviewSubjectIdentity?: string | null;
+  /** Decision identity already accepted for this subject, if any. */
+  acceptedDecisionIdentityForSubject?: string | null;
 }
 
 function normalize(name: string): string {
@@ -570,15 +576,26 @@ export function evaluateCodeReviewExecutionEligibility(
     }
   }
 
-  const ownershipKey = `code_review:${latest.implementationGenerationId}`;
-  const owns =
-    input.activeRunIdentities?.some((id) => id.includes(ownershipKey)) ||
-    input.completedPhaseIdentities?.some((id) => id.includes(ownershipKey));
-  if (owns) {
+  const subjectKey = input.reviewSubjectIdentity
+    ? `code_review:${input.reviewSubjectIdentity}`
+    : null;
+  if (input.acceptedDecisionIdentityForSubject) {
     failureCodes.push("reviewer_identity_already_owns_generation");
     failureMessages.push(
-      "An active or completed reviewer identity already owns this implementation generation.",
+      "An accepted Code Review decision already exists for this review subject.",
     );
+  } else if (subjectKey) {
+    const activeOwns =
+      input.activeRunLeaseIdentity === subjectKey ||
+      input.activeRunIdentities?.some(
+        (id) => id === subjectKey || id.includes(subjectKey),
+      );
+    if (activeOwns) {
+      failureCodes.push("reviewer_identity_already_owns_generation");
+      failureMessages.push(
+        "An active Code Review lease already owns this review subject.",
+      );
+    }
   }
 
   return {

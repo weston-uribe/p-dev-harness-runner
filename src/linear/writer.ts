@@ -231,7 +231,15 @@ export async function postErrorComment(
   issueId: string,
   message: string,
   footer: MergeCommentFooterInput,
-  phase: "planning" | "implementation" | "handoff" | "revision" | "merge" | "production_sync" = "planning",
+  phase:
+    | "planning"
+    | "implementation"
+    | "handoff"
+    | "code_review"
+    | "code_revision"
+    | "revision"
+    | "merge"
+    | "production_sync" = "planning",
   options?: {
     errorClassification?: string;
   },

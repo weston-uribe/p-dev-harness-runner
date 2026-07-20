@@ -21,9 +21,22 @@ export type EvaluationScoreName =
   | "revision_cycle_count"
   | "review_outcome"
   | "merge_completed"
-  | "delivery_outcome";
+  | "delivery_outcome"
+  | "cursor_input_tokens"
+  | "cursor_cache_read_tokens"
+  | "cursor_cache_write_tokens"
+  | "cursor_output_tokens"
+  | "cursor_total_tokens"
+  | "cursor_token_usage_complete"
+  | "cursor_known_noncache_cost_usd"
+  | "cursor_all_input_at_list_rate_usd"
+  | "cursor_cost_proxy_available"
+  | "cursor_exact_cost_complete"
+  | "cursor_generation_native_usage_complete";
 
 export type EvaluationScoreDataType = "BOOLEAN" | "NUMERIC" | "CATEGORICAL";
+
+export type EvaluationScoreClass = "operational" | "cursor_usage_import";
 
 export interface EvaluationScoreInput {
   id: string;
@@ -34,6 +47,13 @@ export interface EvaluationScoreInput {
   dataType: EvaluationScoreDataType;
   value: boolean | number | string;
   timestamp: string;
+  /**
+   * Optional bounded privacy-safe comment. Must not contain issue keys, agent IDs,
+   * CSV paths, repos, or private correlation values. When omitted, runtime uses
+   * the default operational classification comment.
+   */
+  comment?: string;
+  scoreClass?: EvaluationScoreClass;
 }
 
 export interface EvaluationCorrelation {

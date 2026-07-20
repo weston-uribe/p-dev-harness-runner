@@ -1,0 +1,4 @@
+Date,Cloud Agent ID,Automation ID,Kind,Model,Max Mode,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens,Total Tokens,Cost
+2026-07-19T12:00:00.000Z,bc-agent-planning-001,,Included,composer-2.5,false,100,200,300,50,650,Included
+2026-07-19T12:01:00.000Z,bc-agent-planning-001,,Included,composer-2.5,false,0,150,400,25,575,Included
+2026-07-19T13:00:00.000Z,bc-agent-planreview-001,,Included,composer-2.5,false,50,100,200,40,390,Included

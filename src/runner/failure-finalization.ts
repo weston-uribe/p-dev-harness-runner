@@ -225,12 +225,27 @@ export async function finalizeFailedHarnessRun(
     manifest.errorClassification ??
     "Harness run failed";
 
+  if (
+    manifest.finalOutcome === "duplicate" ||
+    manifest.errorClassification === "duplicate_phase_completed"
+  ) {
+    return {
+      skipped: true,
+      blocked: false,
+      reason: "duplicate_outcome_does_not_mark_blocked",
+      manifest,
+    };
+  }
+
   const commentResult = await markRunStatusBlocked(client, issue.id, {
     message: `Harness run blocked: ${failureMessage}`,
     phase: manifest.phase === "none" ? "failed" : manifest.phase,
     runId: manifest.runId,
     deliveryId: manifest.deliveryId ?? deliveryId,
     generation,
+    // Causal authority: only claim-owning in-progress runs may mark blocked.
+    stateRevision: 0,
+    ownedActiveClaim: (manifest.runOwnedStatuses?.length ?? 0) > 0,
   });
 
   const transitionDecision = shouldTransitionIssueToBlocked({

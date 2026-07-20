@@ -3,6 +3,7 @@ export {
   createEmptyWorkflowState,
   toSnapshotRef,
   type AcceptedReviewDecision,
+  type ActiveRunLease,
   type PhaseExecutionFreeze,
   type WorkflowSideEffectKind,
   type WorkflowSideEffectRecord,
@@ -51,6 +52,8 @@ export {
 export {
   applyWorkflowTransition,
   claimAgentRun,
+  DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
+  isActiveRunLeaseExpired,
   type ApplyWorkflowTransitionInput,
   type ApplyWorkflowTransitionResult,
 } from "./apply.js";

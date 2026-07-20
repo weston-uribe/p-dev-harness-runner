@@ -19,21 +19,22 @@ import {
 } from "../../src/workflow/canonical-product-development-workflow.js";
 
 describe("canonical product development workflow descriptor", () => {
-  it("defines exactly five dispatch trigger statuses", () => {
+  it("defines exactly four human-owned bridge dispatch trigger statuses", () => {
     expect(CANONICAL_DISPATCH_TRIGGER_STATUS_NAMES).toEqual([
       "Ready for Planning",
       "Ready for Build",
-      "PR Open",
       "Needs Revision",
       "Ready to Merge",
     ]);
+    expect(CANONICAL_DISPATCH_TRIGGER_STATUS_NAMES).not.toContain("PR Open");
     const triggerStatuses = CANONICAL_STATUSES.filter(
       (status) => status.automationTrigger,
     );
-    expect(triggerStatuses).toHaveLength(5);
+    expect(triggerStatuses).toHaveLength(4);
     expect(triggerStatuses.map((status) => status.name)).toEqual([
       ...CANONICAL_DISPATCH_TRIGGER_STATUS_NAMES,
     ]);
+    expect(lookupCanonicalStatus("pr-open")?.automationTrigger).toBe(false);
   });
 
   it("models Plan Review as an optional canonical status", () => {

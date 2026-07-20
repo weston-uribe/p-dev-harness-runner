@@ -167,6 +167,51 @@ export function WorkflowModelControl({
               );
             })
         : null}
+      {selectedModel
+        ? selectedModel.supportedParameters
+            .filter(
+              (parameter) =>
+                parameter.type === "enum" &&
+                (parameter.id === "effort" || parameter.id === "reasoning") &&
+                (parameter.allowedValues?.length ?? 0) > 0,
+            )
+            .map((parameter) => {
+              const allowed = parameter.allowedValues ?? [];
+              const current =
+                parameters.find((entry) => entry.id === parameter.id)?.value ??
+                (allowed.includes("medium") ? "medium" : allowed[0]);
+              return (
+                <label
+                  key={parameter.id}
+                  className="flex flex-col gap-1 text-sm"
+                  data-testid={`model-param-${parameter.id}`}
+                >
+                  <span className="text-xs text-muted-foreground">
+                    {parameter.label}
+                  </span>
+                  <GuidedSelect
+                    disabled={disabled || !modelId}
+                    value={current}
+                    onChange={(event) =>
+                      onUpdateModelParameter(
+                        phaseKey,
+                        parameter.id,
+                        event.target.value,
+                      )
+                    }
+                  >
+                    {allowed.map((value) => (
+                      <option key={value} value={value}>
+                        {value === "extra_high" || value === "xhigh"
+                          ? "extra high"
+                          : value}
+                      </option>
+                    ))}
+                  </GuidedSelect>
+                </label>
+              );
+            })
+        : null}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import {
 } from "@/lib/verification-state";
 import type { SavedCredentialHealthMap } from "@harness/setup/credential-health";
 import type { CredentialPatchResult } from "@harness/setup/credential-patch";
+import { shouldAcceptHealthRefresh } from "@harness/setup/workspace-health";
 
 const SERVICE_VALUE_KEY: Record<
   ServiceKey,
@@ -42,6 +43,9 @@ type ConnectionsSettingsEditorProps = {
   };
   repairVercel?: boolean;
   envContentFingerprint: string;
+  controlPlaneFingerprint?: string;
+  initialRecoveryActive?: boolean;
+  promptScopeSelection?: boolean;
 };
 
 export function ConnectionsSettingsEditor({
@@ -50,9 +54,13 @@ export function ConnectionsSettingsEditor({
   envDefaults,
   repairVercel = false,
   envContentFingerprint,
+  controlPlaneFingerprint = "",
+  initialRecoveryActive = false,
+  promptScopeSelection = true,
 }: ConnectionsSettingsEditorProps) {
   const [presence, setPresence] = useState(initialPresence);
   const [fingerprint, setFingerprint] = useState(envContentFingerprint);
+  const [mountedControlPlaneFingerprint] = useState(controlPlaneFingerprint);
   const [values, setValues] = useState<EnvironmentFormValues>({
     harnessConfigPath: envDefaults.harnessConfigPath,
     githubDispatchRepository: envDefaults.githubDispatchRepository,
@@ -70,7 +78,7 @@ export function ConnectionsSettingsEditor({
     null,
   );
   /** Recovery UI active when durable nonterminal op exists or after Vercel save. */
-  const [recoveryActive, setRecoveryActive] = useState(false);
+  const [recoveryActive, setRecoveryActive] = useState(initialRecoveryActive);
 
   const refreshSavedHealth = useCallback(async () => {
     const response = await fetch("/api/setup/verify-saved-connections", {
@@ -104,7 +112,17 @@ export function ConnectionsSettingsEditor({
     }
     const result = await readSetupJsonResponse<{
       health: SavedCredentialHealthMap;
+      controlPlaneFingerprint?: string;
     }>(response, "POST /api/setup/verify-saved-connections");
+    if (
+      mountedControlPlaneFingerprint &&
+      !shouldAcceptHealthRefresh({
+        mountedControlPlaneFingerprint,
+        responseControlPlaneFingerprint: result.controlPlaneFingerprint,
+      })
+    ) {
+      return result.health;
+    }
     setVerification(serviceVerificationFromCredentialHealth(result.health));
     setPresence({
       LINEAR_API_KEY: result.health.LINEAR_API_KEY.status !== "missing",
@@ -113,7 +131,7 @@ export function ConnectionsSettingsEditor({
       VERCEL_TOKEN: result.health.VERCEL_TOKEN.status !== "missing",
     });
     return result.health;
-  }, []);
+  }, [mountedControlPlaneFingerprint]);
 
   useEffect(() => {
     void refreshSavedHealth().catch(() => undefined);
@@ -276,6 +294,7 @@ export function ConnectionsSettingsEditor({
                     active
                     variant="embedded"
                     credentialSuccessMessage={vercelSuccessMessage}
+                    suppressScopePrompt={!promptScopeSelection}
                     onCredentialHealthRefresh={() => void refreshSavedHealth()}
                     onActiveChange={(active) => {
                       if (active) {

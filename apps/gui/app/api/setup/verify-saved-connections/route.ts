@@ -5,6 +5,8 @@ import {
   verifyAllSavedCredentialHealth,
   verifySavedCredentialHealth,
 } from "@harness/setup/credential-health";
+import { readControlPlaneSetupState } from "@harness/setup/control-plane-setup-state";
+import { computeControlPlaneHealthFingerprint } from "@harness/setup/workspace-health-snapshot";
 import { toPublicApiError } from "@harness/gui/public-client-payload";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +17,9 @@ export async function POST(request: Request) {
       key?: (typeof CREDENTIAL_HEALTH_KEYS)[number];
     };
     const cwd = resolveHarnessWorkspaceDir();
+    const controlPlane = await readControlPlaneSetupState(cwd);
+    const controlPlaneFingerprint =
+      computeControlPlaneHealthFingerprint(controlPlane);
 
     if (body.key) {
       if (!(CREDENTIAL_HEALTH_KEYS as readonly string[]).includes(body.key)) {
@@ -25,11 +30,15 @@ export async function POST(request: Request) {
       }
       const health = await verifySavedCredentialHealth({ cwd, key: body.key });
       // Never return saved token values — only typed health.
-      return NextResponse.json({ key: body.key, health });
+      return NextResponse.json({
+        key: body.key,
+        health,
+        controlPlaneFingerprint,
+      });
     }
 
     const health = await verifyAllSavedCredentialHealth({ cwd });
-    return NextResponse.json({ health });
+    return NextResponse.json({ health, controlPlaneFingerprint });
   } catch (error) {
     const publicError = toPublicApiError(error, {
       fallbackCode: "saved_connection_verify_failed",

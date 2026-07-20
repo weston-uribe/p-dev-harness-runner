@@ -557,6 +557,205 @@ function buildRawTraces(params: {
   return { traces, scores: allScores, gaps };
 }
 
+const CSV_SCORE_NAMES = [
+  "cursor_input_tokens",
+  "cursor_cache_read_tokens",
+  "cursor_cache_write_tokens",
+  "cursor_output_tokens",
+  "cursor_total_tokens",
+  "cursor_token_usage_complete",
+  "cursor_known_noncache_cost_usd",
+  "cursor_all_input_at_list_rate_usd",
+  "cursor_cost_proxy_available",
+  "cursor_exact_cost_complete",
+  "cursor_generation_native_usage_complete",
+] as const;
+
+function scoreValueEquals(score: LangfuseInspectScore, expected: unknown): boolean {
+  if (expected === undefined) return true;
+  if (score.value === expected) return true;
+  if (expected === true && (score.value === 1 || score.value === "1")) return true;
+  if (expected === false && (score.value === 0 || score.value === "0")) return true;
+  return false;
+}
+
+function numericScoreValue(score: LangfuseInspectScore | undefined): number | null {
+  if (!score) return null;
+  if (typeof score.value === "number" && Number.isFinite(score.value)) {
+    return score.value;
+  }
+  if (typeof score.value === "string" && /^-?\d+(\.\d+)?$/.test(score.value)) {
+    return Number(score.value);
+  }
+  return null;
+}
+
+function resolveCanonicalCsvPhaseTrace(
+  traces: LangfuseInspectTrace[],
+  phase: "planning" | "plan_review",
+): { trace: LangfuseInspectTrace | null; reason: string | null } {
+  const candidates = traces.filter((t) => t.phase === phase);
+  if (candidates.length === 0) {
+    return { trace: null, reason: `missing_csv_score_trace:${phase}` };
+  }
+  if (candidates.length > 1) {
+    return { trace: null, reason: `ambiguous_csv_score_trace:${phase}` };
+  }
+  return { trace: candidates[0]!, reason: null };
+}
+
+/**
+ * Per-required-phase CSV score acceptance. One complete phase cannot hide another.
+ */
+export function evaluateCursorCsvScoreAcceptance(params: {
+  traces: LangfuseInspectTrace[];
+  allScores: LangfuseInspectScore[];
+  expectedPhases: string[];
+  gaps: LangfuseInspectGap[];
+}): {
+  tokenAcceptance: boolean;
+  costProxyAvailable: boolean;
+  nativeUsageComplete: boolean;
+} {
+  const requiredPhases = params.expectedPhases.filter(
+    (p): p is "planning" | "plan_review" =>
+      p === "planning" || p === "plan_review",
+  );
+  if (requiredPhases.length === 0) {
+    return {
+      tokenAcceptance: false,
+      costProxyAvailable: false,
+      nativeUsageComplete: false,
+    };
+  }
+
+  let allTokenOk = true;
+  let allProxyOk = true;
+  let anyNativeComplete = false;
+
+  for (const phase of requiredPhases) {
+    const { trace, reason } = resolveCanonicalCsvPhaseTrace(
+      params.traces,
+      phase,
+    );
+    if (!trace) {
+      if (reason) {
+        params.gaps.push({
+          code: reason.startsWith("missing_")
+            ? "missing_csv_score_trace"
+            : "ambiguous_csv_score_trace",
+          severity: "warning",
+          message: reason,
+          reasonCode: reason,
+        });
+      }
+      allTokenOk = false;
+      allProxyOk = false;
+      continue;
+    }
+
+    const phaseScores = params.allScores.filter((s) => s.traceId === trace.id);
+    const scoresOnOtherPhaseTraces = params.allScores.filter((s) => {
+      if (!s.name?.startsWith("cursor_")) return false;
+      if (s.traceId === trace.id) return false;
+      const other = params.traces.find((t) => t.id === s.traceId);
+      return other?.phase === phase;
+    });
+    if (scoresOnOtherPhaseTraces.length > 0) {
+      params.gaps.push({
+        code: "csv_scores_split_across_traces",
+        severity: "warning",
+        message: `csv_scores_split_across_traces:${phase}`,
+        reasonCode: `csv_scores_split_across_traces:${phase}`,
+      });
+      allTokenOk = false;
+      allProxyOk = false;
+      continue;
+    }
+
+    const byName = new Map<string, LangfuseInspectScore[]>();
+    for (const s of phaseScores) {
+      if (!s.name) continue;
+      const list = byName.get(s.name) ?? [];
+      list.push(s);
+      byName.set(s.name, list);
+    }
+
+    const exactlyOne = (name: string): LangfuseInspectScore | null => {
+      const list = byName.get(name) ?? [];
+      return list.length === 1 ? list[0]! : null;
+    };
+
+    let phaseTokenOk = true;
+    for (const name of CSV_SCORE_NAMES) {
+      if (!exactlyOne(name)) {
+        phaseTokenOk = false;
+        break;
+      }
+    }
+
+    const input = numericScoreValue(exactlyOne("cursor_input_tokens") ?? undefined);
+    const cacheRead = numericScoreValue(
+      exactlyOne("cursor_cache_read_tokens") ?? undefined,
+    );
+    const cacheWrite = numericScoreValue(
+      exactlyOne("cursor_cache_write_tokens") ?? undefined,
+    );
+    const output = numericScoreValue(
+      exactlyOne("cursor_output_tokens") ?? undefined,
+    );
+    const total = numericScoreValue(exactlyOne("cursor_total_tokens") ?? undefined);
+    if (
+      input == null ||
+      cacheRead == null ||
+      cacheWrite == null ||
+      output == null ||
+      total == null ||
+      total !== input + cacheRead + cacheWrite + output
+    ) {
+      phaseTokenOk = false;
+    }
+
+    const tokenComplete = exactlyOne("cursor_token_usage_complete");
+    const exactCost = exactlyOne("cursor_exact_cost_complete");
+    const nativeUsage = exactlyOne("cursor_generation_native_usage_complete");
+    if (
+      !tokenComplete ||
+      !scoreValueEquals(tokenComplete, true) ||
+      !exactCost ||
+      !scoreValueEquals(exactCost, false) ||
+      !nativeUsage ||
+      !scoreValueEquals(nativeUsage, false)
+    ) {
+      phaseTokenOk = false;
+    }
+
+    const proxyAvail = exactlyOne("cursor_cost_proxy_available");
+    const known = exactlyOne("cursor_known_noncache_cost_usd");
+    const broad = exactlyOne("cursor_all_input_at_list_rate_usd");
+    const phaseProxyOk =
+      proxyAvail != null &&
+      scoreValueEquals(proxyAvail, true) &&
+      known != null &&
+      broad != null &&
+      numericScoreValue(known) != null &&
+      numericScoreValue(broad) != null;
+
+    if (nativeUsage && scoreValueEquals(nativeUsage, true)) {
+      anyNativeComplete = true;
+    }
+
+    if (!phaseTokenOk) allTokenOk = false;
+    if (!phaseProxyOk) allProxyOk = false;
+  }
+
+  return {
+    tokenAcceptance: allTokenOk,
+    costProxyAvailable: allProxyOk,
+    nativeUsageComplete: anyNativeComplete,
+  };
+}
+
 export function buildInspectReport(params: {
   issueKey: string;
   namespace: string;
@@ -843,6 +1042,18 @@ export function buildInspectReport(params: {
   );
   const scoreNames = [...new Set(allScores.map((s) => s.name))];
 
+  const csvAcceptance = evaluateCursorCsvScoreAcceptance({
+    traces,
+    allScores,
+    expectedPhases,
+    gaps,
+  });
+  const cursorCsvTokenAcceptance = csvAcceptance.tokenAcceptance;
+  const cursorCsvCostProxyAvailable = csvAcceptance.costProxyAvailable;
+  const cursorCsvExactMonetaryCostAcceptance = generationCostCompleteAll;
+  const cursorGenerationNativeUsageComplete =
+    csvAcceptance.nativeUsageComplete;
+
   const requiredTracesPresent =
     (!expectedPhases.includes("planning") || dedicatedPlanning) &&
     (!expectedPhases.includes("plan_review") || dedicatedPlanReview);
@@ -935,6 +1146,10 @@ export function buildInspectReport(params: {
       errorGapCount,
       warningGapCount,
       scoreNames,
+      cursorCsvTokenAcceptance,
+      cursorCsvCostProxyAvailable,
+      cursorCsvExactMonetaryCostAcceptance,
+      cursorGenerationNativeUsageComplete,
     },
     artifactComparison: {
       localRunCount: params.artifactRuns?.length ?? 0,

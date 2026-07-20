@@ -81,10 +81,10 @@ describe("settings mutation editors", () => {
     );
     expect(linearEditor).toContain("previewLinearWorkspace");
     expect(linearEditor).toContain("applyLinearWorkspace");
-    expect(linearEditor).toContain('previewPolicy="optional"');
-    expect(linearEditor).toContain('confirmScope="linear-write"');
+    expect(linearEditor).toContain("window.confirm");
     expect(linearEditor).toContain("/api/setup/linear-options");
     expect(linearEditor).toContain("Remove from PDev");
+    expect(linearEditor).not.toContain("SettingsMutationPanel");
     expect(linearEditor).not.toContain("previewLinearSetup");
     expect(mutationPanel).toContain('previewPolicy = "required"');
     expect(mutationPanel).toContain("Optional");
@@ -137,11 +137,11 @@ describe("settings mutation editors", () => {
       mutationPanel.lastIndexOf("onApply"),
     );
 
-    expect(deploymentsEditor).toContain('previewPolicy="optional"');
     expect(deploymentsEditor).toContain("previewVercelBridge(buildPlanPayload())");
-    expect(deploymentsEditor).toContain(
-      "disableApply={\n          !selectionComplete || !confirmed || !summary.vercelTokenConfigured\n        }",
-    );
+    expect(deploymentsEditor).toContain("Save deployment selection");
+    expect(deploymentsEditor).toContain("window.confirm");
+    expect(deploymentsEditor).not.toContain("SettingsMutationPanel");
+    expect(deploymentsEditor).not.toContain("Apply deployment changes");
 
     expect(connectionsEditor).not.toContain('previewPolicy="optional"');
     expect(mutationPanel).toContain('previewPolicy = "required"');

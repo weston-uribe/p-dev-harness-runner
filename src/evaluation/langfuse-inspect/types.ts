@@ -115,6 +115,16 @@ export interface LangfuseInspectReport {
     errorGapCount: number;
     warningGapCount: number;
     scoreNames: string[];
+    /**
+     * Score-backed CSV token acceptance (does not require native usageDetails).
+     * Must not feed exact-cost / generationCostComplete.
+     */
+    cursorCsvTokenAcceptance: boolean;
+    /** Both cost-proxy scores present on expected phase traces. */
+    cursorCsvCostProxyAvailable: boolean;
+    /** Always mirrors generationCostComplete for CSV import clarity; remains false when exact cost blocked. */
+    cursorCsvExactMonetaryCostAcceptance: boolean;
+    cursorGenerationNativeUsageComplete: boolean;
   };
   artifactComparison: {
     localRunCount: number;

@@ -79,17 +79,14 @@ Do **not** name the Actions secret `GITHUB_TOKEN` — GitHub reserves that name 
 
 ### Dispatch allowlist (bridge filter)
 
-The webhook **only dispatches GitHub Actions** when the issue's **current status** is:
+The webhook **only dispatches GitHub Actions** when the issue's **current status** is a human-owned entry point:
 
 - Ready for Planning
 - Ready for Build
-- PR Open
 - Needs Revision
 - Ready to Merge
 
-All other statuses return HTTP 200 with `{ "accepted": false, "reason": "ignored_status" }` and **do not** start GHA. This includes transitional statuses the harness sets itself (Planning, Building, PM Review, Merging, Merged / Deployed).
-
-Harness-initiated **Building → PR Open** still dispatches because `PR Open` is allowlisted.
+All other statuses return HTTP 200 with `{ "accepted": false, "reason": "ignored_status" }` and **do not** start GHA. This includes harness-owned intermediates (Planning, Building, PR Open, Code Review, PM Review, Merging, Merged / Deployed). Post-build Code Review is started by durable job handoff from the implementation/orchestration path, not by a PR Open webhook.
 
 ---
 

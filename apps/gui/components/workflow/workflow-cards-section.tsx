@@ -150,7 +150,7 @@ export function WorkflowCardsSection({
     return (
       <div
         key={`optional-${statusKey}`}
-        className="rounded-md border border-dashed border-border"
+        className="mt-3 rounded-md border border-border"
         data-testid="optional-phase-card"
       >
         <button
@@ -398,7 +398,7 @@ export function WorkflowCardsSection({
             <h2 className="text-base font-semibold">{column.title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{column.description}</p>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {column.statuses.map((statusKey) => renderStatusCard(statusKey))}
           </div>
         </section>

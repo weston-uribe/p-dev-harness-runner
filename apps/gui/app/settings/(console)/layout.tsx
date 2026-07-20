@@ -18,6 +18,7 @@ export default async function SettingsConsoleLayout({
   children: React.ReactNode;
 }) {
   const cwd = resolveHarnessWorkspaceDir();
+  // Entry gate first so new workspaces redirect without waiting on summary loads.
   const entry = await classifyWorkspaceEntry(cwd);
 
   // True first-run workspaces still use Initial Harness Configuration.
@@ -26,6 +27,7 @@ export default async function SettingsConsoleLayout({
     redirect(CONFIGURE_ROUTE);
   }
 
+  // Parallel durable reads after the gate; live credential verify stays on Connections mount.
   const [setupSummary, remoteSummary] = await Promise.all([
     loadSetupSummary(),
     loadRemoteSetupSummary(),

@@ -107,6 +107,12 @@ See [native-skill-canary.md](native-skill-canary.md) and [instruction-architectu
 | Unmatched tool completions | Possible; do not synthesize success |
 | Cloud poll fallback (`stream_unavailable`) | Stream detail may be lost; mark completeness honestly |
 | `InteractionUpdate` deltas | Exported by SDK but unused by harness |
+| Cloud `RunResult.usage` / `Run.usage` / stream `usage` | **Documented but not populated** on finished cloud runs in Chunk 8D probe (`@cursor/sdk@1.0.23`); local runtime does populate the same fields |
+| Stable turn/event id on `SDKUsageMessage` | Absent in `.d.ts` and local probe (only `agent_id` / `run_id`) |
+
+### Chunk 8D probe note
+
+Bounded maintainer probe: `npm run evaluation:probe-cursor-sdk-usage`. Cloud go/no-go failed; local comparison succeeded. See [chunk8d-cursor-sdk-usage-todo.md](chunk8d-cursor-sdk-usage-todo.md).
 
 ## Fixtures
 
