@@ -16,7 +16,8 @@ export type AgentTelemetryPhase =
   | "handoff"
   | "revision"
   | "merge"
-  | "integration_repair";
+  | "integration_repair"
+  | "production_sync";
 
 export type RedactionStatus =
   | "none"

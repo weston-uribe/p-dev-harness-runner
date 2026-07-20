@@ -16,6 +16,8 @@ describe("harness-reconcile-production workflow", () => {
     expect(yaml).toContain("harness:reconcile-production");
     expect(yaml).toContain("workflow_dispatch");
     expect(yaml).toContain("VERCEL_TOKEN");
+    expect(yaml).toContain("P_DEV_EVALUATION_PROVIDER");
+    expect(yaml).toContain("LANGFUSE_SECRET_KEY");
     expect(yaml).toContain(
       "group: harness-reconcile-production-${{ github.event.inputs.repo || 'all' }}",
     );

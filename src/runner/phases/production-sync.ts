@@ -63,8 +63,12 @@ import {
   buildProductionMilestoneScore,
   type ProductionDeliveryMilestone,
 } from "../../evaluation/outcomes.js";
-import { safeRecordScore } from "../../evaluation/phase-helpers.js";
+import {
+  safeRecordScore,
+  safeStartPhaseTrace,
+} from "../../evaluation/phase-helpers.js";
 import type { EvaluationRuntime } from "../../evaluation/types.js";
+import type { PhaseTraceHandle } from "../../evaluation/types.js";
 
 export interface ProductionSyncIssueOptions {
   issueKey: string;
@@ -201,6 +205,7 @@ function emitProductionMilestone(
   completion: ProductionCompletionRecord,
   kind: ProductionEffectKind,
   timestamp: string,
+  traceId?: string,
 ): void {
   const milestone = milestoneForEffect(kind);
   if (!runtime || !milestone) {
@@ -214,6 +219,7 @@ function emitProductionMilestone(
       milestone,
       productionCompletionId: completion.productionCompletionId,
       timestamp,
+      traceId,
     }),
   );
 }
@@ -272,6 +278,8 @@ export async function executeProductionSyncForIssue(
   let diagnosticIssueKeyCommits: string[] | undefined;
   let productionCompletionId: string | undefined;
   let productionState: string | undefined;
+  let evaluationRuntime: EvaluationRuntime | null = null;
+  let phaseTrace: PhaseTraceHandle | null = null;
 
   const emptyParsed: ParsedIssue = {
     task: "",
@@ -422,12 +430,25 @@ export async function executeProductionSyncForIssue(
               promotionSha: proof.productionHeadSha,
             });
 
-            const evaluationRuntime = await createEvaluationRuntime();
+            evaluationRuntime = await createEvaluationRuntime();
             const sessionId = deriveSessionId(
               evaluationRuntime.namespace,
               options.issueKey,
             );
             const now = new Date().toISOString();
+            if (!options.dryRun) {
+              phaseTrace = await safeStartPhaseTrace(evaluationRuntime, {
+                phase: "production_sync",
+                issueKey: options.issueKey,
+                runId,
+                metadata: {
+                  productionCompletionId: completion.productionCompletionId,
+                  mergeToDevSha: proof.mergeCommitSha,
+                  productionHeadSha: proof.productionHeadSha,
+                },
+              });
+            }
+            const scoreTraceId = phaseTrace?.correlation.traceId;
 
             if (
               !isProductionEffectCompleted(completion, "langfuse_promoted_to_main")
@@ -439,6 +460,7 @@ export async function executeProductionSyncForIssue(
                   completion,
                   "langfuse_promoted_to_main",
                   now,
+                  scoreTraceId,
                 );
                 completion = upsertProductionEffect(
                   completion,
@@ -494,6 +516,7 @@ export async function executeProductionSyncForIssue(
                     completion,
                     "langfuse_production_deployment_started",
                     now,
+                    scoreTraceId,
                   );
                   completion = upsertProductionEffect(
                     completion,
@@ -537,6 +560,7 @@ export async function executeProductionSyncForIssue(
                       completion,
                       "langfuse_production_deployment_ready",
                       now,
+                      scoreTraceId,
                     );
                     completion = upsertProductionEffect(
                       completion,
@@ -666,6 +690,7 @@ export async function executeProductionSyncForIssue(
                         completion,
                         "langfuse_production_verified",
                         now,
+                        scoreTraceId,
                       );
                       completion = upsertProductionEffect(
                         completion,
@@ -689,6 +714,7 @@ export async function executeProductionSyncForIssue(
                           productionCompletionId:
                             completion.productionCompletionId,
                           timestamp: now,
+                          traceId: scoreTraceId,
                         }),
                       );
                       completion = upsertProductionEffect(
@@ -697,6 +723,20 @@ export async function executeProductionSyncForIssue(
                         "completed",
                         { now },
                       );
+                    }
+
+                    if (phaseTrace) {
+                      phaseTrace.finish({
+                        finalOutcome: "success",
+                        errorClassification: null,
+                        linearStatusAfter: productionSuccessStatus,
+                        prCreated: false,
+                        previewAvailable: Boolean(
+                          resolved.productionUrl ?? deploy.deploymentUrl,
+                        ),
+                        changedFileCount: 0,
+                      });
+                      phaseTrace = null;
                     }
 
                     completion = withProductionState(completion, "completed");
@@ -731,6 +771,14 @@ export async function executeProductionSyncForIssue(
         ? "github_auth_failure"
         : "github_api_failure");
     skippedReason = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (evaluationRuntime) {
+      try {
+        await evaluationRuntime.flushAndShutdown();
+      } catch {
+        // Non-authoritative: Linear/durable effects already committed.
+      }
+    }
   }
 
   const manifest: RunManifest = {

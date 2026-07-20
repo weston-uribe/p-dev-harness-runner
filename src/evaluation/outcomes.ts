@@ -259,9 +259,11 @@ export function deriveProductionMilestoneScoreId(params: {
   milestone: ProductionDeliveryMilestone;
   productionCompletionId: string;
 }): string {
+  // Seed targetType is "trace" so IDs bind to trace-anchored Langfuse writes
+  // (session-only scores are not durable on current Langfuse Cloud).
   return deriveScoreId(
     params.namespace,
-    "session",
+    "trace",
     `${params.sessionId}:${params.productionCompletionId}`,
     params.milestone,
   );
@@ -275,11 +277,19 @@ export function buildProductionMilestoneScore(params: {
   timestamp: string;
   value?: boolean;
   comment?: string;
+  /**
+   * Langfuse requires exactly one of traceId/sessionId. Session-only scores are
+   * accepted but not durable in current Langfuse Cloud; prefer a phase traceId.
+   */
+  traceId?: string;
 }): EvaluationScoreInput {
+  const useTrace = Boolean(params.traceId);
   return {
     id: deriveProductionMilestoneScoreId(params),
-    target: "session",
-    sessionId: params.sessionId,
+    target: useTrace ? "trace" : "session",
+    ...(useTrace
+      ? { traceId: params.traceId }
+      : { sessionId: params.sessionId }),
     name: params.milestone,
     dataType: "BOOLEAN",
     value: params.value ?? true,
@@ -297,16 +307,21 @@ export function buildFinalProductionDeliveryOutcomeScore(params: {
   sessionId: string;
   productionCompletionId: string;
   timestamp: string;
+  /** Prefer phase traceId; session-only scores are not durable on Langfuse Cloud. */
+  traceId?: string;
 }): EvaluationScoreInput {
+  const useTrace = Boolean(params.traceId);
   return {
     id: deriveScoreId(
       params.namespace,
-      "session",
+      "trace",
       `${params.sessionId}:${params.productionCompletionId}`,
       "delivery_outcome:merged_to_production_deployed",
     ),
-    target: "session",
-    sessionId: params.sessionId,
+    target: useTrace ? "trace" : "session",
+    ...(useTrace
+      ? { traceId: params.traceId }
+      : { sessionId: params.sessionId }),
     name: "delivery_outcome",
     dataType: "CATEGORICAL",
     value: "merged_to_production_deployed",

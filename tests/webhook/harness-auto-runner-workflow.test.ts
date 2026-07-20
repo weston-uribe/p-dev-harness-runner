@@ -138,13 +138,12 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       const runHarness = extractJobSection(workflow, "run-harness");
       const runMerge = extractJobSection(workflow, "run-merge");
       const syncSection = extractJobSection(workflow, "sync-production");
-      for (const section of [gate, runHarness, runMerge]) {
+      for (const section of [gate, runHarness, runMerge, syncSection]) {
         expect(section).toContain("P_DEV_PUBLIC_RUNNER_MODE: \"1\"");
         expect(section).toContain("P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github");
         expect(section).toContain("P_DEV_WORKFLOW_STATE_REPOSITORY:");
         expect(section).toContain("P_DEV_STATE_GITHUB_TOKEN:");
       }
-      expect(syncSection).not.toContain("P_DEV_WORKFLOW_STATE_STORE_MODE");
     });
 
     it("validates sync_dry_run is true or false for workflow_dispatch", () => {
@@ -201,7 +200,7 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       );
     });
 
-    it("wires evaluation environment on run-merge but not gate or sync-production", () => {
+    it("wires evaluation environment on run-harness, run-merge, and sync-production but not gate", () => {
       const gate = extractJobSection(workflow, "gate");
       const runHarness = extractJobSection(workflow, "run-harness");
       const runMerge = extractJobSection(workflow, "run-merge");
@@ -211,10 +210,12 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       expect(runHarness).toContain("LANGFUSE_SECRET_KEY");
       expect(runMerge).toContain("P_DEV_EVALUATION_PROVIDER");
       expect(runMerge).toContain("LANGFUSE_SECRET_KEY");
+      expect(syncSection).toContain("P_DEV_EVALUATION_PROVIDER");
+      expect(syncSection).toContain("LANGFUSE_SECRET_KEY");
+      expect(syncSection).toContain("VERCEL_TOKEN");
+      expect(syncSection).toContain("P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github");
 
       expect(gate).not.toContain("LANGFUSE_SECRET_KEY");
-      expect(syncSection).not.toContain("LANGFUSE_SECRET_KEY");
-      expect(syncSection).not.toContain("P_DEV_EVALUATION_PROVIDER");
     });
 
     it("resolves dual-commit provenance before harness jobs via GITHUB_ENV", () => {
