@@ -38,7 +38,14 @@ function workflowVariant(
   status: RemoteSetupRepoSummary["workflowStatus"],
 ): "success" | "warning" | "destructive" | "secondary" {
   if (status === "present") return "success";
-  if (status === "differs" || status === "missing") return "warning";
+  if (
+    status === "differs" ||
+    status === "missing" ||
+    status === "stale_dispatch_target" ||
+    status === "contract_outdated"
+  ) {
+    return "warning";
+  }
   return "secondary";
 }
 
@@ -54,6 +61,10 @@ function workflowStatusLabel(
         return "workflow missing";
       case "differs":
         return "workflow outdated";
+      case "stale_dispatch_target":
+        return "stale dispatch target";
+      case "contract_outdated":
+        return "contract outdated";
       default:
         return "workflow status unknown";
     }

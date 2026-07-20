@@ -60,6 +60,8 @@
     "harness:workflow-status-migrate": "tsx src/index.ts workflow-status-migrate",
     "harness:validation-run": "tsx src/index.ts validation-run",
     "harness:sync-production": "tsx src/index.ts sync-production",
+    "harness:reconcile-production": "tsx src/index.ts reconcile-production",
+    "harness:upgrade-target-workflows": "tsx src/index.ts upgrade-target-workflows",
     "harness:canary-runner-config": "tsx src/index.ts canary-runner-config",
     "release:sync-managed-runner": "tsx src/index.ts sync-managed-runner",
     "harness:redact-output": "tsx src/index.ts redact-output",

@@ -911,15 +911,26 @@ export function collectTargetWorkflowBlockers(
       });
     }
 
-    if (repo.workflowStatus === "missing" || repo.workflowStatus === "differs") {
+    if (
+      repo.workflowStatus === "missing" ||
+      repo.workflowStatus === "differs" ||
+      repo.workflowStatus === "stale_dispatch_target" ||
+      repo.workflowStatus === "contract_outdated"
+    ) {
       const workflowLabel =
-        repo.workflowStatus === "missing" ? "missing" : "outdated";
+        repo.workflowStatus === "missing"
+          ? "missing"
+          : repo.workflowStatus === "stale_dispatch_target"
+            ? "stale (archived dispatch target)"
+            : repo.workflowStatus === "contract_outdated"
+              ? "contract outdated"
+              : "outdated";
       pushBlocker(blockers, {
         id: `target-workflow-${repo.workflowStatus}-${repo.repoConfigId}`,
         stepId: "target-workflow",
         message: `Blocked: Target workflow is ${workflowLabel} for ${repo.repoConfigId}.`,
         action:
-          "Next: Preview the workflow install PR, confirm, then create or update the install PR.",
+          "Next: Preview the workflow install/upgrade PR, confirm, then create or update the install PR.",
         priority: 306,
       });
     }

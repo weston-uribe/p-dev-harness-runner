@@ -14,7 +14,10 @@ import {
   advanceMockTargetWorkflowFinalization,
   type MockWorkflowFinalizationScenario,
 } from "./mock-target-workflow-finalization.js";
-import { previewTargetWorkflowSetup } from "./target-workflow-setup.js";
+import {
+  compareTargetWorkflowContent,
+  previewTargetWorkflowSetup,
+} from "./target-workflow-setup.js";
 import {
   type HarnessDispatchRepoResolution,
 } from "./harness-dispatch-repo.js";
@@ -418,14 +421,10 @@ export class MockGitHubRemoteSetupProvider implements GitHubRemoteSetupProvider 
     });
 
     const existing = this.mutableWorkflowContent ?? this.state.existingWorkflowContent;
-    let workflowStatus: RemoteWorkflowStatus = "unknown";
-    if (existing === null || existing === undefined) {
-      workflowStatus = "missing";
-    } else if (existing === input.intendedWorkflowContent) {
-      workflowStatus = "present";
-    } else {
-      workflowStatus = "differs";
-    }
+    const workflowStatus: RemoteWorkflowStatus =
+      existing === null || existing === undefined
+        ? "missing"
+        : compareTargetWorkflowContent(existing, input.intendedWorkflowContent);
 
     return {
       repoAccess: this.state.targetRepoAccess ?? "unknown",

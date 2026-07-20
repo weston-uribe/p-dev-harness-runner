@@ -77,6 +77,7 @@ function normalizeWorkflowState(record: WorkflowStateRecord): WorkflowStateRecor
     phaseExecutionFreeze: record.phaseExecutionFreeze ?? null,
     supersededGenerationIdentities: record.supersededGenerationIdentities ?? [],
     activeRunLease: record.activeRunLease ?? null,
+    productionCompletion: record.productionCompletion ?? null,
   };
 }
 
