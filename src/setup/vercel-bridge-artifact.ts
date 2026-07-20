@@ -8,8 +8,8 @@ export interface VercelBridgeArtifactFile {
 
 /**
  * Self-contained Vercel handler: filter human-owned intake, create private
- * job-request envelope, attempt Linear ack, then repository_dispatch with
- * opaque requestId only. Embeds the same allowlist as the typed webhook path.
+ * job-request envelope, opaque repository_dispatch first, persist dispatch,
+ * then best-effort Linear ack. Embeds the same allowlist as the typed webhook path.
  */
 function buildLinearWebhookHandlerSource(): string {
   const statusListLiteral = JSON.stringify([...BRIDGE_HUMAN_OWNED_DISPATCH_STATUSES]);
@@ -280,6 +280,11 @@ async function createOrLoadEnvelope(issueKey, phase, triggerSource, linearDelive
       ackSource: null,
       ackFailureCategory: null,
     },
+    dispatch: {
+      attemptedAt: null,
+      confirmedAt: null,
+      failureCategory: null,
+    },
   };
   try {
     await putJobRequest(parsed.owner, parsed.repo, branch, stateToken, record, null);
@@ -324,65 +329,108 @@ async function createOrLoadEnvelope(issueKey, phase, triggerSource, linearDelive
   };
 }
 
-async function attemptAck(envelope) {
-  const record = envelope.record;
-  if (!record.ack || !record.ack.ackRequired || record.ack.ackConfirmedAt) {
-    return { confirmed: Boolean(record.ack && record.ack.ackConfirmedAt) };
+function ensureDispatchLifecycle(record) {
+  if (!record.dispatch) {
+    record.dispatch = {
+      attemptedAt: null,
+      confirmedAt: null,
+      failureCategory: null,
+    };
   }
-  const linearApiKey = process.env.LINEAR_API_KEY;
-  const attemptedAt = new Date().toISOString();
-  record.ack.ackAttemptedAt = attemptedAt;
-  record.revision = Number(record.revision || 0) + 1;
+  return record.dispatch;
+}
+
+function isDispatchConfirmed(record) {
+  const dispatch = ensureDispatchLifecycle(record);
+  return Boolean(dispatch.confirmedAt);
+}
+
+async function persistEnvelope(envelope) {
+  const latest = await loadJobRequest(
+    envelope.owner,
+    envelope.repo,
+    envelope.branch,
+    envelope.token,
+    envelope.record.requestId,
+  );
+  envelope.record.revision = Number((latest && latest.record && latest.record.revision) || envelope.record.revision || 0) + 1;
   await putJobRequest(
     envelope.owner,
     envelope.repo,
     envelope.branch,
     envelope.token,
-    record,
-    envelope.sha,
+    envelope.record,
+    (latest && latest.sha) || envelope.sha,
   );
   const reloaded = await loadJobRequest(
     envelope.owner,
     envelope.repo,
     envelope.branch,
     envelope.token,
-    record.requestId,
+    envelope.record.requestId,
   );
-  envelope.sha = reloaded && reloaded.sha;
-  envelope.record = (reloaded && reloaded.record) || record;
+  if (reloaded) {
+    envelope.sha = reloaded.sha;
+    envelope.record = reloaded.record;
+  }
+}
+
+async function resolveLinearIssueIdByIdentifier(linearApiKey, issueKey) {
+  const match = String(issueKey || "").trim().match(/^([A-Za-z][A-Za-z0-9]*)-(\\d+)$/);
+  if (!match) {
+    throw new Error("linear_issue_identifier_invalid");
+  }
+  const teamKey = match[1].toUpperCase();
+  const number = Number(match[2]);
+  const issueRes = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: linearApiKey,
+    },
+    body: JSON.stringify({
+      query:
+        "query($teamKey: String!, $number: Float!) { issues(filter: { team: { key: { eq: $teamKey } }, number: { eq: $number } }, first: 1) { nodes { id identifier } } }",
+      variables: { teamKey: teamKey, number: number },
+    }),
+  });
+  if (!issueRes.ok) throw new Error("linear_issue_lookup_failed");
+  const issueJson = await issueRes.json();
+  const nodes =
+    issueJson &&
+    issueJson.data &&
+    issueJson.data.issues &&
+    issueJson.data.issues.nodes;
+  const issueId = nodes && nodes[0] && nodes[0].id;
+  if (!issueId) throw new Error("linear_issue_missing");
+  return issueId;
+}
+
+async function attemptAck(envelope) {
+  const record = envelope.record;
+  if (!record.ack || !record.ack.ackRequired || record.ack.ackConfirmedAt) {
+    return { confirmed: Boolean(record.ack && record.ack.ackConfirmedAt) };
+  }
+  const linearApiKey = process.env.LINEAR_API_KEY;
+  record.ack.ackAttemptedAt = new Date().toISOString();
+  try {
+    await persistEnvelope(envelope);
+  } catch {
+    // best-effort; still attempt Linear ack
+  }
 
   if (!linearApiKey) {
     envelope.record.ack.ackFailureCategory = "missing_linear_api_key";
-    envelope.record.revision = Number(envelope.record.revision || 0) + 1;
-    await putJobRequest(
-      envelope.owner,
-      envelope.repo,
-      envelope.branch,
-      envelope.token,
-      envelope.record,
-      envelope.sha,
-    );
+    try {
+      await persistEnvelope(envelope);
+    } catch {
+      // best-effort
+    }
     return { confirmed: false };
   }
 
   try {
-    const issueRes = await fetch("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: linearApiKey,
-      },
-      body: JSON.stringify({
-        query:
-          "query($id: String!) { issue(id: $id) { id identifier } }",
-        variables: { id: record.issueKey },
-      }),
-    });
-    if (!issueRes.ok) throw new Error("linear_issue_lookup_failed");
-    const issueJson = await issueRes.json();
-    const issueId = issueJson && issueJson.data && issueJson.data.issue && issueJson.data.issue.id;
-    if (!issueId) throw new Error("linear_issue_missing");
-
+    const issueId = await resolveLinearIssueIdByIdentifier(linearApiKey, record.issueKey);
     const generation = Date.parse(record.createdAt) || Date.now();
     const body = [
       "<!-- p-dev-run-status:" + issueId + " -->",
@@ -424,42 +472,16 @@ async function attemptAck(envelope) {
     envelope.record.ack.ackConfirmedAt = new Date().toISOString();
     envelope.record.ack.ackSource = "bridge";
     envelope.record.ack.ackFailureCategory = null;
-    envelope.record.revision = Number(envelope.record.revision || 0) + 1;
-    const latest = await loadJobRequest(
-      envelope.owner,
-      envelope.repo,
-      envelope.branch,
-      envelope.token,
-      record.requestId,
-    );
-    await putJobRequest(
-      envelope.owner,
-      envelope.repo,
-      envelope.branch,
-      envelope.token,
-      envelope.record,
-      latest && latest.sha,
-    );
+    try {
+      await persistEnvelope(envelope);
+    } catch {
+      // dispatch already durable; ack persistence is best-effort
+    }
     return { confirmed: true };
   } catch {
     envelope.record.ack.ackFailureCategory = "linear_write_failed";
-    envelope.record.revision = Number(envelope.record.revision || 0) + 1;
-    const latest = await loadJobRequest(
-      envelope.owner,
-      envelope.repo,
-      envelope.branch,
-      envelope.token,
-      record.requestId,
-    );
     try {
-      await putJobRequest(
-        envelope.owner,
-        envelope.repo,
-        envelope.branch,
-        envelope.token,
-        envelope.record,
-        latest && latest.sha,
-      );
+      await persistEnvelope(envelope);
     } catch {
       // best-effort ack failure persistence
     }
@@ -495,6 +517,37 @@ async function dispatchOpaque(requestId) {
     throw new Error("github_dispatch_" + response.status);
   }
   return eventType;
+}
+
+async function ensureOpaqueDispatch(envelope) {
+  if (isDispatchConfirmed(envelope.record)) {
+    return { dispatched: false, alreadyDispatched: true };
+  }
+  ensureDispatchLifecycle(envelope.record).attemptedAt = new Date().toISOString();
+  ensureDispatchLifecycle(envelope.record).failureCategory = null;
+  try {
+    await persistEnvelope(envelope);
+  } catch {
+    // continue; GitHub dispatch is the critical side effect
+  }
+  if (isDispatchConfirmed(envelope.record)) {
+    return { dispatched: false, alreadyDispatched: true };
+  }
+  try {
+    await dispatchOpaque(envelope.record.requestId);
+    ensureDispatchLifecycle(envelope.record).confirmedAt = new Date().toISOString();
+    ensureDispatchLifecycle(envelope.record).failureCategory = null;
+    await persistEnvelope(envelope);
+    return { dispatched: true, alreadyDispatched: false };
+  } catch (error) {
+    ensureDispatchLifecycle(envelope.record).failureCategory = "github_dispatch_failed";
+    try {
+      await persistEnvelope(envelope);
+    } catch {
+      // best-effort
+    }
+    throw error;
+  }
 }
 
 module.exports = async function handler(req, res) {
@@ -598,19 +651,17 @@ module.exports = async function handler(req, res) {
       triggerKind === "comment_create" ? "linear_comment" : "linear_issue_status",
       getHeader(req, "linear-delivery"),
     );
-    if (envelope.duplicate) {
-      return json(res, 200, {
-        accepted: true,
-        dispatched: false,
-        duplicate: true,
-        requestId: envelope.requestId,
-      });
+    const dispatchResult = await ensureOpaqueDispatch(envelope);
+    // Best-effort Linear ack after durable dispatch is established.
+    try {
+      await attemptAck(envelope);
+    } catch {
+      // ack must never undo a successful dispatch
     }
-    await attemptAck(envelope);
-    await dispatchOpaque(envelope.requestId);
     return json(res, 200, {
       accepted: true,
-      dispatched: true,
+      dispatched: dispatchResult.dispatched || dispatchResult.alreadyDispatched,
+      duplicate: Boolean(envelope.duplicate),
       requestId: envelope.requestId,
     });
   } catch {
@@ -638,7 +689,7 @@ export function buildVercelBridgeArtifactFiles(): VercelBridgeArtifactFile[] {
         {
           functions: {
             "api/linear-webhook.js": {
-              maxDuration: 10,
+              maxDuration: 30,
             },
           },
         },

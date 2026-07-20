@@ -25,6 +25,17 @@ export interface JobRequestAckLifecycle {
   ackFailureCategory: JobRequestAckFailureCategory | null;
 }
 
+export type JobRequestDispatchFailureCategory =
+  | "github_dispatch_failed"
+  | "missing_dispatch_configuration"
+  | "unknown";
+
+export interface JobRequestDispatchLifecycle {
+  attemptedAt: string | null;
+  confirmedAt: string | null;
+  failureCategory: JobRequestDispatchFailureCategory | null;
+}
+
 export interface JobRequestRecord {
   kind: typeof JOB_REQUEST_KIND;
   schemaVersion: typeof JOB_REQUEST_SCHEMA_VERSION;
@@ -44,4 +55,6 @@ export interface JobRequestRecord {
   /** Review-subject identity for explicit code_review handoff jobs. */
   reviewSubjectIdentity?: string | null;
   ack?: JobRequestAckLifecycle;
+  /** Opaque repository_dispatch lifecycle (bridge / reconcile). */
+  dispatch?: JobRequestDispatchLifecycle;
 }
