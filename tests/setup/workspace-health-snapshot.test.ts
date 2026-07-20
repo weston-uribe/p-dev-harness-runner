@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ControlPlaneSetupState } from "../../src/setup/control-plane-types.js";
 import {
+  deriveAutomationAttentionState,
   deriveLinearHealthFacts,
   deriveVercelHealthFacts,
   reconcileHistoricalSuccess,
   shouldAcceptHealthRefresh,
   shouldPromptRecoveryScopeSelection,
+  type LinearHealthFacts,
+  type VercelHealthFacts,
 } from "../../src/setup/workspace-health-snapshot.js";
 import { initialCredentialHealthFromPresence } from "../../src/setup/credential-health.js";
 
@@ -164,5 +167,99 @@ describe("workspace health snapshot facts", () => {
         responseControlPlaneFingerprint: "abc",
       }),
     ).toBe(true);
+  });
+});
+
+function stubVercel(
+  automationAggregate: VercelHealthFacts["automationAggregate"],
+  overrides: Partial<VercelHealthFacts> = {},
+): VercelHealthFacts {
+  return {
+    credential: {
+      present: true,
+      status: "connected",
+      aggregate: "verified",
+    },
+    bridgeDeployed: true,
+    bridgeReachable: true,
+    webhookConfigured: true,
+    webhookVerified: automationAggregate === "verified",
+    signedProbeVerified: automationAggregate === "verified",
+    recovery: {
+      active: automationAggregate === "repairing",
+      aggregate: automationAggregate === "repairing" ? "repairing" : "missing",
+      promptScopeSelection: false,
+    },
+    durableBridgeHealth: "verified",
+    historicalSetupComplete: true,
+    automationAggregate,
+    ...overrides,
+  };
+}
+
+function stubLinear(
+  automationAggregate: LinearHealthFacts["automationAggregate"],
+  overrides: Partial<LinearHealthFacts> = {},
+): LinearHealthFacts {
+  return {
+    credential: {
+      present: true,
+      status: "connected",
+      aggregate: "verified",
+    },
+    workspaceName: "Example Workspace",
+    configuredTeams: [],
+    statusConfigPresent: automationAggregate === "verified",
+    webhookConfigured: true,
+    webhookVerified: automationAggregate === "verified",
+    automationAggregate,
+    ...overrides,
+  };
+}
+
+describe("deriveAutomationAttentionState", () => {
+  it("returns null when both Linear and Vercel automation are verified", () => {
+    expect(
+      deriveAutomationAttentionState({
+        vercel: stubVercel("verified"),
+        linear: stubLinear("verified"),
+      }),
+    ).toBeNull();
+  });
+
+  it("warns about Linear only when Vercel is verified and Linear is pending", () => {
+    const attention = deriveAutomationAttentionState({
+      vercel: stubVercel("verified"),
+      linear: stubLinear("verification_pending"),
+    });
+    expect(attention).not.toBeNull();
+    expect(attention!.title).toContain("Needs verification");
+    expect(attention!.title.toLowerCase()).not.toContain("verified");
+    expect(attention!.facts).toHaveLength(1);
+    expect(attention!.facts[0]?.subsystem).toBe("linear");
+    expect(attention!.facts.some((fact) => fact.subsystem === "vercel")).toBe(
+      false,
+    );
+  });
+
+  it("warns about Vercel only when Linear is verified and Vercel is degraded", () => {
+    const attention = deriveAutomationAttentionState({
+      vercel: stubVercel("degraded"),
+      linear: stubLinear("verified"),
+    });
+    expect(attention).not.toBeNull();
+    expect(attention!.tone).toBe("degraded");
+    expect(attention!.facts).toHaveLength(1);
+    expect(attention!.facts[0]?.subsystem).toBe("vercel");
+  });
+
+  it("uses repairing tone when recovery is active", () => {
+    const attention = deriveAutomationAttentionState({
+      vercel: stubVercel("repairing"),
+      linear: stubLinear("verified"),
+    });
+    expect(attention).not.toBeNull();
+    expect(attention!.tone).toBe("repairing");
+    expect(attention!.title).toContain("Repairing");
   });
 });

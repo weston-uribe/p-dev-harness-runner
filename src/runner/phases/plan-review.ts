@@ -282,7 +282,7 @@ export async function executePlanReviewPhase(
   }
   if (!latestPlan) {
     throw new PlanReviewError(
-      "missing_planning_comment",
+      "missing_plan_artifact",
       "No immutable plan artifact identity is available for Plan Review",
     );
   }

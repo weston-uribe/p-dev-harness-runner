@@ -119,8 +119,8 @@ What happens next is controlled by the **Linear status field**, not the descript
 | Status | When to recommend |
 |--------|-------------------|
 | **Backlog** | Default. Open questions remain, structurally incomplete, or user has not approved a higher status. |
-| **Ready for Planning** | Broad, ambiguous, cross-cutting, or high-risk work that needs a plan before implementation. |
-| **Ready for Build** | Only narrow, low-risk issues meeting direct-build rules below—and only after user explicitly approves that status. |
+| **Ready for Planning** | Broad, ambiguous, cross-cutting, or high-risk work that benefits from a plan before implementation. |
+| **Ready for Build** | Prefer for narrow, low-risk issues—and only after user explicitly approves that status. Also valid when the user explicitly chooses to skip planning. |
 | **Draft only** | Package only; no Linear create. |
 
 | Condition | Recommended status |
@@ -129,26 +129,27 @@ What happens next is controlled by the **Linear status field**, not the descript
 | User chose Draft only | Package only; no Linear create |
 | Structurally incomplete | Backlog |
 | Narrow + low-risk (see below) | May recommend Ready for Build **only after user confirms** |
-| Broad, ambiguous, cross-cutting, high-risk, or >7 AC / long task | Ready for Planning or Backlog |
+| Broad, ambiguous, cross-cutting, high-risk, or >7 AC / long task | Prefer Ready for Planning or Backlog (advisory) |
 | Product initialization is `uninitialized` | Ready for Planning only |
 | Default | Backlog |
 
-- **Never** set Ready for Build for broad or ambiguous work, even if the user requests it. Explain why and offer Ready for Planning or Backlog.
+- Prefer Ready for Planning for broad or ambiguous work. If the user still chooses Ready for Build, respect that status, warn that planning was skipped, and note the harness will execute without requiring a plan.
 - **Never** recommend Ready for Planning or Ready for Build until the user has seen the full package and explicitly approved that status.
+- **Never** set Ready for Build for uninitialized products.
 
 ### High-risk signals (planning-first)
 
 Security/auth, payments, data migrations, infrastructure, cross-cutting UI/IA redesigns, unclear acceptance criteria, multi-repo scope.
 
-## Direct-build narrowness rules
+## Direct-build narrowness rules (advisory)
 
-Direct implementation without a prior planning step is appropriate **only** when **all** are true:
+Recommend Ready for Build without planning when **all** are true:
 
 1. **Task length** — `## Task` body is **240 characters or fewer** (including spaces)
 2. **Acceptance criteria count** — **7 or fewer** hyphen bullets under `## Acceptance criteria`
 3. **Scope** — Low-risk and clear (no high-risk signals above)
 
-If any threshold fails, recommend **Ready for Planning** or **Backlog**—never Ready for Build.
+If any threshold fails, **recommend** **Ready for Planning** or **Backlog**. Linear status remains authoritative: Ready for Build still executes if the user selects it.
 
 ## Readiness assessment (internal only)
 
@@ -156,7 +157,7 @@ Perform this structural check before generating the final package. **Do not incl
 
 **Valid for planning: yes** when Task, Acceptance criteria (≥1 bullet), Out of scope (≥1 bullet), and Validation expectations (structured proof expectations or planner placeholder) are all present **and** either `## Target repo` is present **or** a mapped Linear project is confirmed for the issue.
 
-**Valid for direct implementation: yes** when valid for planning AND task ≤240 chars AND AC ≤7 AND scope is low-risk and clear.
+**Valid for direct implementation: yes** when valid for planning and the product is not uninitialized. Narrow thresholds are advisory notes only.
 
 If required information is missing, ask blocking questions **before** generating the final package—not inside it.
 
@@ -284,7 +285,8 @@ Omit optional sections with no content rather than leaving empty placeholders.
 ## Never
 
 - Create a Linear issue before the user approves the final package
-- Set Ready for Build for broad, ambiguous, or high-risk work
+- Silently set Ready for Build for broad work without warning that planning was skipped
+- Set Ready for Build for uninitialized products
 - Hide blocking questions
 - Invent a target repo, workspace, or team
 - Reference local repo files, paths, or templates

@@ -32,7 +32,7 @@ Do not add repo file paths or template references to the instructions—the GPT 
 1. In the GPT **Knowledge** section, upload **one file only**: [`knowledge.md`](knowledge.md)
 2. Do **not** upload repo templates, `harness.config.json`, or skill files
 
-The knowledge file is the authoritative contract for issue descriptions, status semantics, narrow thresholds, and examples.
+The knowledge file is the authoritative contract for issue descriptions, status semantics, advisory narrow thresholds, and examples. Ready for Build is status-authoritative; narrow thresholds guide recommendations only.
 
 ## Connect the Linear app
 

@@ -97,7 +97,34 @@ export async function applyLinearWorkspace(input: {
     apply: LinearWorkspaceApplyResult;
     summary: unknown;
     expectedCommittedFingerprint: string;
+    cloudSync?: {
+      status: "synced" | "partial_success";
+      fingerprint: string;
+      harnessRepository?: string;
+      error?: string;
+      retryable?: boolean;
+      syncedAt?: string;
+    } | null;
   }>(response, "POST /api/setup/apply-linear-workspace");
+}
+
+export async function syncLinearAssociationCloudConfig() {
+  const response = await fetch(
+    "/api/setup/sync-linear-association-cloud-config",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  return readSetupJsonResponse<{
+    status: "synced" | "partial_success";
+    fingerprint: string;
+    harnessRepository?: string;
+    error?: string;
+    retryable?: boolean;
+    syncedAt?: string;
+  }>(response, "POST /api/setup/sync-linear-association-cloud-config");
 }
 
 export async function previewLinearWorkspace(

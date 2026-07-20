@@ -21,8 +21,8 @@ Set the recommended status on the issue when creating or updating it. Do not add
 | Status | Meaning |
 |--------|---------|
 | **Backlog** | Work is captured but not ready to trigger automation. Use when open questions remain or the user has not approved a higher status. |
-| **Ready for Planning** | Triggers a planning workflow. Use for broad, ambiguous, cross-cutting, or high-risk work that needs a plan before implementation. |
-| **Ready for Build** | Triggers direct implementation. Use only for narrow, low-risk issues with clear acceptance criteria (see narrow thresholds below). |
+| **Ready for Planning** | Triggers a planning workflow. Prefer for broad, ambiguous, cross-cutting, or high-risk work. |
+| **Ready for Build** | Triggers direct implementation from the issue body. Prefer for narrow, low-risk issues; also valid when the user explicitly skips planning. Status is authoritative — a planning comment is optional. |
 | **Draft only** | Produce the issue package only; do not create a Linear issue until the user explicitly approves later. |
 
 Statuses like Planning, Building, PR Open, PM Review, and Merged / Deployed are set by automation during execution—do not recommend them at intake.
@@ -79,15 +79,15 @@ The repo must be a real GitHub repository the team intends to change. Never inve
 
 ---
 
-## Direct implementation eligibility (narrow thresholds)
+## Direct implementation eligibility (narrow thresholds — advisory)
 
-Direct implementation without a prior planning step is appropriate **only** when all of the following are true:
+Recommend Ready for Build without planning when all of the following are true:
 
 1. **Task length** — `## Task` body is **240 characters or fewer** (including spaces)
 2. **Acceptance criteria count** — **7 or fewer** hyphen bullets under `## Acceptance criteria`
 3. **Scope** — Low-risk and clear: no auth, payments, security-sensitive changes, multi-repo work, or ambiguous boundaries
 
-If any threshold fails, or scope is broad/ambiguous/high-risk, recommend **Ready for Planning** or **Backlog**—never Ready for Build.
+If any threshold fails, or scope is broad/ambiguous/high-risk, **recommend** **Ready for Planning** or **Backlog**. If the user still chooses Ready for Build, respect that status and note the harness will execute without requiring a plan.
 
 ### High-risk signals (planning-first)
 
@@ -117,19 +117,15 @@ Perform this assessment for every completed issue package. This is a **structura
 
 ### Valid for direct implementation: yes/no
 
-**Yes** when:
+**Yes** when valid for planning is **yes** and the product is not uninitialized.
 
-- Valid for planning is **yes**, AND
-- Task length ≤ 240 characters, AND
-- Acceptance criteria count ≤ 7, AND
-- Scope is low-risk and clear (no high-risk signals above)
+Narrow thresholds remain advisory. When they fail, still report valid for direct implementation **yes** with an advisory reason string, e.g.:
 
-**No** otherwise. Include a reason string, e.g.:
+- `advisory: task length 312 exceeds 240 characters; prefer Ready for Planning`
+- `advisory: acceptance criteria count 8 exceeds 7`
+- `advisory: scope is broad or high-risk; prefer Ready for Planning`
 
-- `task length 312 exceeds 240 characters`
-- `acceptance criteria count 8 exceeds 7`
-- `scope is broad or high-risk; planning recommended`
-- `missing required section: Out of scope`
+**No** when valid for planning is **no**, or the product is uninitialized for Ready for Build.
 
 ---
 
@@ -226,7 +222,7 @@ Show a success toast when the customer completes checkout.
 ### Readiness assessment
 
 - Valid for planning: yes — all required sections present
-- Valid for direct implementation: no — task length 142 characters OK but acceptance criteria count 8 exceeds 7; cross-cutting IA change is high-risk
+- Valid for direct implementation: yes — structurally ready; advisory: acceptance criteria count 8 exceeds 7; cross-cutting IA change — prefer Ready for Planning
 
 ### Blocking questions
 

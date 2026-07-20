@@ -53,6 +53,17 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       expect(runHarness).not.toContain("harness-merge-");
     });
 
+    it("finalize passes request id so pre-phase failures can terminalize the job request", () => {
+      const runHarness = extractJobSection(workflow, "run-harness");
+      const runMerge = extractJobSection(workflow, "run-merge");
+      for (const section of [runHarness, runMerge]) {
+        expect(section).toContain("finalize-harness-run.ts");
+        expect(section).toMatch(
+          /finalize-harness-run\.ts[\s\S]*--request-id "\$REQUEST_ID"/,
+        );
+      }
+    });
+
     it("run-merge uses repo/base merge concurrency with queued pending runs", () => {
       const runMerge = extractJobSection(workflow, "run-merge");
       expect(runMerge).toContain("harness-merge-${{ needs.gate.outputs.merge_concurrency_group }}");

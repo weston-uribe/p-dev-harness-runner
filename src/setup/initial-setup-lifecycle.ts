@@ -18,6 +18,7 @@ import {
   reconcileVercelControlPlaneFromRemote,
   type VercelBridgeReconcileResult,
 } from "./vercel-bridge-reconcile.js";
+import { isNonAuthoritativeLinearWorkspaceName } from "./linear-workspace-identity.js";
 
 export type InitialSetupCompletionEvidence = {
   localConfigPresent: boolean;
@@ -325,9 +326,13 @@ export async function reconcileLinearControlPlaneFromConfig(
   }
 
   const workspaceId = workspaceIds[0]!;
+  const existingName = controlPlane?.linearWorkspace?.workspaceName?.trim() ?? "";
   const evidence = evidenceFromAssociations({
     workspaceId,
-    workspaceName: "Linear workspace",
+    // Never persist a generic placeholder as durable identity.
+    workspaceName: isNonAuthoritativeLinearWorkspaceName(existingName)
+      ? ""
+      : existingName,
     associations,
     appliedAt: new Date().toISOString(),
   });

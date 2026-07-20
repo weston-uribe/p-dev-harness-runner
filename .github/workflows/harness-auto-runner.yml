@@ -311,7 +311,8 @@ jobs:
           npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
           npx tsx src/workflow/finalize-harness-run.ts \
             --json-out harness-run-output.json \
-            --exit-code "${EXIT_CODE:-1}"
+            --exit-code "${EXIT_CODE:-1}" \
+            --request-id "$REQUEST_ID"
 
       - name: Write public run summary file
         if: always()
@@ -472,7 +473,8 @@ jobs:
           npm run harness:claim-job-request -- --request-id "$REQUEST_ID" --json
           npx tsx src/workflow/finalize-harness-run.ts \
             --json-out harness-run-output.json \
-            --exit-code "${EXIT_CODE:-1}"
+            --exit-code "${EXIT_CODE:-1}" \
+            --request-id "$REQUEST_ID"
 
       - name: Write public run summary file
         if: always()

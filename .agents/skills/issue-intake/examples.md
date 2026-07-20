@@ -83,7 +83,7 @@ Show a success toast when the customer completes checkout.
 ### Readiness assessment
 
 - Valid for planning: yes — all required sections present
-- Valid for direct implementation: no — 8 acceptance criteria exceeds 7; cross-cutting IA change
+- Valid for direct implementation: yes — structurally ready; advisory note: 8 acceptance criteria exceeds narrow heuristic; prefer Ready for Planning
 
 ### Blocking questions
 
@@ -137,4 +137,4 @@ Redesign checkout navigation and information architecture so customers can compl
 - Screenshot or browser interaction notes for mobile and desktop when visual layout matters
 ```
 
-**Validate:** `npm run harness:validate-issue -- --file draft.md --intended-phase planning` (passes) and `--intended-phase implementation` (fails — too broad for build-direct)
+**Validate:** `npm run harness:validate-issue -- --file draft.md --intended-phase planning` (passes) and `--intended-phase implementation` (passes structurally; advisory narrow-size note expected). Prefer recommending Ready for Planning unless the operator explicitly chooses Ready for Build.

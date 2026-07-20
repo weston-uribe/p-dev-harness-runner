@@ -8,7 +8,7 @@
 - **Parser-aligned template** — [`templates/linear-issue.md`](../templates/linear-issue.md)
 - **Operator guide** — [`docs/issue-intake.md`](../issue-intake.md)
 - **Read-only validator CLI** — `harness validate-issue` with route-specific `--intended-phase planning|implementation`
-- Reuses parser, resolver, allowlist, narrow heuristic, and planning-marker detection
+- Reuses parser, resolver, allowlist, advisory narrow heuristic, and optional planning-marker detection
 - Tests and fixtures for validation paths
 
 ## What is deferred
@@ -58,7 +58,7 @@ npm run harness:run -- --issue WES-FIXTURE --dry-run \
 ## Pass criteria
 
 - Skill output passes route-specific validator for recommended status
-- `--intended-phase implementation` fails broad issues at file-validation time
+- `--intended-phase implementation` accepts broad issues when structurally valid; narrow heuristics are advisory only (uninitialized-product still blocks)
 - Validator catches `ambiguous_issue`, `missing_target_repo`, `unknown_repo_denied`
 - No Linear writes from validator
 - Full test suite green

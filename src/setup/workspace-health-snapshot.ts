@@ -22,6 +22,7 @@ import type {
   PDevBridgeHealthStatus,
 } from "./workspace-health.js";
 import { isCredentialFailureStatus } from "./workspace-health.js";
+import { isNonAuthoritativeLinearWorkspaceName } from "./linear-workspace-identity.js";
 
 export type CredentialHealthFact = {
   present: boolean;
@@ -198,6 +199,125 @@ export function reconcileHistoricalSuccess(input: {
   };
 }
 
+const ATTENTION_STATUS_PRIORITY: Record<HealthAggregateStatus, number> = {
+  repairing: 0,
+  degraded: 1,
+  missing: 2,
+  verification_pending: 3,
+  configured: 4,
+  verified: 5,
+};
+
+export type AutomationAttentionSubsystem = "vercel" | "linear";
+
+export type AutomationAttentionFact = {
+  subsystem: AutomationAttentionSubsystem;
+  status: HealthAggregateStatus;
+  detail: string;
+};
+
+export type AutomationAttentionState = {
+  tone: Exclude<HealthAggregateStatus, "verified">;
+  title: string;
+  facts: AutomationAttentionFact[];
+};
+
+function humanAggregateLabel(status: HealthAggregateStatus): string {
+  switch (status) {
+    case "missing":
+      return "Missing";
+    case "configured":
+      return "Configured but incomplete";
+    case "verification_pending":
+      return "Needs verification";
+    case "verified":
+      return "Verified";
+    case "degraded":
+      return "Degraded";
+    case "repairing":
+      return "Repairing";
+  }
+}
+
+function worseAttentionStatus(
+  left: HealthAggregateStatus,
+  right: HealthAggregateStatus,
+): HealthAggregateStatus {
+  return ATTENTION_STATUS_PRIORITY[left] <= ATTENTION_STATUS_PRIORITY[right]
+    ? left
+    : right;
+}
+
+/**
+ * Operator-facing automation attention panel state.
+ * Returns null when both Linear and Vercel automation aggregates are verified.
+ */
+export function deriveAutomationAttentionState(
+  snapshot: Pick<WorkspaceHealthSnapshot, "vercel" | "linear">,
+): AutomationAttentionState | null {
+  const { vercel, linear } = snapshot;
+  if (
+    vercel.automationAggregate === "verified" &&
+    linear.automationAggregate === "verified"
+  ) {
+    return null;
+  }
+
+  const facts: AutomationAttentionFact[] = [];
+
+  if (vercel.automationAggregate !== "verified") {
+    const bridgeDetail = vercel.bridgeDeployed
+      ? vercel.bridgeReachable
+        ? "bridge reachable"
+        : "bridge not reachable"
+      : "bridge not deployed";
+    const webhookDetail = vercel.webhookVerified
+      ? "webhook verified"
+      : vercel.webhookConfigured
+        ? "webhook not verified"
+        : "webhook not configured";
+    facts.push({
+      subsystem: "vercel",
+      status: vercel.automationAggregate,
+      detail: `${humanAggregateLabel(vercel.automationAggregate)} · ${bridgeDetail} · ${webhookDetail}`,
+    });
+  }
+
+  if (linear.automationAggregate !== "verified") {
+    const workspace =
+      linear.workspaceName?.trim() || "workspace name unavailable";
+    facts.push({
+      subsystem: "linear",
+      status: linear.automationAggregate,
+      detail: `${humanAggregateLabel(linear.automationAggregate)} · ${workspace}`,
+    });
+  }
+
+  const tone = facts.reduce<HealthAggregateStatus>(
+    (current, fact) => worseAttentionStatus(current, fact.status),
+    "configured",
+  );
+  const attentionTone =
+    tone === "verified" ? "configured" : (tone as AutomationAttentionState["tone"]);
+
+  const title =
+    attentionTone === "repairing"
+      ? "Automation needs attention · Repairing"
+      : attentionTone === "degraded"
+        ? "Automation needs attention · Degraded"
+        : attentionTone === "missing"
+          ? "Automation needs attention · Missing configuration"
+          : attentionTone === "verification_pending"
+            ? "Automation needs attention · Needs verification"
+            : "Automation needs attention · Incomplete";
+
+  return {
+    tone: attentionTone,
+    title,
+    facts,
+  };
+}
+
 function toCredentialFact(
   health: SavedCredentialHealth,
   present: boolean,
@@ -366,9 +486,14 @@ export function deriveLinearHealthFacts(input: {
     automationAggregate = "configured";
   }
 
+  const rawWorkspaceName = evidence?.workspaceName?.trim() || undefined;
   return {
     credential,
-    workspaceName: evidence?.workspaceName?.trim() || undefined,
+    workspaceName:
+      rawWorkspaceName &&
+      !isNonAuthoritativeLinearWorkspaceName(rawWorkspaceName)
+        ? rawWorkspaceName
+        : undefined,
     configuredTeams,
     statusConfigPresent: summary.statusCoverageComplete,
     webhookConfigured,

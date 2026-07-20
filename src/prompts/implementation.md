@@ -74,7 +74,9 @@ When the product marker on the development branch is `uninitialized`, stop unles
 - **Base branch:** {{baseBranch}}
 - **Required branch name:** {{branchName}}
 
-## Planning context
+## Planning context (optional)
+
+Supplemental planning context when a durable PDev planning comment exists. When absent, treat the Linear issue above as authoritative.
 
 {{planningComment}}
 

@@ -10,9 +10,14 @@ import {
 } from "../../src/artifacts/write-json-out-manifest.js";
 import {
   finalizeFailedHarnessRun,
+  resolveFailureProjectionOwnership,
   resolveRunOwnedStatuses,
   shouldTransitionIssueToBlocked,
 } from "../../src/runner/failure-finalization.js";
+import {
+  buildRunStatusCommentBody,
+  shouldAcceptRunStatusUpdate,
+} from "../../src/linear/run-status-comment.js";
 import type { RunManifest } from "../../src/types/run.js";
 
 const config = {
@@ -85,12 +90,19 @@ vi.mock("../../src/linear/client.js", () => ({
   fetchLinearIssue: vi.fn(),
 }));
 
-vi.mock("../../src/linear/run-status-comment.js", () => ({
-  markRunStatusBlocked: vi.fn(async () => ({ action: "updated" as const })),
-}));
+vi.mock("../../src/linear/run-status-comment.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/linear/run-status-comment.js")
+  >();
+  return {
+    ...actual,
+    markRunStatusBlocked: vi.fn(async () => ({ action: "updated" as const })),
+  };
+});
 
 vi.mock("../../src/linear/writer.js", () => ({
   createLinearClient: vi.fn(() => ({})),
+  listIssueComments: vi.fn(async () => []),
   transitionIssueStatus: vi.fn(async () => undefined),
 }));
 
@@ -307,6 +319,166 @@ describe("failure finalization", () => {
     });
     expect(fallback.finalOutcome).toBe("failed");
     expect(fallback.issueKey).toBe("WES-9");
+  });
+
+  it("FRE-5: accepting claim owner can project blocked without runOwnedStatuses", () => {
+    const ownership = resolveFailureProjectionOwnership({
+      existingAuthority: {
+        stateRevision: 0,
+        phase: "accepted",
+        outcomeClass: "accepted",
+        ownedActiveClaim: true,
+      },
+      existingRunId: "dlv-eb090c3c89c73bc68635aba4f7442ba9",
+      existingDeliveryId: "c65aa4a1-8df4-4401-8f7b-07f49b62fac3",
+      requestId: "dlv-eb090c3c89c73bc68635aba4f7442ba9",
+      deliveryId: "c65aa4a1-8df4-4401-8f7b-07f49b62fac3",
+      runOwnedStatusesCount: 0,
+    });
+    expect(ownership).toEqual({
+      ownedActiveClaim: true,
+      reason: "accepting_claim_owner",
+    });
+
+    const decision = shouldAcceptRunStatusUpdate({
+      existing: {
+        stateRevision: 0,
+        phase: "accepted",
+        outcomeClass: "accepted",
+        ownedActiveClaim: true,
+      },
+      incoming: {
+        stateRevision: 0,
+        phase: "implementation",
+        outcomeClass: "blocked",
+        ownedActiveClaim: true,
+      },
+    });
+    expect(decision.accept).toBe(true);
+  });
+
+  it("FRE-5: non-owner still cannot block acceptance", () => {
+    const ownership = resolveFailureProjectionOwnership({
+      existingAuthority: {
+        stateRevision: 0,
+        phase: "accepted",
+        outcomeClass: "accepted",
+        ownedActiveClaim: true,
+      },
+      existingRunId: "dlv-eb090c3c89c73bc68635aba4f7442ba9",
+      existingDeliveryId: "c65aa4a1-8df4-4401-8f7b-07f49b62fac3",
+      requestId: "dlv-other-request",
+      deliveryId: "other-delivery",
+      runOwnedStatusesCount: 0,
+    });
+    expect(ownership.ownedActiveClaim).toBe(false);
+
+    expect(
+      shouldAcceptRunStatusUpdate({
+        existing: {
+          stateRevision: 0,
+          phase: "accepted",
+          outcomeClass: "accepted",
+          ownedActiveClaim: true,
+        },
+        incoming: {
+          stateRevision: 0,
+          phase: "implementation",
+          outcomeClass: "blocked",
+          ownedActiveClaim: false,
+        },
+      }).reason,
+    ).toBe("non_owner_cannot_block_acceptance");
+  });
+
+  it("FRE-5: pre-Building linear_write_failure projects blocked on acceptance claim", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "failure-finalize-fre5-"));
+    const jsonOutPath = path.join(dir, "harness-run-output.json");
+    const requestId = "dlv-eb090c3c89c73bc68635aba4f7442ba9";
+    const deliveryId = "c65aa4a1-8df4-4401-8f7b-07f49b62fac3";
+    const issueId = "73d090be-335e-4908-9731-66f28d8f18a6";
+
+    await writeJsonOutManifest(jsonOutPath, {
+      ...baseManifest,
+      runId: "2026-07-20T17-21-57-285Z-FRE-5",
+      issueKey: "FRE-5",
+      phase: "implementation",
+      phaseInferredFromStatus: "Ready for Build",
+      linearStatusBefore: "Ready for Build",
+      linearStatusAfter: "Ready for Build",
+      finalOutcome: "failed",
+      errorClassification: "linear_write_failure",
+      validationSummary: "Failed to transition issue to Building: GraphQL error",
+      runOwnedStatuses: null,
+      deliveryId: null,
+      runGeneration: 29763160688,
+      cursorAgentId: null,
+      cursorRunId: null,
+    });
+
+    const { fetchLinearIssue } = await import("../../src/linear/client.js");
+    vi.mocked(fetchLinearIssue).mockResolvedValue({
+      id: issueId,
+      identifier: "FRE-5",
+      title: "Add Kinterra work page",
+      description: "",
+      status: "Ready for Build",
+      projectName: "harness",
+      teamName: "fresh p-dev linear team",
+      teamKey: "FRE",
+      teamId: "team-fre",
+      url: null,
+    });
+
+    const writer = await import("../../src/linear/writer.js");
+    vi.mocked(writer.listIssueComments).mockResolvedValue([
+      {
+        id: "comment-accepted",
+        body: buildRunStatusCommentBody({
+          issueId,
+          headline: "PDev accepted this issue",
+          visiblePhase: "Preparing the next phase",
+          phase: "accepted",
+          outcomeClass: "accepted",
+          stateRevision: 0,
+          ownedActiveClaim: true,
+          generation: 1784567899953,
+          runId: requestId,
+          deliveryId,
+        }),
+        createdAt: "2026-07-20T17:22:00.415Z",
+      },
+    ]);
+
+    const comments = await import("../../src/linear/run-status-comment.js");
+    const result = await finalizeFailedHarnessRun({
+      issueKey: "FRE-5",
+      jsonOutPath,
+      exitCode: 3,
+      configPath: "harness.config.json",
+      linearApiKey: "lin_api_test",
+      generation: 29763160688,
+      requestId,
+      deliveryId,
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toMatch(/not a claimed in-progress/i);
+    expect(writer.transitionIssueStatus).not.toHaveBeenCalled();
+    expect(comments.markRunStatusBlocked).toHaveBeenCalledWith(
+      expect.anything(),
+      issueId,
+      expect.objectContaining({
+        ownedActiveClaim: true,
+        runId: requestId,
+        deliveryId,
+        message: expect.stringMatching(
+          /Failed to transition issue to Building|GraphQL error/,
+        ),
+      }),
+    );
+    await rm(dir, { recursive: true, force: true });
   });
 });
 

@@ -292,6 +292,14 @@ export class LiveGitHubRemoteSetupProvider implements GitHubRemoteSetupProvider 
     return results;
   }
 
+  async readHarnessVariable(
+    harnessDispatchRepo: string,
+    name: string,
+  ): Promise<{ name: string; value: string } | null> {
+    const { owner, repo } = parseRepoSlug(harnessDispatchRepo);
+    return this.client.getActionsVariable(owner, repo, name);
+  }
+
   async checkTargetWorkflowStatus(input: {
     targetRepoSlug: string;
     workflowPath: string;

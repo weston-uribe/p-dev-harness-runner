@@ -18,10 +18,12 @@ function baseResult(
     narrowFailureReason: "task length 300 exceeds 240 characters",
     hasPlanningMarker: false,
     planningMarkerMode: "file",
-    routingNotes: ["Recommended status should be Ready for Planning, not Ready for Build."],
-    repairInstructions: [
-      "Too broad for Ready for Build — narrow task/AC, set recommended status to Ready for Planning, or complete a planning run first.",
+    productInitializationState: null,
+    blocksDirectImplementationForUninitializedProduct: false,
+    routingNotes: [
+      "Advisory: issue exceeds narrow-size heuristics — consider Ready for Planning first, but Ready for Build will still execute if selected.",
     ],
+    repairInstructions: [],
     ...overrides,
   };
 }
@@ -37,7 +39,8 @@ describe("formatValidationReport", () => {
     expect(report).toContain("## Parser errors");
     expect(report).toContain("## Routing / status notes");
     expect(report).toContain("## Repair instructions");
-    expect(report).toContain("Ready for Planning");
+    expect(report).toContain("advisory heuristic only");
+    expect(report).toContain("narrow-size heuristics");
   });
 
   it("shows planning marker yes in issue mode", () => {

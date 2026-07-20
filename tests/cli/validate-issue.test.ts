@@ -74,13 +74,13 @@ describe("runValidateIssue", () => {
     expect(exitCode).toBe(EXIT_SUCCESS);
   });
 
-  it("exits 2 for broad issue with intended-phase implementation", async () => {
+  it("exits 0 for broad issue with intended-phase implementation", async () => {
     const exitCode = await runValidateIssue({
       configPath,
       filePath: path.join(repoRoot, "tests/fixtures/issues/broad-for-direct-impl.md"),
       intendedPhase: "implementation",
     });
-    expect(exitCode).toBe(EXIT_RUN_FAILURE);
+    expect(exitCode).toBe(EXIT_SUCCESS);
   });
 
   it("exits 1 for invalid intended phase", async () => {

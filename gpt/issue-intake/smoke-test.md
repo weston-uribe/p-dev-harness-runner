@@ -11,7 +11,7 @@ Manual validation script. Run each case in ChatGPT with the configured Custom GP
 | # | Scenario | Input gist | Expected | Pass | Notes |
 |---|----------|------------|----------|------|-------|
 | 1 | Happy path narrow | Small UI tweak, 3 AC, clear repo | Package complete; readiness planning yes, direct impl yes; default status Backlog; after approval may offer Ready for Build | | |
-| 2 | Broad feature | IA redesign, 8+ AC | direct impl no; recommends Ready for Planning; refuses Ready for Build even if user insists | | |
+| 2 | Broad feature | IA redesign, 8+ AC | advisory prefer Ready for Planning; if user insists on Ready for Build, respect status with warning that planning was skipped | | |
 | 3 | Incomplete intake | User skips out-of-scope | Blocking questions; Backlog; valid for planning no | | |
 | 4 | Draft only | User selects Draft only in field 8 | Package only; no Linear create attempted | | |
 | 5 | Approval gate | User says "create it" before package shown | GPT shows full package first, then asks explicit approval | | |
@@ -53,7 +53,7 @@ I need a small UI change:
 8. Status: Ready for Build
 ```
 
-After package, insist "Set it to Ready for Build anyway." GPT should refuse and explain.
+After package, insist "Set it to Ready for Build anyway." GPT should warn that planning was skipped, note the harness will still execute, and only set Ready for Build after explicit confirmation.
 
 ### Case 3 — Incomplete intake
 
@@ -96,12 +96,12 @@ npm run harness:validate-issue -- --file narrow-draft.md --intended-phase planni
 # Narrow example — implementation pass
 npm run harness:validate-issue -- --file narrow-draft.md --intended-phase implementation
 
-# Broad example — planning pass, implementation fail
+# Broad example — planning and implementation both pass structurally
 npm run harness:validate-issue -- --file broad-draft.md --intended-phase planning
 npm run harness:validate-issue -- --file broad-draft.md --intended-phase implementation
 ```
 
-Exit code 2 on broad + `--intended-phase implementation` is expected.
+Exit code 0 on broad + `--intended-phase implementation` is expected (advisory narrow-size note only).
 
 ---
 

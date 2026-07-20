@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import Link from "next/link";
 import type { LocalConfigFormInput } from "@harness/setup/config-local-editor";
 import {
   TargetRepoCreateConnect,
@@ -522,10 +521,7 @@ export function RepositoriesSettingsEditor({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          Add, connect, verify, edit branches, and detach repositories that PDev may modify.
-        </p>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <Button type="button" size="sm" onClick={startAddRepository}>
           Add repository
         </Button>
@@ -732,18 +728,6 @@ export function RepositoriesSettingsEditor({
           />
         </div>
       ) : null}
-
-      <p className="text-xs text-muted-foreground">
-        Linear team and project mappings are managed in{" "}
-        <Link href="/settings/linear" className="underline">
-          Settings → Linear
-        </Link>
-        . Deployment settings are managed in{" "}
-        <Link href="/settings/deployments" className="underline">
-          Settings → Deployments
-        </Link>
-        .
-      </p>
     </div>
   );
 }

@@ -154,15 +154,31 @@ describe("guided linear workspace card", () => {
     expect(source).toContain("verifiedSuccess && applyResult");
     expect(source).toContain("onContinue={onContinue}");
   });
+
+  it("does not seed workspace identity with the Linear workspace placeholder", () => {
+    const source = readLinearCardSource();
+    expect(source).not.toContain('useState("Linear workspace")');
+    expect(source).not.toContain(
+      'workspaceName || bootstrap?.workspaceName || "Linear workspace"',
+    );
+  });
 });
 
 describe("linear settings editor shared draft helpers", () => {
   it("imports shared draft helpers instead of local duplicates", () => {
     const source = readLinearSettingsEditorSource();
+    const provisionForm = readFileSync(
+      path.join(
+        repoRoot,
+        "apps/gui/components/settings/linear-provision-form.tsx",
+      ),
+      "utf8",
+    );
 
     expect(source).toContain('from "@/lib/linear-association-draft"');
-    expect(source).toContain("addProjectsToDraft");
-    expect(source).toContain("buildConfiguredAssociationKeys");
+    expect(source).toContain("LinearProvisionForm");
     expect(source).not.toMatch(/function groupAssociationsByTeam\(/);
+    expect(provisionForm).toContain("addProjectsToDraft");
+    expect(provisionForm).toContain("foldResolvedAssociationIntoDraft");
   });
 });

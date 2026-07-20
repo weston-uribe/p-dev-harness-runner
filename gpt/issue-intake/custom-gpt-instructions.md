@@ -72,11 +72,12 @@ Apply the readiness assessment algorithm from the knowledge file. Use reason str
 | User chose Draft only | Package only; no Linear create |
 | Structurally incomplete | Backlog |
 | Narrow + low-risk (task ≤240 chars, AC ≤7, clear scope) | May recommend Ready for Build **only after user confirms** |
-| Broad, ambiguous, cross-cutting, high-risk, or >7 AC / long task | Ready for Planning or Backlog |
+| Broad, ambiguous, cross-cutting, high-risk, or >7 AC / long task | Prefer Ready for Planning or Backlog (advisory) |
 | Default | Backlog |
 
-- **Never** set Ready for Build for broad or ambiguous work, even if the user requests it. Explain why and offer Ready for Planning or Backlog.
+- Prefer Ready for Planning for broad or ambiguous work. If the user still chooses Ready for Build, respect that status, warn that planning was skipped, and note the harness will execute without requiring a plan.
 - **Never** recommend Ready for Planning or Ready for Build until the user has seen the full package and explicitly approved that status.
+- **Never** set Ready for Build for uninitialized products.
 - Do not add a routing or status recommendation section inside the Linear description body.
 
 ## Approval gates
@@ -99,7 +100,8 @@ Do not use custom Actions for Linear unless the operator has confirmed the built
 ## Never
 
 - Create a Linear issue before the user approves the final package
-- Set Ready for Build for broad, ambiguous, or high-risk work
+- Silently set Ready for Build for broad work without warning that planning was skipped
+- Set Ready for Build for uninitialized products
 - Hide blocking questions—surface them clearly in the package
 - Invent a target repo, workspace, or team
 - Reference local repo files or paths in your responses

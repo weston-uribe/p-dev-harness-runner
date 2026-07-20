@@ -171,9 +171,14 @@ describe("GuidedSelect height usage in settings", () => {
       "apps/gui/components/workflow/workflow-model-control.tsx",
     );
 
-    expect(deployments).toContain("GuidedSelect");
+    const linearProvision = readSource(
+      "apps/gui/components/settings/linear-provision-form.tsx",
+    );
+
+    expect(deployments).not.toContain("GuidedSelect");
     expect(deployments).not.toContain("selectClassName");
-    expect(linear).toContain("GuidedSelect");
+    expect(linearProvision).toContain("GuidedSelect");
+    expect(linearProvision).not.toContain("selectClassName");
     expect(linear).not.toContain("selectClassName");
     expect(modelControl).toContain("GuidedSelect");
     expect(modelControl).not.toMatch(

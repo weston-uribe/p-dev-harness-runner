@@ -137,9 +137,11 @@ describe("settings mutation editors", () => {
       mutationPanel.lastIndexOf("onApply"),
     );
 
-    expect(deploymentsEditor).toContain("previewVercelBridge(buildPlanPayload())");
-    expect(deploymentsEditor).toContain("Save deployment selection");
-    expect(deploymentsEditor).toContain("window.confirm");
+    expect(deploymentsEditor).toContain("Team:");
+    expect(deploymentsEditor).toContain("Project:");
+    expect(deploymentsEditor).toContain("Production URL:");
+    expect(deploymentsEditor).not.toContain("Save deployment selection");
+    expect(deploymentsEditor).not.toContain("previewVercelBridge");
     expect(deploymentsEditor).not.toContain("SettingsMutationPanel");
     expect(deploymentsEditor).not.toContain("Apply deployment changes");
 

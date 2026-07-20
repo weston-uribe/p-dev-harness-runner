@@ -19,14 +19,19 @@ import {
 } from "../../artifacts/paths.js";
 import { writeCommentsArtifact } from "../../linear/comments.js";
 import { fetchLinearIssue } from "../../linear/client.js";
-import { findLatestPlanningComment } from "../../linear/planning-comment.js";
+import { resolveOptionalPlanningContext } from "../../linear/planning-comment.js";
 import {
   createLinearClient,
   listIssueComments,
   postErrorComment,
   postPhaseStartCommentIfNeeded,
   transitionIssueStatus,
+  type LinearCommentRecord,
 } from "../../linear/writer.js";
+import {
+  createWorkflowStateStore,
+  resolveWorkflowStateStoreMode,
+} from "../../workflow/state/index.js";
 import {
   acquireBuilderAgent,
   disposeAgent,
@@ -60,7 +65,6 @@ import { rerouteUninitializedProductToPlanning } from "../uninitialized-product-
 import {
   assertImplementationEligibleStatus,
   checkImplementationIdempotency,
-  isNarrowImplementationIssue,
 } from "../idempotency.js";
 import type { EventLogger } from "../../artifacts/events.js";
 import type {
@@ -182,7 +186,6 @@ async function writeFinalManifest(
             "missing_target_repo",
             "unknown_repo_denied",
             "wrong_status",
-            "missing_planning_comment",
             "base_branch_missing",
             "wrong_pr_base_branch",
           ].includes(errorClassification)
@@ -322,6 +325,13 @@ export async function executeImplementationPhase(
   let cursorCleanup: CursorCancelOutcome | null = null;
   let builderContinuity: BuilderThreadResolution | null = null;
   let cursorRequestId: string | null = null;
+  let planningContextPresent = false;
+  let planningHistory:
+    | {
+        directBuild: boolean;
+        planningRequested: boolean;
+      }
+    | null = null;
   const builderModel = manifestModelEvidence(config, "builder");
   const model = builderModel.model;
   const commentsWritten: string[] = [];
@@ -408,7 +418,19 @@ export async function executeImplementationPhase(
       );
     }
 
-    const comments = await listIssueComments(client, issue.id);
+    let comments: LinearCommentRecord[] = [];
+    try {
+      comments = await listIssueComments(client, issue.id);
+    } catch (error) {
+      // Fail-open for optional planning + idempotency: empty comments means no
+      // prior completion markers. Issue body from preflight remains authoritative.
+      await events.log("planning_context_absent", "warn", {
+        reason: "comment_lookup_failed",
+        message: extractErrorMessage(error),
+      });
+      comments = [];
+    }
+
     const githubForIdempotency = process.env.GITHUB_TOKEN
       ? new GitHubClient({ token: process.env.GITHUB_TOKEN })
       : undefined;
@@ -480,16 +502,42 @@ export async function executeImplementationPhase(
       );
     }
 
-    const planningComment = findLatestPlanningComment(
-      comments,
-      config.orchestratorMarker,
-    );
-    if (!planningComment && !isNarrowImplementationIssue(parsed)) {
-      throw new ImplementationError(
-        "missing_planning_comment",
-        "No durable planning comment found for a broad implementation issue",
-      );
+    let supersededGenerationIds: string[] = [];
+    try {
+      const stateStore = await createWorkflowStateStore({
+        logDirectory: config.logDirectory,
+        teamId: issue.teamId ?? undefined,
+        env: process.env,
+        mode: resolveWorkflowStateStoreMode(process.env),
+      });
+      const workflowState = await stateStore.load(options.issueKey);
+      if (workflowState) {
+        supersededGenerationIds = [
+          ...(workflowState.supersededGenerationIdentities ?? []),
+        ];
+        const hasCompletedPlan = Boolean(workflowState.latestPlanArtifact);
+        const planningPhaseEvidence =
+          hasCompletedPlan ||
+          (workflowState.completedPhaseIdentities ?? []).some((identity) =>
+            /planning/i.test(identity),
+          ) ||
+          (workflowState.currentPhaseId ?? "").toLowerCase().includes("planning");
+        planningHistory = {
+          directBuild: !hasCompletedPlan,
+          planningRequested: planningPhaseEvidence,
+        };
+      }
+    } catch {
+      planningHistory = null;
     }
+
+    const planningResolution = resolveOptionalPlanningContext({
+      comments,
+      orchestratorMarker: config.orchestratorMarker,
+      supersededGenerationIds,
+    });
+    const planningContext = planningResolution.context;
+    planningContextPresent = Boolean(planningContext);
 
     if (
       blocksDirectImplementationForInitialization(productInitialization)
@@ -500,15 +548,19 @@ export async function executeImplementationPhase(
       );
     }
 
-    if (planningComment) {
+    if (planningContext) {
       await mkdir(`${runDirectory}/linear`, { recursive: true });
       await writeFile(
         getPlanningCommentLoadedPath(runDirectory),
-        `${planningComment.body}\n`,
+        `${planningContext.body}\n`,
         "utf8",
       );
       await events.log("planning_comment_loaded", "info", {
-        commentId: planningComment.id,
+        commentId: planningContext.commentId,
+      });
+    } else {
+      await events.log("planning_context_absent", "info", {
+        reason: planningResolution.reason,
       });
     }
 
@@ -544,7 +596,7 @@ export async function executeImplementationPhase(
       resolved,
       runId,
       branchName,
-      planningCommentBody: planningComment?.body ?? null,
+      planningCommentBody: planningContext?.body ?? null,
       validationCommands,
       productInitializationState: productInitialization.state,
     });
@@ -1117,6 +1169,17 @@ export async function executeImplementationPhase(
         }),
   };
 
+  const planningEvalMetadata: Record<string, unknown> = {
+    route: "implementation",
+    planning_context_present: planningContextPresent,
+  };
+  if (planningHistory) {
+    planningEvalMetadata.direct_build = planningHistory.directBuild;
+    if (planningHistory.planningRequested) {
+      planningEvalMetadata.planning_requested = true;
+    }
+  }
+
   return writeFinalManifest(
     manifest,
     runDirectory,
@@ -1138,6 +1201,7 @@ export async function executeImplementationPhase(
       builderThreadAction: builderContinuity?.action ?? null,
       builderThreadGeneration: builderContinuity?.reference.generation ?? null,
       previewConfigured: shouldCaptureApplicationPreview(resolved.previewProvider),
+      ...planningEvalMetadata,
     },
     options.evaluationRuntime ?? null,
   );

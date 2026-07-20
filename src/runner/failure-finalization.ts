@@ -10,9 +10,16 @@ import {
   writeJsonOutManifest,
 } from "../artifacts/write-json-out-manifest.js";
 import { fetchLinearIssue } from "../linear/client.js";
-import { markRunStatusBlocked } from "../linear/run-status-comment.js";
+import {
+  findRunStatusComment,
+  markRunStatusBlocked,
+  parseRunStatusAuthority,
+  parseRunStatusMetadata,
+  type RunStatusAuthority,
+} from "../linear/run-status-comment.js";
 import {
   createLinearClient,
+  listIssueComments,
   transitionIssueStatus,
 } from "../linear/writer.js";
 import { resolveRunGeneration } from "./run-generation.js";
@@ -25,8 +32,48 @@ export interface FailureFinalizationInput {
   configPath: string;
   linearApiKey?: string;
   deliveryId?: string | null;
+  /** Opaque job-request / acceptance run_id (e.g. dlv-…). */
+  requestId?: string | null;
   generation?: number;
   message?: string;
+}
+
+/**
+ * Decide whether failure finalization may assert owned_active_claim.
+ *
+ * Acceptance comments set owned_active_claim=true before any transitional
+ * Linear status is claimed. Pre-Building terminal failures (e.g. Linear comment
+ * list / status write failures while still Ready for Build) must still be able
+ * to project blocked for the same delivery/request, or Linear stays stuck on
+ * "Preparing the next phase".
+ */
+export function resolveFailureProjectionOwnership(input: {
+  existingAuthority: RunStatusAuthority | null;
+  existingRunId: string | null;
+  existingDeliveryId: string | null;
+  requestId: string | null;
+  deliveryId: string | null;
+  runOwnedStatusesCount: number;
+}): { ownedActiveClaim: boolean; reason: string } {
+  if (input.runOwnedStatusesCount > 0) {
+    return { ownedActiveClaim: true, reason: "run_owned_statuses" };
+  }
+
+  const sameDelivery =
+    Boolean(input.deliveryId) &&
+    input.deliveryId === input.existingDeliveryId;
+  const sameRequest =
+    Boolean(input.requestId) && input.requestId === input.existingRunId;
+
+  if (
+    input.existingAuthority?.outcomeClass === "accepted" &&
+    input.existingAuthority.ownedActiveClaim &&
+    (sameDelivery || sameRequest)
+  ) {
+    return { ownedActiveClaim: true, reason: "accepting_claim_owner" };
+  }
+
+  return { ownedActiveClaim: false, reason: "no_ownership_evidence" };
 }
 
 export interface FailureFinalizationResult {
@@ -155,6 +202,11 @@ export async function finalizeFailedHarnessRun(
   input: FailureFinalizationInput,
 ): Promise<FailureFinalizationResult> {
   const generation = input.generation ?? resolveRunGeneration();
+  const requestId =
+    input.requestId?.trim() ||
+    process.env.REQUEST_ID?.trim() ||
+    process.env.P_DEV_REQUEST_ID?.trim() ||
+    null;
   const deliveryId = input.deliveryId ?? process.env.LINEAR_DELIVERY_ID ?? null;
 
   let manifest =
@@ -237,15 +289,41 @@ export async function finalizeFailedHarnessRun(
     };
   }
 
+  const existingComments = await listIssueComments(client, issue.id);
+  const existingStatusComment = findRunStatusComment(existingComments, issue.id);
+  const existingAuthority = existingStatusComment
+    ? parseRunStatusAuthority(existingStatusComment.body)
+    : null;
+  const existingMeta = existingStatusComment
+    ? parseRunStatusMetadata(existingStatusComment.body)
+    : {
+        generation: null,
+        runId: null,
+        deliveryId: null,
+        pmFeedbackCommentId: null,
+        revisionIntent: null,
+      };
+  const projectionDeliveryId = manifest.deliveryId ?? deliveryId;
+  const ownership = resolveFailureProjectionOwnership({
+    existingAuthority,
+    existingRunId: existingMeta.runId,
+    existingDeliveryId: existingMeta.deliveryId,
+    requestId,
+    deliveryId: projectionDeliveryId,
+    runOwnedStatusesCount: manifest.runOwnedStatuses?.length ?? 0,
+  });
+  // Prefer the acceptance run_id (request id) so projection stays on the same
+  // claim identity that wrote "Preparing the next phase".
+  const projectionRunId = requestId ?? existingMeta.runId ?? manifest.runId;
+
   const commentResult = await markRunStatusBlocked(client, issue.id, {
     message: `Harness run blocked: ${failureMessage}`,
     phase: manifest.phase === "none" ? "failed" : manifest.phase,
-    runId: manifest.runId,
-    deliveryId: manifest.deliveryId ?? deliveryId,
+    runId: projectionRunId,
+    deliveryId: projectionDeliveryId,
     generation,
-    // Causal authority: only claim-owning in-progress runs may mark blocked.
-    stateRevision: 0,
-    ownedActiveClaim: (manifest.runOwnedStatuses?.length ?? 0) > 0,
+    stateRevision: existingAuthority?.stateRevision ?? 0,
+    ownedActiveClaim: ownership.ownedActiveClaim,
   });
 
   const transitionDecision = shouldTransitionIssueToBlocked({

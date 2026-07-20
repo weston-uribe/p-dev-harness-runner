@@ -70,18 +70,10 @@ function buildRepairInstructions(
     !result.validForDirectImplementation &&
     intendedPhase === "implementation"
   ) {
-    if (!result.narrowIssue && !result.hasPlanningMarker) {
+    if (result.blocksDirectImplementationForUninitializedProduct) {
       repairs.push(
-        "Too broad for Ready for Build — narrow task/AC, set recommended status to Ready for Planning, or complete a planning run first.",
+        "Product is uninitialized — complete product foundation planning before Ready for Build.",
       );
-      if (result.narrowFailureReason) {
-        repairs.push(`Narrow heuristic: ${result.narrowFailureReason}`);
-      }
-      if (result.planningMarkerMode === "file") {
-        repairs.push(
-          "File validation cannot see Linear planning markers; re-validate with --issue after planning completes.",
-        );
-      }
     }
   }
 
@@ -117,15 +109,24 @@ function buildRoutingNotes(
   }
 
   if (validForDirectImplementation) {
-    notes.push("Set Linear status to Ready for Build to run direct implementation.");
-  } else if (validForPlanning && !narrowIssue && !hasPlanningMarker) {
     notes.push(
-      "Issue is planning-valid but too broad for build-direct without a planning marker.",
+      "Set Linear status to Ready for Build to run implementation directly. Linear status is authoritative; a planning comment is optional supplemental context.",
     );
   }
 
-  if (hasPlanningMarker) {
-    notes.push("Durable planning comment found — broad issues may proceed to implementation.");
+  if (validForPlanning && !narrowIssue) {
+    notes.push(
+      "Advisory: issue exceeds narrow-size heuristics — consider Ready for Planning first, but Ready for Build will still execute if selected.",
+    );
+    if (hasPlanningMarker) {
+      notes.push(
+        "Durable planning comment found — it will be included as supplemental implementation context.",
+      );
+    }
+  } else if (hasPlanningMarker) {
+    notes.push(
+      "Durable planning comment found — it will be included as supplemental implementation context.",
+    );
   }
 
   if (blocksDirectImplementationForUninitializedProduct) {
@@ -197,10 +198,10 @@ export function computeIssueValidation(
   const narrowFailureReason = getNarrowFailureReason(parsed);
   const blocksDirectImplementationForUninitializedProduct =
     productInitializationState === "uninitialized";
+  // Linear status is authoritative: Ready for Build does not require narrow size
+  // or a prior planning comment. Uninitialized product remains a foundation gate.
   const validForDirectImplementation =
-    validForPlanning &&
-    !blocksDirectImplementationForUninitializedProduct &&
-    (narrowIssue || hasPlanningMarker);
+    validForPlanning && !blocksDirectImplementationForUninitializedProduct;
 
   const routingNotes = buildRoutingNotes(
     validForPlanning,

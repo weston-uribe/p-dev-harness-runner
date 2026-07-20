@@ -61,6 +61,24 @@ describe("run-status causal authority", () => {
     ).toBe(false);
   });
 
+  it("allows the accepting claim owner to project blocked at the same revision", () => {
+    const decision = shouldAcceptRunStatusUpdate({
+      existing: {
+        stateRevision: 0,
+        phase: "accepted",
+        outcomeClass: "accepted",
+        ownedActiveClaim: true,
+      },
+      incoming: {
+        stateRevision: 0,
+        phase: "implementation",
+        outcomeClass: "blocked",
+        ownedActiveClaim: true,
+      },
+    });
+    expect(decision.accept).toBe(true);
+  });
+
   it("round-trips authority metadata in comment bodies", () => {
     const body = buildRunStatusCommentBody({
       issueId: "issue-1",

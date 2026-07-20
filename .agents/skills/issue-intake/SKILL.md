@@ -81,11 +81,11 @@ Recommend **Linear status** (not a description section):
 | User chose Draft only | Package only |
 | Structurally incomplete | Backlog |
 | Narrow + low-risk (task ≤240 chars, AC ≤7) | Ready for Build only after operator confirms |
-| Broad, ambiguous, cross-cutting, or high-risk | Ready for Planning or Backlog |
+| Broad, ambiguous, cross-cutting, or high-risk | Prefer Ready for Planning or Backlog (advisory) |
 | Uninitialized product (metadata or marker) | Ready for Planning only |
 | Default | Backlog |
 
-**Never** recommend Ready for Build for broad or ambiguous work.
+Prefer Ready for Planning for broad or ambiguous work, but **Linear status is authoritative**: if the operator explicitly chooses Ready for Build, respect that choice and note that the harness will execute without a plan. **Never** recommend Ready for Build for uninitialized products.
 
 ### Labels (optional)
 
@@ -113,15 +113,15 @@ When project metadata reports `Product initialization: uninitialized` (or the ta
   - `Platform runtime: ...`
   - `Language framework: ...`
 
-## Narrow-issue thresholds (build-direct)
+## Narrow-issue thresholds (advisory)
 
-Direct implementation without a prior planning run requires:
+Recommend planning first when any of these fail:
 
 - Task body ≤ 240 characters
 - Acceptance criteria ≤ 7 hyphen bullets
 - Low-risk, clear scope
 
-See [`src/validate/constants.ts`](../../../src/validate/constants.ts) for canonical values. Full rules in [`prompts/issue-intake-chatgpt.md`](../../../prompts/issue-intake-chatgpt.md).
+These thresholds are **intake guidance only**. They do not fail `--intended-phase implementation`, and Ready for Build does not require a prior planning run. See [`src/validate/constants.ts`](../../../src/validate/constants.ts) and [`prompts/issue-intake-chatgpt.md`](../../../prompts/issue-intake-chatgpt.md).
 
 ## Output package
 
