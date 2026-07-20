@@ -5,7 +5,10 @@ import {
   getEligibleRevisionStatuses,
   getTransitionalStatus,
 } from "../config/status-names.js";
-import { resolveAuthoritativeLinearTeamIds } from "../config/resolve-linear-team.js";
+import {
+  resolveAuthoritativeLinearTeamIdFromConfig,
+  resolveAuthoritativeLinearTeamIds,
+} from "../config/resolve-linear-team.js";
 import { runLinearAssociationGate } from "../config/linear-association-gate.js";
 import { fetchLinearIssue } from "../linear/client.js";
 import { listIssuesByStatus } from "../linear/issue-query.js";
@@ -35,6 +38,28 @@ import {
   getDispatchEventType,
   getDispatchRepository,
 } from "../webhook/dispatch-github.js";
+
+/**
+ * Team IDs to try when loading durable workflow state for reconcile.
+ * Handoff/phases write under the config-authoritative association team, which can
+ * differ from the issue's Linear teamId in multi-team dogfood (FRE-5).
+ */
+export function reconcileWorkflowStateTeamCandidates(input: {
+  config: HarnessConfig;
+  issueTeamId?: string | null;
+}): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const candidate of [
+    input.issueTeamId?.trim(),
+    resolveAuthoritativeLinearTeamIdFromConfig(input.config),
+  ]) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    out.push(candidate);
+  }
+  return out;
+}
 
 export const MAX_RECONCILE_CANDIDATES_PER_STATUS = 25;
 export const MAX_RECONCILE_CANDIDATES_TOTAL = 100;
@@ -217,17 +242,31 @@ export async function evaluateWorkflowReconcileIssue(input: {
 
   let authoritativeState: WorkflowStateRecord | null = null;
   let stateStore: WorkflowStateStore | null = null;
-  try {
-    stateStore = await createWorkflowStateStore({
-      logDirectory: input.config.logDirectory,
-      teamId: issue.teamId ?? undefined,
-      env: process.env,
-      mode: resolveWorkflowStateStoreMode(process.env),
-    });
-    authoritativeState = await stateStore.load(issueKey);
-  } catch {
-    authoritativeState = null;
-    stateStore = null;
+  const stateTeamCandidates = reconcileWorkflowStateTeamCandidates({
+    config: input.config,
+    issueTeamId: issue.teamId,
+  });
+  const teamIdsToTry =
+    stateTeamCandidates.length > 0 ? stateTeamCandidates : [undefined];
+  for (const teamId of teamIdsToTry) {
+    try {
+      const candidateStore = await createWorkflowStateStore({
+        logDirectory: input.config.logDirectory,
+        teamId,
+        env: process.env,
+        mode: resolveWorkflowStateStoreMode(process.env),
+      });
+      const loaded = await candidateStore.load(issueKey);
+      // Prefer a store that already holds durable state; keep the last successful
+      // store as a write fallback when no record exists yet.
+      stateStore = candidateStore;
+      if (loaded) {
+        authoritativeState = loaded;
+        break;
+      }
+    } catch {
+      // try next candidate team path
+    }
   }
   const incompleteSideEffects = authoritativeState
     ? listIncompleteSideEffects(authoritativeState).map((effect) => effect.identity)
