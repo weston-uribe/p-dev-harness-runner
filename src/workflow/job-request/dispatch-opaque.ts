@@ -4,6 +4,7 @@
 
 import { GitHubClient } from "../../github/client.js";
 import {
+  resolveDispatchGithubToken,
   resolveExecutionRepository,
   resolveJobRequestRepository,
   resolveStateGithubToken,
@@ -30,7 +31,7 @@ export interface CreateEnvelopeAndDispatchInput {
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
   githubClient?: GitHubClient;
-  /** Override dispatch token (defaults to GITHUB_DISPATCH_TOKEN). */
+  /** Override dispatch token (defaults to GITHUB_DISPATCH_TOKEN ?? HARNESS_GITHUB_TOKEN). */
   dispatchToken?: string;
   reviewSubjectIdentity?: string | null;
   /** When false, skip ack lifecycle (internal/harness-owned dispatches). */
@@ -75,7 +76,7 @@ export async function createEnvelopeAndDispatch(
   }
 
   const dispatchToken =
-    input.dispatchToken?.trim() || env.GITHUB_DISPATCH_TOKEN?.trim();
+    input.dispatchToken?.trim() || resolveDispatchGithubToken(env);
   if (!dispatchToken) {
     throw new Error("missing_dispatch_token");
   }

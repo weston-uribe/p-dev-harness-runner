@@ -53,6 +53,24 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       expect(runHarness).not.toContain("harness-merge-");
     });
 
+    it("run-harness aliases HARNESS_GITHUB_TOKEN as GITHUB_DISPATCH_TOKEN for code-review dispatch", () => {
+      const runHarness = extractJobSection(workflow, "run-harness");
+      expect(runHarness).toContain(
+        "GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}",
+      );
+      expect(runHarness).toContain(
+        "GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}",
+      );
+      const gate = extractJobSection(workflow, "gate");
+      const runMerge = extractJobSection(workflow, "run-merge");
+      const syncSection = extractJobSection(workflow, "sync-production");
+      for (const section of [gate, runMerge, syncSection]) {
+        expect(section).not.toContain(
+          "GITHUB_DISPATCH_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}",
+        );
+      }
+    });
+
     it("finalize passes request id so pre-phase failures can terminalize the job request", () => {
       const runHarness = extractJobSection(workflow, "run-harness");
       const runMerge = extractJobSection(workflow, "run-merge");

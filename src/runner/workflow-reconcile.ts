@@ -10,17 +10,26 @@ import { runLinearAssociationGate } from "../config/linear-association-gate.js";
 import { fetchLinearIssue } from "../linear/client.js";
 import { listIssuesByStatus } from "../linear/issue-query.js";
 import { markRevisionPendingPmFeedback } from "../linear/run-status-comment.js";
-import { createLinearClient, listIssueComments } from "../linear/writer.js";
+import {
+  createLinearClient,
+  listIssueComments,
+  transitionIssueStatus,
+} from "../linear/writer.js";
 import { evaluateRevisionReconcile } from "./revision-reconcile.js";
 import { evaluateMergeReconcile } from "./merge-reconcile.js";
 import { resolveRoute } from "./resolve-route.js";
 import type { RunPhase } from "../types/run.js";
 import type { WorkflowStateRecord } from "../workflow/state/types.js";
+import type { WorkflowStateStore } from "../workflow/state/index.js";
 import { listIncompleteSideEffects } from "../workflow/state/side-effects.js";
 import {
   createWorkflowStateStore,
   resolveWorkflowStateStoreMode,
 } from "../workflow/state/factory.js";
+import {
+  ensureCodeReviewJobDispatched,
+} from "../workflow/code-review-dispatch-effect.js";
+import { resolveDispatchGithubToken } from "../public-execution/runtime-repos.js";
 import {
   dispatchRepositoryEvent,
   getDispatchEventType,
@@ -207,8 +216,9 @@ export async function evaluateWorkflowReconcileIssue(input: {
   }
 
   let authoritativeState: WorkflowStateRecord | null = null;
+  let stateStore: WorkflowStateStore | null = null;
   try {
-    const stateStore = await createWorkflowStateStore({
+    stateStore = await createWorkflowStateStore({
       logDirectory: input.config.logDirectory,
       teamId: issue.teamId ?? undefined,
       env: process.env,
@@ -217,6 +227,7 @@ export async function evaluateWorkflowReconcileIssue(input: {
     authoritativeState = await stateStore.load(issueKey);
   } catch {
     authoritativeState = null;
+    stateStore = null;
   }
   const incompleteSideEffects = authoritativeState
     ? listIncompleteSideEffects(authoritativeState).map((effect) => effect.identity)
@@ -234,6 +245,7 @@ export async function evaluateWorkflowReconcileIssue(input: {
   let reason = route.reconcileReason ?? (route.shouldRun ? "eligible" : "not_eligible");
   let pendingRecorded = false;
   let dispatched = false;
+  let codeReviewRecoveryHandled = false;
   let pmFeedbackCommentId = route.pmFeedbackCommentId ?? null;
   let mergePrUrl = route.mergePrUrl ?? null;
 
@@ -314,16 +326,23 @@ export async function evaluateWorkflowReconcileIssue(input: {
   }
 
   // Explicit Code Review recovery: do not rely on Linear webhooks the harness owns.
+  // Also recovers Blocked issues whose durable phase is still code_review (FRE-5).
+  const linearStatusLower = (issue.status ?? "").trim().toLowerCase();
+  const durableCodeReviewEligible =
+    authoritativeState?.currentPhaseId === "code_review" &&
+    Boolean(authoritativeState.latestImplementationArtifact) &&
+    (linearStatusLower === "code review" || linearStatusLower === "blocked");
   if (
-    (issue.status ?? "").trim().toLowerCase() === "code review" &&
-    authoritativeState?.latestImplementationArtifact &&
-    action === "noop"
+    durableCodeReviewEligible &&
+    authoritativeState &&
+    stateStore &&
+    (action === "noop" || action === "replay_side_effects")
   ) {
     const { buildCodeReviewSubjectIdentity } = await import(
       "../workflow/subject-identities.js"
     );
     const { isActiveRunLeaseExpired } = await import("../workflow/state/apply.js");
-    const artifact = authoritativeState.latestImplementationArtifact;
+    const artifact = authoritativeState.latestImplementationArtifact!;
     const reviewCycle = authoritativeState.cycleCounters.code_review_cycles ?? 0;
     const subjectIdentity = buildCodeReviewSubjectIdentity({
       issueKey,
@@ -343,22 +362,69 @@ export async function evaluateWorkflowReconcileIssue(input: {
       action = "dispatch";
       reason = "code_review_subject_missing_active_or_completed";
       if (input.dispatch && !input.dryRun) {
-        const { createCodeReviewJobAndDispatch } = await import(
-          "../workflow/job-request/dispatch-opaque.js"
-        );
-        await createCodeReviewJobAndDispatch({
+        const dispatchResult = await ensureCodeReviewJobDispatched({
+          store: stateStore,
           issueKey,
           reviewSubjectIdentity: subjectIdentity,
+          ownerGeneration: `reconcile:${issueKey}:${Date.now()}`,
+          state: authoritativeState,
         });
-        dispatched = true;
+        authoritativeState = dispatchResult.state;
+        if (dispatchResult.outcome === "missing_dispatch_token") {
+          return {
+            issueKey,
+            linearStatus: issue.status,
+            phase: "code_review",
+            action: "blocker",
+            reason: "missing_dispatch_token",
+            shouldRun: true,
+            dispatched: false,
+            pendingRecorded,
+            incompleteSideEffectIdentities: listIncompleteSideEffects(
+              dispatchResult.state,
+            ).map((effect) => effect.identity),
+            workflowStateRevision: dispatchResult.state.stateRevision,
+            pmFeedbackCommentId,
+            mergePrUrl,
+          };
+        }
+        if (
+          dispatchResult.outcome === "dispatched" ||
+          dispatchResult.outcome === "request_already_present" ||
+          dispatchResult.outcome === "already_dispatched"
+        ) {
+          codeReviewRecoveryHandled = true;
+          dispatched = dispatchResult.httpDispatched;
+          if (
+            dispatchResult.outcome === "request_already_present" ||
+            dispatchResult.outcome === "already_dispatched"
+          ) {
+            reason = "code_review_request_already_present";
+          }
+          // Project Code Review to Linear only after durable dispatch proof.
+          if (linearStatusLower === "blocked") {
+            const client = createLinearClient(input.linearApiKey);
+            await transitionIssueStatus(client, issue, "Code Review");
+          }
+        } else if (dispatchResult.outcome === "claim_lost") {
+          codeReviewRecoveryHandled = true;
+          action = "noop";
+          reason = "code_review_dispatch_claim_lost";
+        }
       }
     }
   }
 
   const shouldRun = action === "dispatch";
 
-  if (shouldRun && input.dispatch && !input.dryRun && !dispatched) {
-    const token = process.env.GITHUB_DISPATCH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (
+    shouldRun &&
+    input.dispatch &&
+    !input.dryRun &&
+    !dispatched &&
+    !codeReviewRecoveryHandled
+  ) {
+    const token = resolveDispatchGithubToken(process.env);
     if (!token) {
       return {
         issueKey,

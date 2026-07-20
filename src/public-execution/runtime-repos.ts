@@ -62,6 +62,21 @@ export function resolveStateGithubToken(
   return githubToken || null;
 }
 
+/**
+ * Resolve the credential used for repository_dispatch.
+ * Policy: GITHUB_DISPATCH_TOKEN ?? HARNESS_GITHUB_TOKEN (never GITHUB_TOKEN).
+ */
+export function resolveDispatchGithubToken(
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const dispatchToken = env.GITHUB_DISPATCH_TOKEN?.trim();
+  if (dispatchToken) {
+    return dispatchToken;
+  }
+  const harnessToken = env.HARNESS_GITHUB_TOKEN?.trim();
+  return harnessToken || null;
+}
+
 export function resolveExecutionRepository(
   env: Record<string, string | undefined> = process.env,
 ): { owner: string; repo: string } | null {

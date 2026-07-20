@@ -26,6 +26,7 @@ export type ErrorClassification =
   | "agent_policy_violation"
   | "missing_plan_artifact"
   | "validation_failed"
+  | "configuration_error"
   | "pr_not_created"
   | "branch_without_pr"
   | "wrong_target_repo"

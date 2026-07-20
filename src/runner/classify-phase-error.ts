@@ -37,6 +37,12 @@ export function classifyUnexpectedPhaseError(
     return error.classification ?? "validation_failed";
   }
   const message = extractErrorMessage(error);
+  if (
+    message === "missing_dispatch_token" ||
+    message.startsWith("missing_dispatch_token:")
+  ) {
+    return "configuration_error";
+  }
   if (LINEAR_WRITE_PATTERNS.some((pattern) => pattern.test(message))) {
     return "linear_write_failure";
   }
