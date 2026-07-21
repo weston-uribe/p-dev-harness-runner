@@ -1,4 +1,10 @@
 import { resolvePhaseWorkflowStateStore } from "../../workflow/state/resolve-store.js";
+import { buildPlanReviewSubjectIdentity } from "../../workflow/subject-identities.js";
+import {
+  ensurePlanReviewDispatchPending,
+  ensurePlanReviewJobDispatched,
+  MISSING_PLAN_REVIEW_DISPATCH_TOKEN_MESSAGE,
+} from "../../workflow/plan-review-dispatch-effect.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import {
   DEFAULT_PLANNING_TIMEOUT_SECONDS,
@@ -844,6 +850,7 @@ export async function executePlanningPhase(
         planGenerationId: planArtifact.planGenerationId,
         planArtifactHash: planArtifact.planArtifactHash,
       },
+      { planReviewNext: readiness.effectiveEnabled },
     );
     commentsWritten.push(observed.assistantText);
     await events.log("linear_comment_posted", "info", {
@@ -889,6 +896,34 @@ export async function executePlanningPhase(
         });
 
     const nextStatus = planningSuccess.statusName;
+    const landsOnPlanReview =
+      readiness.effectiveEnabled &&
+      nextStatus.trim().toLowerCase() === "plan review";
+
+    let durableState = applied.state ?? priorState;
+    let planReviewSubjectIdentity: string | null = null;
+    if (landsOnPlanReview) {
+      const reviewCycle = durableState.cycleCounters.plan_review_cycles ?? 0;
+      planReviewSubjectIdentity = buildPlanReviewSubjectIdentity({
+        issueKey: options.issueKey,
+        planGenerationId: planArtifact.planGenerationId,
+        planHash: planArtifact.planArtifactHash,
+        reviewCycle,
+      });
+      // Crash boundary: pending effect before Linear projection.
+      durableState = await ensurePlanReviewDispatchPending({
+        store,
+        issueKey: options.issueKey,
+        reviewSubjectIdentity: planReviewSubjectIdentity,
+        state: durableState,
+      });
+      await events.log("plan_review_dispatch_pending", "info", {
+        planReviewSubjectIdentity,
+        planGenerationId: planArtifact.planGenerationId,
+        planArtifactHash: planArtifact.planArtifactHash,
+      });
+    }
+
     await transitionIssueStatus(client, issue, nextStatus);
     linearStatusAfter = nextStatus;
     await events.log("linear_status_changed", "info", {
@@ -906,6 +941,28 @@ export async function executePlanningPhase(
         bypassAnalytics.event,
         bypassAnalytics.properties,
       );
+    }
+
+    if (landsOnPlanReview && planReviewSubjectIdentity) {
+      const dispatchResult = await ensurePlanReviewJobDispatched({
+        store,
+        issueKey: options.issueKey,
+        reviewSubjectIdentity: planReviewSubjectIdentity,
+        ownerGeneration: runId,
+        state: durableState,
+      });
+      durableState = dispatchResult.state;
+      if (dispatchResult.outcome === "missing_dispatch_token") {
+        throw new Error(MISSING_PLAN_REVIEW_DISPATCH_TOKEN_MESSAGE);
+      }
+      await events.log("plan_review_job_dispatched", "info", {
+        planReviewSubjectIdentity,
+        reviewRequestId: dispatchResult.reviewRequestId,
+        outcome: dispatchResult.outcome,
+        httpDispatched: dispatchResult.httpDispatched,
+        planGenerationId: planArtifact.planGenerationId,
+        planArtifactHash: planArtifact.planArtifactHash,
+      });
     }
 
     const afterIssue = await fetchLinearIssue(options.issueKey, linearApiKey);

@@ -80,7 +80,8 @@ export type WorkflowSideEffectKind =
   | "handoff_marker"
   | "build_complete_marker"
   | "pm_handoff_marker"
-  | "code_review_dispatch";
+  | "code_review_dispatch"
+  | "plan_review_dispatch";
 
 export type WorkflowSideEffectStatus =
   | "pending"
@@ -98,7 +99,7 @@ export interface WorkflowSideEffectRecord {
   completedAt?: string;
   /** Owner generation claiming a dispatching effect (run id / reconcile generation). */
   ownerGeneration?: string;
-  /** Deterministic job-request id for code_review_dispatch (`cr-subject:…`). */
+  /** Deterministic job-request id for review dispatch (`cr-subject:…` / `pr-subject:…` delivery id or opaque `dlv-…`). */
   reviewRequestId?: string;
   claimedAt?: string;
   dispatchedAt?: string;
@@ -106,6 +107,8 @@ export interface WorkflowSideEffectRecord {
   githubDeliveryId?: string | null;
   blockedReason?: string;
   blockedAt?: string;
+  /** Count of opaque HTTP dispatch attempts for this effect. */
+  dispatchAttemptCount?: number;
 }
 
 export interface WorkflowStateRecord {
@@ -135,6 +138,15 @@ export interface WorkflowStateRecord {
   phaseExecutionFreeze: PhaseExecutionFreeze | null;
   /** Current review subject identity (plan/code) when a review loop owns the issue. */
   activeReviewSubjectIdentity?: string | null;
+  /**
+   * Review subject selected for Plan Review dispatch (does not imply an agent exists).
+   * Distinct from activeReviewSubjectIdentity / lease / reviewerAgentId.
+   */
+  planReviewSubjectIdentity?: string | null;
+  /** Cursor Plan Review agent id when created (null until agent create persists). */
+  planReviewerAgentId?: string | null;
+  /** Harness run id that owns the Plan Reviewer agent prompt. */
+  planReviewerRunId?: string | null;
   /** Accepted decision identities keyed by review subject (subject → decisionIdentity). */
   acceptedReviewSubjects?: Record<string, string>;
   /** Current handoff subject identity for idempotent handoff. */
@@ -194,6 +206,9 @@ export function createEmptyWorkflowState(input: {
     latestImplementationArtifact: null,
     phaseExecutionFreeze: null,
     activeReviewSubjectIdentity: null,
+    planReviewSubjectIdentity: null,
+    planReviewerAgentId: null,
+    planReviewerRunId: null,
     acceptedReviewSubjects: {},
     handoffSubjectIdentity: null,
     sideEffects: [],

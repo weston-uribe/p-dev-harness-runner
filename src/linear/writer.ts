@@ -108,8 +108,9 @@ export async function postPlanningComment(
   issueId: string,
   planBody: string,
   footer: HarnessCommentFooterInput,
+  options?: { planReviewNext?: boolean },
 ): Promise<string> {
-  const body = formatPlanningComment(planBody, footer);
+  const body = formatPlanningComment(planBody, footer, options);
   return postIssueComment(client, issueId, body);
 }
 

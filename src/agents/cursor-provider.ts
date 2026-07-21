@@ -5,6 +5,7 @@ import {
   createPlanReviewCloudAgent,
   createPlanningCloudAgent,
   disposeCloudAgent,
+  resumePlanReviewCloudAgent,
 } from "../cursor/agent-factory.js";
 import { resolveModelId as cursorResolveModelId } from "../cursor/model.js";
 import { sendAndObserve as cursorSendAndObserve } from "../cursor/run-observer.js";
@@ -96,6 +97,14 @@ export const cursorAgentProvider: AgentProvider = {
 
   async createPlanReviewAgent(params: PlanningAgentParams): Promise<AgentHandle> {
     const agent = await createPlanReviewCloudAgent(params);
+    return wrapCursorAgent(agent);
+  },
+
+  async resumePlanReviewAgent(input: {
+    apiKey: string;
+    agentId: string;
+  }): Promise<AgentHandle> {
+    const agent = await resumePlanReviewCloudAgent(input);
     return wrapCursorAgent(agent);
   },
 

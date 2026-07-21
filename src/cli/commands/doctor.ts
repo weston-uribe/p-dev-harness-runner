@@ -350,6 +350,70 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     });
   }
 
+  {
+    const dispatchToken =
+      process.env.GITHUB_DISPATCH_TOKEN?.trim() ||
+      process.env.HARNESS_GITHUB_TOKEN?.trim();
+    checks.push({
+      label: "GITHUB_DISPATCH_TOKEN (or HARNESS_GITHUB_TOKEN) set",
+      ok: Boolean(dispatchToken),
+      detail: dispatchToken
+        ? "dispatch token available for opaque repository_dispatch"
+        : "required for Plan Review / Code Review / reconcile opaque dispatch",
+    });
+  }
+
+  try {
+    const { inspectReconcileWorkflowSource, RECONCILE_WORKFLOW_RELATIVE_PATH } =
+      await import("../../workflow/reconcile-health.js");
+    const { loadReconcileHeartbeat } = await import(
+      "../../workflow/reconcile-heartbeat-store.js"
+    );
+    const { evaluateReconcileHeartbeatHealth } = await import(
+      "../../workflow/reconcile-health.js"
+    );
+    const fs = await import("node:fs/promises");
+    const workflowPath = path.join(
+      process.cwd(),
+      RECONCILE_WORKFLOW_RELATIVE_PATH,
+    );
+    let workflowContent = "";
+    try {
+      workflowContent = await fs.readFile(workflowPath, "utf8");
+    } catch {
+      workflowContent = "";
+    }
+    const workflowInspect = inspectReconcileWorkflowSource(workflowContent);
+    checks.push({
+      label: "Reconcile workflow present and scheduled",
+      ok:
+        Boolean(workflowContent) &&
+        workflowInspect.hasSchedule &&
+        workflowInspect.hasRequiredCron &&
+        workflowInspect.invokesReconcileCommand,
+      detail: workflowContent
+        ? workflowInspect.detail
+        : `Missing ${RECONCILE_WORKFLOW_RELATIVE_PATH}`,
+    });
+
+    const heartbeat = await loadReconcileHeartbeat();
+    const heartbeatHealth = evaluateReconcileHeartbeatHealth(heartbeat);
+    checks.push({
+      label: "Reconcile heartbeat fresh",
+      ok: heartbeatHealth.ok,
+      skipped: !process.env.P_DEV_STATE_GITHUB_TOKEN && !heartbeat,
+      detail: heartbeatHealth.ok
+        ? `Heartbeat age ${Math.round((heartbeatHealth.ageMs ?? 0) / 60000)}m`
+        : heartbeatHealth.detail,
+    });
+  } catch (error) {
+    checks.push({
+      label: "Reconcile health checks",
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   if (config) {
     const cwd = path.dirname(path.resolve(options.configPath));
     const dispatchRepo = await resolveHarnessDispatchRepo({ cwd });

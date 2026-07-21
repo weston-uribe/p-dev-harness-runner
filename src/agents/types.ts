@@ -145,6 +145,11 @@ export interface AgentProvider {
 
   createPlanningAgent(params: PlanningAgentParams): Promise<AgentHandle>;
   createPlanReviewAgent(params: PlanningAgentParams): Promise<AgentHandle>;
+  /** Resume an existing Plan Reviewer agent when durable agent id is present. */
+  resumePlanReviewAgent?(input: {
+    apiKey: string;
+    agentId: string;
+  }): Promise<AgentHandle>;
   createCodeReviewAgent(params: CodeReviewAgentParams): Promise<AgentHandle>;
   createCodeRevisionAgent(params: CodeRevisionAgentParams): Promise<AgentHandle>;
   createImplementationAgent(params: ImplementationAgentParams): Promise<AgentHandle>;

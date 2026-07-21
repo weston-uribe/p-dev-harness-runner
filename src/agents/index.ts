@@ -29,6 +29,21 @@ export function createPlanReviewAgent(
   return getAgentProvider(params.config).createPlanReviewAgent(params);
 }
 
+export async function resumePlanReviewAgent(input: {
+  apiKey: string;
+  agentId: string;
+  config: HarnessConfig;
+}): Promise<AgentHandle> {
+  const provider = getAgentProvider(input.config);
+  if (!provider.resumePlanReviewAgent) {
+    throw new Error("Agent provider does not support Plan Review resume");
+  }
+  return provider.resumePlanReviewAgent({
+    apiKey: input.apiKey,
+    agentId: input.agentId,
+  });
+}
+
 export function createCodeReviewAgent(
   params: CodeReviewAgentParams,
 ): Promise<AgentHandle> {

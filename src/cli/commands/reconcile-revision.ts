@@ -7,11 +7,8 @@ import {
   evaluateRevisionReconcile,
   type RevisionReconcileResult,
 } from "../../runner/revision-reconcile.js";
-import {
-  dispatchRepositoryEvent,
-  getDispatchEventType,
-  getDispatchRepository,
-} from "../../webhook/dispatch-github.js";
+import { createReconcileJobAndDispatch } from "../../workflow/job-request/dispatch-reconcile.js";
+import { resolveDispatchGithubToken } from "../../public-execution/runtime-repos.js";
 
 export interface ReconcileRevisionCommandOptions {
   issueKey?: string;
@@ -75,35 +72,27 @@ export async function runReconcileRevisionCommand(
       }
 
       if (reconcile.action === "dispatch_revision" && options.dispatch) {
-        const token = process.env.GITHUB_DISPATCH_TOKEN ?? process.env.GITHUB_TOKEN;
+        const token = resolveDispatchGithubToken(process.env);
         if (!token) {
           console.error(
-            "GITHUB_DISPATCH_TOKEN or GITHUB_TOKEN is required for --dispatch",
+            "GITHUB_DISPATCH_TOKEN (or HARNESS_GITHUB_TOKEN) is required for --dispatch",
           );
           return EXIT_CONFIG;
         }
 
-        await dispatchRepositoryEvent({
-          token,
-          repository: getDispatchRepository(),
-          eventType: getDispatchEventType(),
-          clientPayload: {
-            issueKey,
-            issueId: issue.id,
-            issueUrl: issue.url,
-            action: "update",
-            statusName: issue.status,
-            previousStatusName: null,
-            linearDeliveryId: null,
-            linearWebhookId: null,
-            receivedAt: new Date().toISOString(),
-            meta: {
-              triggerKind: "issue_status",
-              pmFeedbackCommentId: reconcile.pmFeedbackCommentId,
-            },
-          },
+        const opaque = await createReconcileJobAndDispatch({
+          issueKey,
+          phase: "revision",
+          workflowStateRevision: null,
+          linearStatus: issue.status,
+          detail: reconcile.pmFeedbackCommentId,
+          dispatchToken: token,
         });
-        result.dispatched = true;
+        if (!opaque.requestId?.trim()) {
+          console.error("opaque_dispatch_missing_request_id");
+          return EXIT_RUN_FAILURE;
+        }
+        result.dispatched = opaque.dispatched || opaque.duplicate;
       }
     }
 

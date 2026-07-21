@@ -257,6 +257,7 @@ describe("executePlanningPhase", () => {
         cursorRunId: "run-repaired",
         phase: "planning",
       }),
+      { planReviewNext: false },
     );
 
     const planningResultPath = getPlanningResultPath(result.runDirectory);

@@ -330,3 +330,15 @@ export async function resumeBuilderCloudAgent(
   }
   return Agent.resume(params.agentId, { apiKey: params.apiKey });
 }
+
+/** Resume an existing Plan Reviewer agent (never creates a second reviewer). */
+export async function resumePlanReviewCloudAgent(params: {
+  apiKey: string;
+  agentId: string;
+}): Promise<SDKAgent> {
+  const info = await Agent.get(params.agentId, { apiKey: params.apiKey });
+  if (info.archived) {
+    await Agent.unarchive(params.agentId, { apiKey: params.apiKey });
+  }
+  return Agent.resume(params.agentId, { apiKey: params.apiKey });
+}

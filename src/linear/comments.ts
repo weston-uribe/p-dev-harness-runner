@@ -310,8 +310,12 @@ function buildGithubActionsLink(
 export function formatPlanningComment(
   planBody: string,
   footer: HarnessCommentFooterInput,
+  options?: { planReviewNext?: boolean },
 ): string {
   const summary = summarizeAgentText(planBody);
+  const nextStep = options?.planReviewNext
+    ? "Plan Review will start automatically. No PM action is needed until the issue reaches **PM Review**."
+    : "Implementation will start automatically. No PM action is needed until the issue reaches **PM Review**.";
   return buildHarnessComment({
     phaseLabel: getCompletionLabel("planning"),
     pmSection: [
@@ -319,7 +323,7 @@ export function formatPlanningComment(
       "",
       summary || "_No plan summary reported._",
       "",
-      "Implementation will start automatically. No PM action is needed until the issue reaches **PM Review**.",
+      nextStep,
     ],
     engineerSection: [
       ...formatBulletList([

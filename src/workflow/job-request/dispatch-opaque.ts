@@ -203,4 +203,27 @@ export async function createCodeReviewJobAndDispatch(input: {
   });
 }
 
+/** Create + dispatch an explicit plan_review job (no Linear ack; harness-owned). */
+export async function createPlanReviewJobAndDispatch(input: {
+  issueKey: string;
+  reviewSubjectIdentity: string;
+  env?: Record<string, string | undefined>;
+  fetchImpl?: typeof fetch;
+  githubClient?: GitHubClient;
+  dispatchToken?: string;
+}): Promise<CreateEnvelopeAndDispatchResult> {
+  return createEnvelopeAndDispatch({
+    issueKey: input.issueKey,
+    phase: "plan_review",
+    triggerSource: "harness_plan_review_handoff",
+    linearDeliveryId: `pr-subject:${input.reviewSubjectIdentity}`,
+    reviewSubjectIdentity: input.reviewSubjectIdentity,
+    ackRequired: false,
+    env: input.env,
+    fetchImpl: input.fetchImpl,
+    githubClient: input.githubClient,
+    dispatchToken: input.dispatchToken,
+  });
+}
+
 export { buildJobRequestRecord };
