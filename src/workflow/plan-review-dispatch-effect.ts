@@ -369,18 +369,25 @@ export async function recoverUnresolvedPlanReviewDispatch(input: {
 
   try {
     const jobStore = await createGithubJobRequestStoreFromEnv(env);
-    let reopened =
-      (await reopenFailedJobRequestForRetry(jobStore, {
-        requestId: reviewRequestId,
-      })) ??
-      (await reopenFalseDuplicateJobRequestForRetry(jobStore, {
-        requestId: reviewRequestId,
-        durableCompletionEvidenceAbsent: true,
-      }));
-    if (!reopened) {
-      // Also recover when envelope is still claimed/failed under other codes:
-      // load and force reopen only for failed+retryable already handled above.
+    const existing = await jobStore.load(reviewRequestId);
+    if (!existing) {
       return null;
+    }
+    // Pending/claimed with a finished reviewer + no accepted decision means the
+    // prior execution terminalized without binding a decision (FRE-8). Redispatch
+    // the same subject/request so the phase can reparse artifacts / repair.
+    if (existing.state !== "pending" && existing.state !== "claimed") {
+      const reopened =
+        (await reopenFailedJobRequestForRetry(jobStore, {
+          requestId: reviewRequestId,
+        })) ??
+        (await reopenFalseDuplicateJobRequestForRetry(jobStore, {
+          requestId: reviewRequestId,
+          durableCompletionEvidenceAbsent: true,
+        }));
+      if (!reopened) {
+        return null;
+      }
     }
     const token = resolveDispatchGithubToken(env);
     if (!token) {
