@@ -27,17 +27,29 @@ import { PublicSafeLogger } from "../../public-execution/logger.js";
 import { isPublicRunnerMode } from "../../public-execution/mode.js";
 import {
   doctorChecksFailed,
+  doctorChecksDegraded,
   formatDoctorCheckLine,
+  sanitizeDoctorFailedChecks,
+  summarizeDoctorChecksBySeverity,
   type DoctorCheckResult,
+  type DoctorCheckSeverity,
 } from "../../setup/doctor-summary.js";
 import { createLiveGitHubRemoteSetupProvider } from "../../setup/github-remote-setup-live.js";
 import { previewTargetWorkflowSetup } from "../../setup/target-workflow-setup.js";
 import { workflowStatusNeedsUpgrade } from "../../setup/target-workflow-contract.js";
 import { EXIT_CONFIG, EXIT_SUCCESS } from "../exit-codes.js";
 
+export type DoctorProfile = "full" | "merge" | "reconciler";
+
 export interface DoctorOptions {
   configPath: string;
-  profile?: "full" | "merge";
+  profile?: DoctorProfile;
+}
+
+function reconcileHealthSeverity(
+  profile: DoctorProfile,
+): DoctorCheckSeverity {
+  return profile === "reconciler" ? "critical" : "degraded";
 }
 
 export async function runDoctor(options: DoctorOptions): Promise<number> {
@@ -192,6 +204,8 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     checks.push({
       label: "harness.config.json valid",
       ok: false,
+      severity: "critical",
+      classification: "invalid_harness_config",
       detail: error instanceof Error ? error.message : String(error),
     });
   }
@@ -208,6 +222,8 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
       checks.push({
         label: "LINEAR_API_KEY set",
         ok: false,
+        severity: "critical",
+        classification: "linear_auth_failure",
         detail: error instanceof Error ? error.message : String(error),
       });
     }
@@ -215,6 +231,8 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     checks.push({
       label: "LINEAR_API_KEY set",
       ok: false,
+      severity: "critical",
+      classification: "missing_linear_api_key",
       detail: "required for live planning runs",
     });
   }
@@ -274,17 +292,23 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
         detail: `warn: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
-  } else if (profile === "merge") {
+  } else if (profile === "merge" || profile === "reconciler") {
     checks.push({
       label: "CURSOR_API_KEY set",
       ok: true,
       skipped: true,
-      detail: "required only when merge integration repair needs a Cursor agent",
+      severity: "informational",
+      detail:
+        profile === "merge"
+          ? "required only when merge integration repair needs a Cursor agent"
+          : "not required for reconciler health profile",
     });
   } else {
     checks.push({
       label: "CURSOR_API_KEY set",
       ok: false,
+      severity: "critical",
+      classification: "missing_cursor_api_key",
       detail: "required for live planning runs",
     });
   }
@@ -301,6 +325,8 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
       checks.push({
         label: "GITHUB_TOKEN set",
         ok: false,
+        severity: "critical",
+        classification: "github_auth_failure",
         detail: error instanceof Error ? error.message : String(error),
       });
     }
@@ -346,6 +372,8 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     checks.push({
       label: "GITHUB_TOKEN set",
       ok: false,
+      severity: "critical",
+      classification: "missing_github_token",
       detail: "required for handoff runs (Milestone 4+)",
     });
   }
@@ -357,6 +385,10 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     checks.push({
       label: "GITHUB_DISPATCH_TOKEN (or HARNESS_GITHUB_TOKEN) set",
       ok: Boolean(dispatchToken),
+      severity: "critical",
+      classification: dispatchToken
+        ? "dispatch_token_present"
+        : "missing_dispatch_token",
       detail: dispatchToken
         ? "dispatch token available for opaque repository_dispatch"
         : "required for Plan Review / Code Review / reconcile opaque dispatch",
@@ -384,13 +416,19 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
       workflowContent = "";
     }
     const workflowInspect = inspectReconcileWorkflowSource(workflowContent);
+    const reconcileOk =
+      Boolean(workflowContent) &&
+      workflowInspect.hasSchedule &&
+      workflowInspect.hasRequiredCron &&
+      workflowInspect.invokesReconcileCommand;
+    const reconcileSeverity = reconcileHealthSeverity(profile);
     checks.push({
       label: "Reconcile workflow present and scheduled",
-      ok:
-        Boolean(workflowContent) &&
-        workflowInspect.hasSchedule &&
-        workflowInspect.hasRequiredCron &&
-        workflowInspect.invokesReconcileCommand,
+      ok: reconcileOk,
+      severity: reconcileOk ? "informational" : reconcileSeverity,
+      classification: reconcileOk
+        ? "reconcile_workflow_ok"
+        : "reconcile_workflow_incomplete",
       detail: workflowContent
         ? workflowInspect.detail
         : `Missing ${RECONCILE_WORKFLOW_RELATIVE_PATH}`,
@@ -402,13 +440,32 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
       heartbeatHealth.ageMs != null
         ? Math.round(heartbeatHealth.ageMs / 60000)
         : null;
+    const heartbeatSkipped =
+      !process.env.P_DEV_STATE_GITHUB_TOKEN && !heartbeat;
+    const heartbeatSeverity = reconcileHealthSeverity(profile);
+    const lastRunId =
+      heartbeat?.lastWorkflowRunId ?? heartbeat?.workflowRunId ?? null;
+    const recoveryHint =
+      "Run npm run harness:reconcile-workflow (or dispatch Harness Reconcile Stranded Issues). Primary webhook phases continue when critical deps are healthy.";
     checks.push({
       label: "Reconcile heartbeat fresh",
       ok: heartbeatHealth.ok,
-      skipped: !process.env.P_DEV_STATE_GITHUB_TOKEN && !heartbeat,
+      skipped: heartbeatSkipped,
+      severity: heartbeatSkipped
+        ? "informational"
+        : heartbeatHealth.ok
+          ? "informational"
+          : heartbeatSeverity,
+      classification: heartbeatHealth.ok
+        ? "reconcile_heartbeat_fresh"
+        : heartbeatHealth.reason === "stale"
+          ? "reconcile_heartbeat_stale"
+          : heartbeatHealth.reason === "missing"
+            ? "reconcile_heartbeat_missing"
+            : "reconcile_heartbeat_invalid",
       detail: heartbeatHealth.ok
-        ? `Heartbeat age ${ageMinutes}m; lastSuccessfulScanAt=${heartbeat?.lastSuccessfulScanAt ?? heartbeat?.finishedAt}; dispatchEnabled=${heartbeat?.dispatchEnabled ?? "?"}; outcome=${heartbeat?.outcome ?? "success"}`
-        : `${heartbeatHealth.detail}${heartbeat?.lastFailure ? ` lastFailure=${heartbeat.lastFailure}` : ""}${heartbeat?.lastSuccessfulScanAt ? ` lastSuccessfulScanAt=${heartbeat.lastSuccessfulScanAt}` : ""}`,
+        ? `Heartbeat age ${ageMinutes}m; lastSuccessfulScanAt=${heartbeat?.lastSuccessfulScanAt ?? heartbeat?.finishedAt}; lastWorkflowRunId=${lastRunId ?? "?"}; dispatchEnabled=${heartbeat?.dispatchEnabled ?? "?"}; outcome=${heartbeat?.lastOutcome ?? heartbeat?.outcome ?? "success"}`
+        : `${heartbeatHealth.detail}${lastRunId ? ` lastWorkflowRunId=${lastRunId}` : ""}${heartbeat?.lastFailure ? ` lastFailure=${heartbeat.lastFailure}` : ""}${heartbeat?.lastSuccessfulScanAt ? ` lastSuccessfulScanAt=${heartbeat.lastSuccessfulScanAt}` : ""}. ${recoveryHint}`,
     });
     if (config) {
       const { resolveAuthoritativeLinearTeamIdFromConfig, resolveAuthoritativeLinearTeamIds } =
@@ -424,6 +481,7 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
         checks.push({
           label: "Multi-team workflow-state association path",
           ok: true,
+          severity: "informational",
           detail: `Writers use config-authoritative team path first (${authoritative}${first?.teamKey ? ` / ${first.teamKey}` : ""}). Issues on other configured teams (${allTeams.filter((t) => t !== authoritative).join(", ") || "none"}) reuse that path via candidate search; do not expect a per-issue-team duplicate record.`,
         });
       }
@@ -432,6 +490,8 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     checks.push({
       label: "Reconcile health checks",
       ok: false,
+      severity: reconcileHealthSeverity(profile),
+      classification: "reconcile_health_check_error",
       detail: error instanceof Error ? error.message : String(error),
     });
   }
@@ -496,22 +556,46 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     }
   }
 
+  const tallies = summarizeDoctorChecksBySeverity(checks);
+  const criticalFailed = doctorChecksFailed(checks);
+  const degraded = doctorChecksDegraded(checks);
+  const sanitizedFailures = sanitizeDoctorFailedChecks(checks);
+
   if (isPublicRunnerMode()) {
-    const failed = checks.filter((check) => !check.ok && !check.skipped).length;
-    const skipped = checks.filter((check) => check.skipped).length;
-    const passed = checks.length - failed - skipped;
     new PublicSafeLogger().log({
       phase: "doctor",
-      outcome: failed > 0 ? "failure" : "success",
-      errorCode: failed > 0 ? "doctor_checks_failed" : undefined,
-      retryCount: passed,
-      noops: skipped,
+      outcome: criticalFailed ? "failure" : "success",
+      errorCode: criticalFailed
+        ? "doctor_checks_failed"
+        : degraded
+          ? "doctor_degraded"
+          : undefined,
+      retryCount: tallies.passed,
+      noops: tallies.skipped,
+      blockers: tallies.critical,
+      success: !criticalFailed,
     });
+    if (sanitizedFailures.length > 0) {
+      // Sanitized labels only — no secrets/details in public mode.
+      console.log(
+        JSON.stringify({
+          phase: "doctor",
+          publicEventType: "doctor_failed_checks",
+          failedChecks: sanitizedFailures,
+          degraded: tallies.degraded,
+        }),
+      );
+    }
   } else {
     for (const check of checks) {
       console.log(formatDoctorCheckLine(check));
     }
+    if (degraded && !criticalFailed) {
+      console.log(
+        `⚠ Doctor health degraded (${tallies.degraded} check(s)); phase execution not blocked.`,
+      );
+    }
   }
 
-  return doctorChecksFailed(checks) ? EXIT_CONFIG : EXIT_SUCCESS;
+  return criticalFailed ? EXIT_CONFIG : EXIT_SUCCESS;
 }

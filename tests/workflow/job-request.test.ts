@@ -9,7 +9,11 @@ import {
 import {
   claimJobRequest,
   completeJobRequest,
+  failJobRequest,
+  failStalePrePhaseClaim,
+  isStalePrePhaseClaim,
   JobRequestError,
+  reopenFailedJobRequestForRetry,
 } from "../../src/workflow/job-request/claim.js";
 import { GithubJobRequestStore } from "../../src/workflow/job-request/store.js";
 
@@ -210,5 +214,73 @@ describe("GithubJobRequestStore lifecycle", () => {
       code: "malformed",
       message: expect.not.stringMatching(/TT-8/),
     });
+  });
+
+  it("terminalizes doctor failure and reopens for reconcile reclaim", async () => {
+    const { client } = createFakeGitHubClient();
+    const store = new GithubJobRequestStore({
+      client: client as never,
+      owner: "state-owner",
+      repo: "state-repo",
+    });
+
+    const created = await createJobRequest(store, {
+      issueKey: "FRE-7",
+      phase: "planning",
+      triggerSource: "linear-webhook",
+      requestId: "dlv-stale-claim",
+    });
+    await claimJobRequest(store, {
+      requestId: created.requestId,
+      claimIdentity: "run-29840114253",
+    });
+
+    const claimed = await store.load(created.requestId);
+    expect(isStalePrePhaseClaim(claimed!)).toBe(true);
+    expect(
+      isStalePrePhaseClaim(claimed!, { hasActiveAgentOrLease: true }),
+    ).toBe(false);
+
+    const failed = await failJobRequest(store, {
+      requestId: created.requestId,
+      completionState: "doctor_checks_failed",
+    });
+    expect(failed.state).toBe("failed");
+    expect(failed.completionState).toBe("doctor_checks_failed");
+
+    // Concluded failed run cannot remain indefinitely claimed.
+    expect(failed.state).not.toBe("claimed");
+
+    const reopened = await reopenFailedJobRequestForRetry(store, {
+      requestId: created.requestId,
+    });
+    expect(reopened?.state).toBe("pending");
+    expect(reopened?.claimIdentity).toBeNull();
+    expect(reopened?.dispatch?.confirmedAt).toBeNull();
+  });
+
+  it("failStalePrePhaseClaim no-ops when an active lease/agent exists", async () => {
+    const { client } = createFakeGitHubClient();
+    const store = new GithubJobRequestStore({
+      client: client as never,
+      owner: "state-owner",
+      repo: "state-repo",
+    });
+    const created = await createJobRequest(store, {
+      issueKey: "FRE-6",
+      phase: "merge",
+      triggerSource: "merge_reconcile",
+      requestId: "mrg-active",
+    });
+    await claimJobRequest(store, {
+      requestId: created.requestId,
+      claimIdentity: "run-live",
+    });
+    const skipped = await failStalePrePhaseClaim(store, {
+      requestId: created.requestId,
+      hasActiveAgentOrLease: true,
+    });
+    expect(skipped).toBeNull();
+    expect((await store.load(created.requestId))?.state).toBe("claimed");
   });
 });

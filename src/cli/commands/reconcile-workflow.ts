@@ -36,6 +36,7 @@ export async function runReconcileWorkflowCommand(
       );
       return EXIT_PLANNING_FAILURE;
     }
+    const attemptStartedAt = new Date().toISOString();
     let summary;
     try {
       summary = await runWorkflowReconcile({
@@ -62,6 +63,7 @@ export async function runReconcileWorkflowCommand(
         const { resolveWorkflowReconcileStatusNames } = await import(
           "../../runner/workflow-reconcile.js"
         );
+        const finishedAt = new Date().toISOString();
         await writeReconcileHeartbeat({
           heartbeat: buildReconcileHeartbeat({
             candidatesFound: 0,
@@ -74,6 +76,9 @@ export async function runReconcileWorkflowCommand(
               240,
             ),
             lastSuccessfulScanAt: null,
+            lastAttemptStartedAt: attemptStartedAt,
+            lastAttemptFinishedAt: finishedAt,
+            lastFailureClassification: "command_failure",
           }),
         });
       } catch {

@@ -35,8 +35,15 @@ export const RECONCILE_WORKFLOW_REQUIRED_CRON = "*/15 * * * *";
 export const RECONCILE_WORKFLOW_REQUIRED_COMMAND =
   "harness:reconcile-workflow";
 
+export type ReconcileHeartbeatFailureClassification =
+  | "command_failure"
+  | "dispatch_failure"
+  | "schedule_gap"
+  | "unknown";
+
 export interface ReconcileHeartbeatRecord {
   kind: typeof RECONCILE_HEARTBEAT_KIND;
+  /** @deprecated Prefer lastAttemptFinishedAt; kept for compat. */
   finishedAt: string;
   workflowRunId: string | null;
   candidatesFound: number;
@@ -47,10 +54,20 @@ export interface ReconcileHeartbeatRecord {
   dispatchEnabled?: boolean;
   /** Terminal scan outcome for doctor/ops. */
   outcome?: "success" | "failure" | "dry_run";
+  /** Alias of outcome for clearer diagnostics. */
+  lastOutcome?: "success" | "failure" | "dry_run";
   /** Last failure message when outcome=failure (bounded). */
   lastFailure?: string | null;
   /** ISO timestamp of the last successful (non-failure) scan. */
   lastSuccessfulScanAt?: string | null;
+  /** When the reconcile attempt began. */
+  lastAttemptStartedAt?: string | null;
+  /** When the reconcile attempt finished (same as finishedAt when written). */
+  lastAttemptFinishedAt?: string | null;
+  /** Last GitHub Actions run id that wrote this heartbeat. */
+  lastWorkflowRunId?: string | null;
+  /** Classified failure mode for doctor/ops. */
+  lastFailureClassification?: ReconcileHeartbeatFailureClassification | null;
 }
 
 export type ReconcileHeartbeatHealth =
@@ -73,23 +90,40 @@ export function buildReconcileHeartbeat(input: {
   outcome?: "success" | "failure" | "dry_run";
   lastFailure?: string | null;
   lastSuccessfulScanAt?: string | null;
+  lastAttemptStartedAt?: string | null;
+  lastAttemptFinishedAt?: string | null;
+  lastFailureClassification?: ReconcileHeartbeatFailureClassification | null;
 }): ReconcileHeartbeatRecord {
-  const finishedAt = input.finishedAt ?? new Date().toISOString();
+  const finishedAt =
+    input.lastAttemptFinishedAt ??
+    input.finishedAt ??
+    new Date().toISOString();
   const outcome = input.outcome ?? "success";
+  const workflowRunId = input.workflowRunId ?? process.env.GITHUB_RUN_ID ?? null;
   return {
     kind: RECONCILE_HEARTBEAT_KIND,
     finishedAt,
-    workflowRunId: input.workflowRunId ?? process.env.GITHUB_RUN_ID ?? null,
+    workflowRunId,
     candidatesFound: input.candidatesFound,
     opaqueDispatches: input.opaqueDispatches,
     legacyDispatchForbidden: true,
     statusesScanned: [...input.statusesScanned],
     dispatchEnabled: input.dispatchEnabled ?? false,
     outcome,
+    lastOutcome: outcome,
     lastFailure: input.lastFailure ?? null,
     lastSuccessfulScanAt:
-      input.lastSuccessfulScanAt ??
-      (outcome === "failure" ? null : finishedAt),
+      input.lastSuccessfulScanAt === undefined
+        ? outcome === "failure"
+          ? null
+          : finishedAt
+        : input.lastSuccessfulScanAt,
+    lastAttemptStartedAt: input.lastAttemptStartedAt ?? null,
+    lastAttemptFinishedAt: finishedAt,
+    lastWorkflowRunId: workflowRunId,
+    lastFailureClassification:
+      input.lastFailureClassification ??
+      (outcome === "failure" ? "command_failure" : null),
   };
 }
 
@@ -110,6 +144,22 @@ export function parseReconcileHeartbeat(
     obj.outcome === "dry_run"
       ? obj.outcome
       : undefined;
+  const failureClassification =
+    obj.lastFailureClassification === "command_failure" ||
+    obj.lastFailureClassification === "dispatch_failure" ||
+    obj.lastFailureClassification === "schedule_gap" ||
+    obj.lastFailureClassification === "unknown" ||
+    obj.lastFailureClassification === null
+      ? (obj.lastFailureClassification as
+          | ReconcileHeartbeatFailureClassification
+          | null)
+      : undefined;
+  const lastOutcome =
+    obj.lastOutcome === "success" ||
+    obj.lastOutcome === "failure" ||
+    obj.lastOutcome === "dry_run"
+      ? obj.lastOutcome
+      : outcome;
   return {
     kind: RECONCILE_HEARTBEAT_KIND,
     finishedAt: obj.finishedAt,
@@ -127,12 +177,33 @@ export function parseReconcileHeartbeat(
       ? { dispatchEnabled: obj.dispatchEnabled }
       : {}),
     ...(outcome ? { outcome } : {}),
+    ...(lastOutcome ? { lastOutcome } : {}),
     ...(obj.lastFailure === null || typeof obj.lastFailure === "string"
       ? { lastFailure: obj.lastFailure as string | null }
       : {}),
     ...(obj.lastSuccessfulScanAt === null ||
     typeof obj.lastSuccessfulScanAt === "string"
       ? { lastSuccessfulScanAt: obj.lastSuccessfulScanAt as string | null }
+      : {}),
+    ...(obj.lastAttemptStartedAt === null ||
+    typeof obj.lastAttemptStartedAt === "string"
+      ? { lastAttemptStartedAt: obj.lastAttemptStartedAt as string | null }
+      : {}),
+    ...(obj.lastAttemptFinishedAt === null ||
+    typeof obj.lastAttemptFinishedAt === "string"
+      ? { lastAttemptFinishedAt: obj.lastAttemptFinishedAt as string | null }
+      : { lastAttemptFinishedAt: obj.finishedAt }),
+    ...(obj.lastWorkflowRunId === null ||
+    typeof obj.lastWorkflowRunId === "string"
+      ? { lastWorkflowRunId: obj.lastWorkflowRunId as string | null }
+      : {
+          lastWorkflowRunId:
+            typeof obj.workflowRunId === "string" || obj.workflowRunId === null
+              ? (obj.workflowRunId as string | null)
+              : null,
+        }),
+    ...(failureClassification !== undefined
+      ? { lastFailureClassification: failureClassification }
       : {}),
   };
 }
@@ -164,12 +235,20 @@ export function evaluateReconcileHeartbeatHealth(
   }
   const ageMs = nowMs - finished;
   if (ageMs > staleMs) {
+    const classification =
+      heartbeat.lastFailureClassification === "command_failure"
+        ? "command_failure"
+        : "schedule_gap";
     return {
       ok: false,
       reason: "stale",
       ageMs,
-      heartbeat,
-      detail: `Reconcile heartbeat is ${Math.round(ageMs / 60000)}m old (threshold ${Math.round(staleMs / 60000)}m). GitHub schedule ticks may be delayed or dropped.`,
+      heartbeat: {
+        ...heartbeat,
+        lastFailureClassification:
+          heartbeat.lastFailureClassification ?? classification,
+      },
+      detail: `Reconcile heartbeat is ${Math.round(ageMs / 60000)}m old (threshold ${Math.round(staleMs / 60000)}m). Classification=${classification}. GitHub schedule ticks may be delayed or dropped.`,
     };
   }
   return { ok: true, ageMs, heartbeat };

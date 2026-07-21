@@ -128,7 +128,7 @@ describe("dispatchMergeReconcileJob", () => {
     expect(storeState.dispatchCalls).toBe(0);
   });
 
-  it("skips claimed, completed, and merged PR", async () => {
+  it("reclaims stale pre-phase claims and redispatches; preserves active claims", async () => {
     const requestId = resolveMergeJobRequestId(identity);
     seed({
       kind: JOB_REQUEST_KIND,
@@ -146,12 +146,60 @@ describe("dispatchMergeReconcileJob", () => {
       completionState: null,
       dedupeIdentity: "x",
       revision: 2,
+      dispatch: {
+        attemptedAt: new Date().toISOString(),
+        confirmedAt: new Date().toISOString(),
+        failureCategory: null,
+      },
     });
-    expect((await dispatchMergeReconcileJob(identity)).outcome).toBe(
-      "already_claimed",
-    );
+    expect(
+      (
+        await dispatchMergeReconcileJob({
+          ...identity,
+          hasActiveAgentOrLease: true,
+        })
+      ).outcome,
+    ).toBe("already_claimed");
+    expect(storeState.dispatchCalls).toBe(0);
 
-    storeState.records.clear();
+    const reclaimed = await dispatchMergeReconcileJob(identity);
+    expect(reclaimed.outcome).toBe("dispatched");
+    expect(reclaimed.dispatched).toBe(true);
+    expect(storeState.dispatchCalls).toBe(1);
+    expect(storeState.records.get(requestId)?.state).toBe("pending");
+  });
+
+  it("reopens retryable failed doctor/pre-phase envelopes for one merge redispath", async () => {
+    const requestId = resolveMergeJobRequestId(identity);
+    seed({
+      kind: JOB_REQUEST_KIND,
+      schemaVersion: JOB_REQUEST_SCHEMA_VERSION,
+      requestId,
+      issueKey: "FRE-5",
+      phase: "merge",
+      triggerSource: "merge_reconcile",
+      linearDeliveryId: null,
+      force: false,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      state: "failed",
+      claimIdentity: "run-29840198249",
+      completionState: "doctor_checks_failed",
+      dedupeIdentity: "x",
+      revision: 4,
+      dispatch: {
+        attemptedAt: new Date().toISOString(),
+        confirmedAt: new Date().toISOString(),
+        failureCategory: null,
+      },
+    });
+    const result = await dispatchMergeReconcileJob(identity);
+    expect(result.outcome).toBe("dispatched");
+    expect(storeState.dispatchCalls).toBe(1);
+  });
+
+  it("skips completed and merged PR", async () => {
+    const requestId = resolveMergeJobRequestId(identity);
     seed({
       kind: JOB_REQUEST_KIND,
       schemaVersion: JOB_REQUEST_SCHEMA_VERSION,

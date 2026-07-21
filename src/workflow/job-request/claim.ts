@@ -206,3 +206,89 @@ export async function failJobRequest(
     completionState: input.completionState,
   });
 }
+
+/** Pre-phase / Doctor failures that are safe to reclaim via reconcile. */
+export const RETRYABLE_JOB_REQUEST_COMPLETION_STATES = new Set([
+  "doctor_checks_failed",
+  "run_crash",
+  "stale_prephase_claim",
+]);
+
+/**
+ * True when a claimed envelope has no evidence of an in-progress agent and is
+ * safe for reconcile to terminalize/retry (pre-phase Doctor failure pattern).
+ */
+export function isStalePrePhaseClaim(
+  record: JobRequestRecord,
+  input?: { hasActiveAgentOrLease?: boolean; now?: Date },
+): boolean {
+  if (record.state !== "claimed") return false;
+  if (input?.hasActiveAgentOrLease) return false;
+  if (record.completionState) return false;
+  // Claimed with no completion and no active lease/agent → stale pre-phase.
+  return true;
+}
+
+/**
+ * Terminalize a stale pre-phase claim so reconcile can create/resume work.
+ */
+export async function failStalePrePhaseClaim(
+  store: GithubJobRequestStore,
+  input: {
+    requestId: string;
+    hasActiveAgentOrLease?: boolean;
+    completionState?: string;
+  },
+): Promise<JobRequestRecord | null> {
+  const loaded = await store.load(input.requestId);
+  if (!loaded) return null;
+  if (
+    !isStalePrePhaseClaim(loaded, {
+      hasActiveAgentOrLease: input.hasActiveAgentOrLease,
+    })
+  ) {
+    return null;
+  }
+  return failJobRequest(store, {
+    requestId: input.requestId,
+    completionState: input.completionState ?? "stale_prephase_claim",
+  });
+}
+
+/**
+ * Re-open a retryable failed envelope to pending so merge/planning reconcile
+ * can dispatch again without inventing a second subject identity.
+ */
+export async function reopenFailedJobRequestForRetry(
+  store: GithubJobRequestStore,
+  input: { requestId: string },
+): Promise<JobRequestRecord | null> {
+  const loaded = await store.load(input.requestId);
+  const record = assertValidRecord(loaded, input.requestId);
+  if (record.state !== "failed") return null;
+  const completion = record.completionState?.trim() ?? "";
+  if (
+    completion &&
+    !RETRYABLE_JOB_REQUEST_COMPLETION_STATES.has(completion)
+  ) {
+    return null;
+  }
+  const next: JobRequestRecord = {
+    ...record,
+    state: "pending",
+    claimIdentity: null,
+    completionState: null,
+    dispatch: {
+      attemptedAt: null,
+      confirmedAt: null,
+      failureCategory: null,
+    },
+    revision: record.revision + 1,
+  };
+  const updated = await store.compareAndSet({
+    requestId: record.requestId,
+    expectedRevision: record.revision,
+    next,
+  });
+  return updated ?? next;
+}

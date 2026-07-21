@@ -273,7 +273,9 @@ async function createOrLoadEnvelope(issueKey, phase, triggerSource, linearDelive
     dedupeIdentity: dedupeIdentity(issueKey, phase, linearDeliveryId, triggerSource),
     revision: 0,
     ack: {
-      ackRequired: true,
+      // Optional post-dispatch observability; missing LINEAR_API_KEY must not
+      // mark a successfully dispatched delivery as failed.
+      ackRequired: false,
       acceptedAt: createdAt,
       ackAttemptedAt: null,
       ackConfirmedAt: null,

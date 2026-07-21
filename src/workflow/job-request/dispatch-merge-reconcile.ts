@@ -17,6 +17,10 @@ import {
   getDispatchRepository,
 } from "../../webhook/dispatch-github.js";
 import type { OpaqueJobDispatchPayload } from "../../webhook/types.js";
+import {
+  failStalePrePhaseClaim,
+  reopenFailedJobRequestForRetry,
+} from "./claim.js";
 import { createJobRequest } from "./create.js";
 import { resolveMergeJobRequestId } from "./merge-request-id.js";
 import { GithubJobRequestStore, JobRequestStoreError } from "./store.js";
@@ -43,6 +47,8 @@ export interface DispatchMergeReconcileInput {
    * When omitted, the helper may fetch once using GITHUB_TOKEN.
    */
   pullRequestMerged?: boolean | null;
+  /** When true, do not reclaim stale claimed / retryable failed envelopes. */
+  hasActiveAgentOrLease?: boolean;
 }
 
 export type MergeReconcileDispatchOutcome =
@@ -233,12 +239,32 @@ export async function dispatchMergeReconcileJob(
     };
   }
   if (record.state === "claimed") {
-    return {
+    const reclaimed = await failStalePrePhaseClaim(store, {
       requestId,
-      outcome: "already_claimed",
-      dispatched: false,
-      record,
-    };
+      hasActiveAgentOrLease: input.hasActiveAgentOrLease,
+      completionState: "stale_prephase_claim",
+    });
+    if (!reclaimed) {
+      return {
+        requestId,
+        outcome: "already_claimed",
+        dispatched: false,
+        record,
+      };
+    }
+    record = reclaimed;
+  }
+  if (record.state === "failed") {
+    const reopened = await reopenFailedJobRequestForRetry(store, { requestId });
+    if (!reopened) {
+      return {
+        requestId,
+        outcome: "already_completed",
+        dispatched: false,
+        record,
+      };
+    }
+    record = ensureDispatchLifecycle(reopened);
   }
   if (record.dispatch?.confirmedAt) {
     return {
