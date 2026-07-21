@@ -366,12 +366,10 @@ export async function evaluateWorkflowReconcileIssue(input: {
     authoritativeState?.currentPhaseId === "code_review" &&
     Boolean(authoritativeState.latestImplementationArtifact) &&
     (linearStatusLower === "code review" || linearStatusLower === "blocked");
-  if (
-    durableCodeReviewEligible &&
-    authoritativeState &&
-    stateStore &&
-    (action === "noop" || action === "replay_side_effects")
-  ) {
+  // Enter whenever durable phase matches — route.shouldRun may already be true
+  // for Plan Review / Code Review (reason=eligible), which must not skip subject
+  // recovery or fall through to plan_review_requires_subject_dispatch.
+  if (durableCodeReviewEligible && authoritativeState && stateStore) {
     const { buildCodeReviewSubjectIdentity } = await import(
       "../workflow/subject-identities.js"
     );
@@ -446,6 +444,12 @@ export async function evaluateWorkflowReconcileIssue(input: {
           reason = "code_review_dispatch_claim_lost";
         }
       }
+    } else {
+      codeReviewRecoveryHandled = true;
+      action = "noop";
+      reason = accepted
+        ? "code_review_subject_already_accepted"
+        : "code_review_lease_active";
     }
   }
 
@@ -454,12 +458,7 @@ export async function evaluateWorkflowReconcileIssue(input: {
     authoritativeState?.currentPhaseId === "plan_review" &&
     Boolean(authoritativeState.latestPlanArtifact) &&
     (linearStatusLower === "plan review" || linearStatusLower === "blocked");
-  if (
-    durablePlanReviewEligible &&
-    authoritativeState &&
-    stateStore &&
-    (action === "noop" || action === "replay_side_effects")
-  ) {
+  if (durablePlanReviewEligible && authoritativeState && stateStore) {
     const { isActiveRunLeaseExpired } = await import("../workflow/state/apply.js");
     const artifact = authoritativeState.latestPlanArtifact!;
     const reviewCycle = authoritativeState.cycleCounters.plan_review_cycles ?? 0;
@@ -601,6 +600,18 @@ export async function evaluateWorkflowReconcileIssue(input: {
           reason = "plan_review_dispatch_claim_lost";
         }
       }
+    } else {
+      // Route may mark Plan Review eligible even after subject/agent exists;
+      // treat as effect-level no-op so we never hit requires_subject_dispatch.
+      planReviewRecoveryHandled = true;
+      action = "noop";
+      planReviewSubjectIdentityOut = subjectIdentity;
+      planReviewRequestIdOut = buildPlanReviewRequestId(subjectIdentity);
+      reason = accepted
+        ? "plan_review_subject_already_accepted"
+        : leaseActive
+          ? "plan_review_lease_active"
+          : "plan_review_reviewer_already_present";
     }
   }
 
