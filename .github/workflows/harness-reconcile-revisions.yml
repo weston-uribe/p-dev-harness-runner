@@ -1,6 +1,9 @@
 name: Harness Reconcile Stranded Issues
 
 # Recovers stranded workflow issues when webhooks were missed.
+# GitHub Actions `schedule` is best-effort and may delay or skip ticks; the
+# handoff Code Review dispatch path must not depend on this cron for success.
+# Doctor reports stale/missing reconcile heartbeats when scans stop.
 on:
   schedule:
     - cron: "*/15 * * * *"
@@ -20,6 +23,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: harness-reconcile-stranded
+  cancel-in-progress: false
 
 jobs:
   reconcile:

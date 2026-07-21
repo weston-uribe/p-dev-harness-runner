@@ -377,6 +377,50 @@ export async function resolveRoute(
     options.force,
   );
 
+  let shouldRun = mergeRouting.shouldRun;
+  let reconcileReason =
+    mergeRouting.reconcileReason ?? revisionRouting.reconcileReason;
+
+  // Implementation subject gate: suppress duplicate agents before any side effects.
+  // Covers orphan non-subject envelopes and racing webhook/reconcile claims.
+  if (mergeRouting.phase === "implementation" && shouldRun && authoritativeState) {
+    const { isActiveRunLeaseExpired } = await import(
+      "../workflow/state/apply.js"
+    );
+    const { buildImplementationSubjectIdentity } = await import(
+      "../workflow/subject-identities.js"
+    );
+    const { normalizeRepoUrl } = await import("../resolver/normalize-repo.js");
+    const subject =
+      authoritativeState.implementationSubjectIdentity ??
+      buildImplementationSubjectIdentity({
+        issueKey,
+        targetRepo: normalizeRepoUrl(resolved.targetRepo),
+        baseBranch: resolved.baseBranch,
+        planGenerationId:
+          authoritativeState.latestPlanArtifact?.planGenerationId ?? "direct",
+        planArtifactHash:
+          authoritativeState.latestPlanArtifact?.planArtifactHash ?? "none",
+        implementationCycle:
+          authoritativeState.cycleCounters?.implementation_cycles ?? 0,
+      });
+    const leaseIdentity = `implementation:${subject}`;
+    const lease = authoritativeState.activeRunLease;
+    const leaseActive =
+      lease?.identity === leaseIdentity &&
+      !isActiveRunLeaseExpired(lease, Date.now());
+    if (authoritativeState.latestImplementationArtifact) {
+      shouldRun = false;
+      reconcileReason = "implementation_subject_already_complete";
+    } else if (authoritativeState.builderAgentId) {
+      shouldRun = false;
+      reconcileReason = "implementation_builder_already_present";
+    } else if (leaseActive) {
+      shouldRun = false;
+      reconcileReason = "implementation_lease_active";
+    }
+  }
+
   // Live Linear + specialized reconcile remain authoritative for shouldRun
   // (backward-compatible). Workflow eligibility supplies correlation metadata.
   return {
@@ -390,9 +434,8 @@ export async function resolveRoute(
       resolved.repoConfigId,
       resolved.baseBranch,
     ),
-    shouldRun: mergeRouting.shouldRun,
-    reconcileReason:
-      mergeRouting.reconcileReason ?? revisionRouting.reconcileReason,
+    shouldRun,
+    reconcileReason,
     pmFeedbackCommentId: revisionRouting.pmFeedbackCommentId,
     mergePrUrl: mergeRouting.mergePrUrl,
     workflowSchemaVersion: eligibility.workflowSchemaVersion,

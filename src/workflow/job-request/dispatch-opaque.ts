@@ -226,4 +226,27 @@ export async function createPlanReviewJobAndDispatch(input: {
   });
 }
 
+/** Create + dispatch an explicit implementation job (subject-scoped; webhook+reconcile). */
+export async function createImplementationJobAndDispatch(input: {
+  issueKey: string;
+  implementationSubjectIdentity: string;
+  env?: Record<string, string | undefined>;
+  fetchImpl?: typeof fetch;
+  githubClient?: GitHubClient;
+  dispatchToken?: string;
+}): Promise<CreateEnvelopeAndDispatchResult> {
+  return createEnvelopeAndDispatch({
+    issueKey: input.issueKey,
+    phase: "implementation",
+    triggerSource: "harness_implementation_handoff",
+    linearDeliveryId: `impl-subject:${input.implementationSubjectIdentity}`,
+    reviewSubjectIdentity: input.implementationSubjectIdentity,
+    ackRequired: false,
+    env: input.env,
+    fetchImpl: input.fetchImpl,
+    githubClient: input.githubClient,
+    dispatchToken: input.dispatchToken,
+  });
+}
+
 export { buildJobRequestRecord };

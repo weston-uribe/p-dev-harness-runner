@@ -29,9 +29,17 @@ import {
   type LinearCommentRecord,
 } from "../../linear/writer.js";
 import {
-  createWorkflowStateStore,
-  resolveWorkflowStateStoreMode,
+  claimAgentRun,
+  DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
 } from "../../workflow/state/index.js";
+import type { WorkflowStateRecord } from "../../workflow/state/types.js";
+import { resolveDefinitionForConfig } from "../workflow-transition.js";
+import { resolveImplementationSubject } from "../../workflow/resolve-implementation-subject.js";
+import {
+  buildImplementationDispatchEffectId,
+  buildImplementationRequestId,
+} from "../../workflow/implementation-dispatch-effect.js";
+import { markImplementationDispatchCompleted } from "../../workflow/state/side-effects.js";
 import {
   acquireBuilderAgent,
   disposeAgent,
@@ -503,15 +511,17 @@ export async function executeImplementationPhase(
     }
 
     let supersededGenerationIds: string[] = [];
+    let implementationSubjectIdentity: string | null = null;
     try {
-      const stateStore = await createWorkflowStateStore({
-        logDirectory: config.logDirectory,
-        teamId: issue.teamId ?? undefined,
-        env: process.env,
-        mode: resolveWorkflowStateStoreMode(process.env),
+      const resolvedSubject = await resolveImplementationSubject({
+        config,
+        issueKey: options.issueKey,
+        linearApiKey,
       });
-      const workflowState = await stateStore.load(options.issueKey);
-      if (workflowState) {
+      implementationSubjectIdentity = resolvedSubject.subjectIdentity;
+      const stateStore = resolvedSubject.stateStore;
+      let workflowState = resolvedSubject.state;
+      if (stateStore && workflowState) {
         supersededGenerationIds = [
           ...(workflowState.supersededGenerationIdentities ?? []),
         ];
@@ -526,6 +536,149 @@ export async function executeImplementationPhase(
           directBuild: !hasCompletedPlan,
           planningRequested: planningPhaseEvidence,
         };
+
+        if (workflowState.latestImplementationArtifact) {
+          await events.log("idempotency_skip", "info", {
+            reason: "implementation_subject_already_complete",
+            implementationSubjectIdentity,
+          });
+          finalOutcome = "duplicate";
+          errorClassification = "duplicate_phase_completed";
+          const manifest: RunManifest = {
+            runId,
+            issueKey: options.issueKey,
+            phase,
+            phaseInferredFromStatus,
+            linearStatusBefore,
+            linearStatusAfter,
+            targetRepo: resolved.targetRepo,
+            baseBranch: resolved.baseBranch,
+            resolutionSource: resolved.resolutionSource,
+            dryRun: false,
+            finalOutcome,
+            errorClassification,
+            startedAt: startedAt.toISOString(),
+            finishedAt: new Date().toISOString(),
+            milestone: MILESTONE,
+            promptVersion: IMPLEMENTATION_PROMPT_VERSION,
+            cursorAgentId,
+            cursorRunId,
+            branch,
+            prUrl,
+            previewUrl: null,
+            validationSummary,
+            changedFiles: null,
+            checkSummary: null,
+            previousImplementationRunId: null,
+            previousHandoffRunId: null,
+            pmFeedbackCommentId: null,
+            ...emptyMergeManifestFields(),
+            model,
+          };
+          return writeFinalManifest(
+            manifest,
+            runDirectory,
+            parsed,
+            resolved,
+            events,
+            finalOutcome,
+            errorClassification,
+            null,
+            phaseTrace,
+          );
+        }
+
+        const definition = resolveDefinitionForConfig({
+          config,
+          baseBranch: resolved.baseBranch,
+          productionBranch: resolved.productionBranch,
+        });
+        const leaseIdentity = `implementation:${implementationSubjectIdentity}`;
+        const claimResult = await claimAgentRun({
+          store: stateStore,
+          issueKey: options.issueKey,
+          definition,
+          expectedStateRevision: workflowState.stateRevision,
+          currentPhaseId:
+            workflowState.currentPhaseId ?? "implementation_dispatch",
+          runId,
+          evidence: {
+            linearStatusName: issue.status ?? linearStatusBefore ?? "",
+          },
+          leaseIdentity,
+          subjectIdentity: implementationSubjectIdentity,
+          leaseTtlMs: DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
+        });
+        if (!claimResult.ok) {
+          await events.log("idempotency_skip", "info", {
+            reason: "implementation_claim_conflict",
+            implementationSubjectIdentity,
+            claimReason: claimResult.reason,
+          });
+          finalOutcome = "duplicate";
+          errorClassification = "duplicate_phase_completed";
+          const manifest: RunManifest = {
+            runId,
+            issueKey: options.issueKey,
+            phase,
+            phaseInferredFromStatus,
+            linearStatusBefore,
+            linearStatusAfter,
+            targetRepo: resolved.targetRepo,
+            baseBranch: resolved.baseBranch,
+            resolutionSource: resolved.resolutionSource,
+            dryRun: false,
+            finalOutcome,
+            errorClassification,
+            startedAt: startedAt.toISOString(),
+            finishedAt: new Date().toISOString(),
+            milestone: MILESTONE,
+            promptVersion: IMPLEMENTATION_PROMPT_VERSION,
+            cursorAgentId,
+            cursorRunId,
+            branch,
+            prUrl,
+            previewUrl: null,
+            validationSummary,
+            changedFiles: null,
+            checkSummary: null,
+            previousImplementationRunId: null,
+            previousHandoffRunId: null,
+            pmFeedbackCommentId: null,
+            ...emptyMergeManifestFields(),
+            model,
+          };
+          return writeFinalManifest(
+            manifest,
+            runDirectory,
+            parsed,
+            resolved,
+            events,
+            finalOutcome,
+            errorClassification,
+            null,
+            phaseTrace,
+          );
+        }
+        workflowState = claimResult.state;
+        // Persist subject on state for gate convergence.
+        if (
+          workflowState &&
+          workflowState.implementationSubjectIdentity !==
+            implementationSubjectIdentity
+        ) {
+          const next: WorkflowStateRecord = {
+            ...workflowState,
+            implementationSubjectIdentity,
+            stateRevision: workflowState.stateRevision + 1,
+          };
+          const ok = await stateStore.compareAndSet({
+            issueKey: options.issueKey,
+            expectedRevision: workflowState.stateRevision,
+            next,
+          });
+          if (ok) workflowState = next;
+        }
       }
     } catch {
       planningHistory = null;
@@ -736,6 +889,46 @@ export async function executeImplementationPhase(
       implementationIdempotencyKey,
     );
     const agent = acquired.agent;
+    cursorAgentId = acquired.continuity.reference.agentId;
+
+    // Persist builder identity so racing gates no-op before a second agent starts.
+    if (implementationSubjectIdentity && acquired.continuity.reference.agentId) {
+      try {
+        const resolvedSubject = await resolveImplementationSubject({
+          config,
+          issueKey: options.issueKey,
+          linearApiKey,
+        });
+        if (resolvedSubject.stateStore && resolvedSubject.state) {
+          const effectId = buildImplementationDispatchEffectId(
+            implementationSubjectIdentity,
+          );
+          const requestId = buildImplementationRequestId(
+            implementationSubjectIdentity,
+          );
+          const withBuilder: WorkflowStateRecord = {
+            ...resolvedSubject.state,
+            implementationSubjectIdentity,
+            builderAgentId: acquired.continuity.reference.agentId,
+            builderRunId: runId,
+          };
+          const next = {
+            ...markImplementationDispatchCompleted(withBuilder, {
+              identity: effectId,
+              reviewRequestId: requestId,
+            }),
+            stateRevision: resolvedSubject.state.stateRevision + 1,
+          };
+          await resolvedSubject.stateStore.compareAndSet({
+            issueKey: options.issueKey,
+            expectedRevision: resolvedSubject.state.stateRevision,
+            next,
+          });
+        }
+      } catch {
+        // Best-effort; lease already held.
+      }
+    }
 
     try {
     const timeoutMs =

@@ -431,6 +431,18 @@ export function createProgram(): Command {
       "Scan configured Linear teams for stranded workflow issues; optionally dispatch recovery runs",
     )
     .option("--issue <key>", "Reconcile a single Linear issue key")
+    .option(
+      "--phase <phase>",
+      "Pin inspection/recovery to one phase (plan_review, implementation, code_review); never reinterpret current Linear status as another phase",
+    )
+    .option(
+      "--subject <identity>",
+      "Pin inspection/recovery to one durable subject identity",
+    )
+    .option(
+      "--request-id <id>",
+      "Inspect one job-request envelope only (no phase reinterpretation)",
+    )
     .option("--json", "Print reconcile JSON to stdout", false)
     .option("--dry-run", "Evaluate only; no Linear writes or dispatch", false)
     .option(
@@ -448,6 +460,9 @@ export function createProgram(): Command {
         dryRun: opts.dryRun,
         dispatch: opts.dispatch,
         force: opts.force,
+        phase: opts.phase,
+        subject: opts.subject,
+        requestId: opts.requestId,
       });
       process.exitCode = exitCode;
     });

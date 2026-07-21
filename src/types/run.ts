@@ -173,6 +173,7 @@ export type RunEventName =
   | "preview_captured"
   | "preview_not_found"
   | "handoff_comment_posted"
+  | "code_review_dispatch_attempt"
   | "code_review_job_dispatched"
   | "plan_review_dispatch_pending"
   | "plan_review_job_dispatched"

@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   runLinearAssociationGate: vi.fn(),
   ensureCodeReviewJobDispatched: vi.fn(),
   ensurePlanReviewJobDispatched: vi.fn(),
+  ensureImplementationJobDispatched: vi.fn(),
+  resolveImplementationSubject: vi.fn(),
   markRunStatusBlocked: vi.fn(),
   markRevisionPendingPmFeedback: vi.fn(),
 }));
@@ -65,6 +67,21 @@ vi.mock("../../src/workflow/plan-review-dispatch-effect.js", async (importOrigin
     ensurePlanReviewJobDispatched: mocks.ensurePlanReviewJobDispatched,
   };
 });
+
+vi.mock("../../src/workflow/implementation-dispatch-effect.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../src/workflow/implementation-dispatch-effect.js")
+    >();
+  return {
+    ...actual,
+    ensureImplementationJobDispatched: mocks.ensureImplementationJobDispatched,
+  };
+});
+
+vi.mock("../../src/workflow/resolve-implementation-subject.js", () => ({
+  resolveImplementationSubject: mocks.resolveImplementationSubject,
+}));
 
 vi.mock("../../src/linear/writer.js", () => ({
   createLinearClient: mocks.createLinearClient,
@@ -172,7 +189,7 @@ describe("workflow reconcile opaque-only dispatch", () => {
     expect(requestId.length).toBeGreaterThan(0);
   });
 
-  it("blocks when opaque dispatcher returns empty requestId", async () => {
+  it("Ready for Build uses implementation subject dispatch (not generic opaque)", async () => {
     mocks.fetchLinearIssue.mockResolvedValue({
       id: "iss-1",
       identifier: "FRE-7",
@@ -180,13 +197,13 @@ describe("workflow reconcile opaque-only dispatch", () => {
       teamId: "team-fre",
       teamKey: "FRE",
       url: "https://linear.app/x/issue/FRE-7",
+      description: "Target repo: https://github.com/weston-uribe/weston-uribe-portfolio",
     });
-    store.seed(
-      createEmptyWorkflowState({
-        issueKey: "FRE-7",
-        workflowSchemaVersion: "product-development-v2",
-      }),
-    );
+    const state = createEmptyWorkflowState({
+      issueKey: "FRE-7",
+      workflowSchemaVersion: "product-development-v2",
+    });
+    store.seed({ ...state, stateRevision: 1, currentPhaseId: "implementation_dispatch" });
     mocks.resolveRoute.mockResolvedValue({
       issueKey: "FRE-7",
       phase: "implementation",
@@ -198,14 +215,22 @@ describe("workflow reconcile opaque-only dispatch", () => {
       mergeConcurrencyGroup: "portfolio-dev",
       workflowStateRevision: 1,
     });
-    mocks.createReconcileJobAndDispatch.mockResolvedValue({
-      requestId: "",
-      envelopeSchemaVersion: 1,
-      publicEventType: "linear_issue_status_changed",
-      executionRepository: "weston-uribe/p-dev-harness-runner",
-      duplicate: false,
-      dispatched: true,
-      ackConfirmed: false,
+    mocks.resolveImplementationSubject.mockResolvedValue({
+      subjectIdentity: "subj-impl-7",
+      targetRepo: "https://github.com/weston-uribe/weston-uribe-portfolio",
+      baseBranch: "dev",
+      planGenerationId: "direct",
+      planArtifactHash: "none",
+      implementationCycle: 0,
+      state: await store.load("FRE-7"),
+      stateStore: store,
+      workflowStateRevision: 1,
+    });
+    mocks.ensureImplementationJobDispatched.mockResolvedValue({
+      outcome: "dispatched",
+      reviewRequestId: "dlv-implsubject00000000000000000001",
+      state: (await store.load("FRE-7"))!,
+      httpDispatched: true,
     });
 
     const result = await evaluateWorkflowReconcileIssue({
@@ -216,8 +241,8 @@ describe("workflow reconcile opaque-only dispatch", () => {
       dispatch: true,
     });
 
-    expect(result.action).toBe("blocker");
-    expect(result.reason).toBe("opaque_dispatch_missing_request_id");
-    expect(result.dispatched).toBe(false);
+    expect(result.dispatched).toBe(true);
+    expect(mocks.ensureImplementationJobDispatched).toHaveBeenCalled();
+    expect(mocks.createReconcileJobAndDispatch).not.toHaveBeenCalled();
   });
 });
