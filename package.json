@@ -109,7 +109,7 @@
     "react-icons": "^5.7.0",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.3.0",
-    "tweetsodium": "^0.0.4",
+    "tweetsodium": "^0.0.6",
     "yaml": "^2.8.0",
     "zod": "^3.24.2"
   },
