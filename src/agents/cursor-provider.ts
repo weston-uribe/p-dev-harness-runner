@@ -9,6 +9,10 @@ import {
 } from "../cursor/agent-factory.js";
 import { resolveModelId as cursorResolveModelId } from "../cursor/model.js";
 import { sendAndObserve as cursorSendAndObserve } from "../cursor/run-observer.js";
+import {
+  downloadReviewArtifacts,
+  type DownloadedReviewArtifact,
+} from "../cursor/review-artifacts.js";
 import { acquireBuilderAgent as acquireBuilderAgentImpl } from "../runner/builder-thread-acquire.js";
 import { unavailableCost, buildUsageRecord } from "../evaluation/telemetry/cost.js";
 import type {
@@ -165,3 +169,14 @@ export const cursorAgentProvider: AgentProvider = {
     await disposeCloudAgent(cursorAgent);
   },
 };
+
+/** Best-effort review artifact download from a live AgentHandle. */
+export async function downloadAgentReviewArtifacts(
+  agent: AgentHandle,
+): Promise<DownloadedReviewArtifact[]> {
+  const cursorAgent = cursorAgents.get(agent);
+  if (!cursorAgent) {
+    return [];
+  }
+  return downloadReviewArtifacts(cursorAgent);
+}

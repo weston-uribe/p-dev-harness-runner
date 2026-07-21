@@ -212,6 +212,16 @@ export const RETRYABLE_JOB_REQUEST_COMPLETION_STATES = new Set([
   "doctor_checks_failed",
   "run_crash",
   "stale_prephase_claim",
+  "validation_failed",
+  "decision_unresolved",
+]);
+
+/**
+ * Completed envelopes that were terminalized as duplicates without durable
+ * phase completion evidence (FRE-7 false-duplicate class).
+ */
+export const FALSE_DUPLICATE_JOB_REQUEST_COMPLETION_STATES = new Set([
+  "duplicate_phase_completed",
 ]);
 
 /**
@@ -277,6 +287,51 @@ export async function reopenFailedJobRequestForRetry(
     ...record,
     state: "pending",
     claimIdentity: null,
+    completionState: null,
+    dispatch: {
+      attemptedAt: null,
+      confirmedAt: null,
+      failureCategory: null,
+    },
+    revision: record.revision + 1,
+  };
+  const updated = await store.compareAndSet({
+    requestId: record.requestId,
+    expectedRevision: record.revision,
+    next,
+  });
+  return updated ?? next;
+}
+
+/**
+ * Re-open a completed false-duplicate envelope for the same deterministic
+ * request/subject id. Preserves historical revision lineage; does not invent
+ * a second subject. Caller must prove there is no durable completion evidence.
+ */
+export async function reopenFalseDuplicateJobRequestForRetry(
+  store: GithubJobRequestStore,
+  input: {
+    requestId: string;
+    /** When false, refuse reopen (caller found accepted decision / active reviewer). */
+    durableCompletionEvidenceAbsent: boolean;
+  },
+): Promise<JobRequestRecord | null> {
+  if (!input.durableCompletionEvidenceAbsent) return null;
+  const loaded = await store.load(input.requestId);
+  if (!loaded) return null;
+  const record = assertValidRecord(loaded, input.requestId);
+  if (record.state !== "completed") return null;
+  const completion = record.completionState?.trim() ?? "";
+  if (!FALSE_DUPLICATE_JOB_REQUEST_COMPLETION_STATES.has(completion)) {
+    return null;
+  }
+  const next: JobRequestRecord = {
+    ...record,
+    state: "pending",
+    claimIdentity: null,
+    // Preserve prior completionState in a non-authoritative field? Spec says
+    // preserve historical revision; clear completion so the envelope is
+    // executable again. Prior revision remains in git history of the store.
     completionState: null,
     dispatch: {
       attemptedAt: null,

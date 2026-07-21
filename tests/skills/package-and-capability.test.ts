@@ -28,7 +28,7 @@ describe("canonical skill packages", () => {
       expect(pkg.valid).toBe(true);
       expect(pkg.sourcePath.startsWith(`${CANONICAL_SKILLS_DIR}/`)).toBe(true);
       expect(pkg.contentSha256).toHaveLength(64);
-      expect(pkg.frontmatter.skillContractVersion).toBe("1");
+      expect(["1", "2"]).toContain(pkg.frontmatter.skillContractVersion);
       expect(pkg.frontmatter.description.length).toBeGreaterThan(20);
     }
   });

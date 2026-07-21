@@ -4,6 +4,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Agent } from "@cursor/sdk";
 import { DEFAULT_PLANNING_TIMEOUT_SECONDS, MILESTONE } from "../../config/defaults.js";
 import { loadHarnessConfig } from "../../config/load-config.js";
 import { emptyMergeManifestFields } from "../../artifacts/manifest-fields.js";
@@ -28,9 +29,11 @@ import { formatPlanReviewComment } from "../../linear/plan-review-comment.js";
 import {
   createPlanReviewAgent,
   disposeAgent,
+  downloadAgentReviewArtifacts,
   resumePlanReviewAgent,
   sendAndObserve,
 } from "../../agents/index.js";
+import { selectPrimaryReviewArtifact } from "../../cursor/review-artifacts.js";
 import { manifestModelEvidence } from "../../cursor/model.js";
 import { buildPlanReviewPrompt } from "../../prompts/builder.js";
 import { PlanReviewError } from "../errors.js";
@@ -51,10 +54,12 @@ import {
   buildPlanReviewReadinessDiagnostic,
   evaluatePlanReviewReadiness,
 } from "../../workflow/plan-review-readiness.js";
+import { toEngineReviewOutcome } from "../../workflow/review-contracts.js";
 import {
-  extractPlanReviewOutcomeFromText,
-  toEngineReviewOutcome,
-} from "../../workflow/review-contracts.js";
+  REVIEW_DECISION_REPAIR_PROMPT,
+  extractReviewDecision,
+  extractReviewDecisionAfterRepair,
+} from "../../workflow/review-decision-extract.js";
 import { buildTelemetryCorrelation } from "../../evaluation/telemetry/correlation.js";
 import {
   buildPromptProvenance,
@@ -461,7 +466,10 @@ export async function executePlanReviewPhase(
       });
 
     // Reuse an existing reviewer agent when durable state already has one.
+    // On resume: reparse preserved raw/artifact first (FRE-8) — never a second
+    // full Plan Review prompt unless the agent cannot be resumed.
     let agent;
+    let reusedExistingReviewer = false;
     if (state.planReviewerAgentId) {
       try {
         agent = await resumePlanReviewAgent({
@@ -469,6 +477,7 @@ export async function executePlanReviewPhase(
           agentId: state.planReviewerAgentId,
           config,
         });
+        reusedExistingReviewer = true;
         await events.log("plan_review_agent_reused", "info", {
           planReviewerAgentId: state.planReviewerAgentId,
           planReviewSubjectIdentity,
@@ -510,76 +519,252 @@ export async function executePlanReviewPhase(
           "agent",
         ) ?? null;
 
-      const observed = await Promise.race([
-        sendAndObserve(agent, prompt, runDirectory, events, {
-          apiKey: cursorApiKey,
-          phase: "plan_review",
-          telemetryCorrelation,
-          onTelemetryEvent: onTelemetry,
-        }),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(
-              new PlanReviewError(
-                "cursor_run_timeout",
-                `Cursor plan review run exceeded ${timeoutMs / 1000}s`,
-              ),
-            );
-          }, timeoutMs);
-        }),
-      ]);
+      const observeWithTimeout = (message: string) =>
+        Promise.race([
+          sendAndObserve(agent, message, runDirectory, events, {
+            apiKey: cursorApiKey,
+            phase: "plan_review",
+            telemetryCorrelation,
+            onTelemetryEvent: onTelemetry,
+          }),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(
+                new PlanReviewError(
+                  "cursor_run_timeout",
+                  `Cursor plan review run exceeded ${timeoutMs / 1000}s`,
+                ),
+              );
+            }, timeoutMs);
+          }),
+        ]);
 
-      cursorAgentId = observed.agentId;
-      cursorRunId = observed.runId;
-
-      // Persist agent/run ids separately from dispatch subject (crash recovery).
-      if (cursorAgentId || cursorRunId) {
-        const withAgent = {
-          ...state,
-          planReviewSubjectIdentity,
-          planReviewerAgentId: cursorAgentId ?? state.planReviewerAgentId,
-          planReviewerRunId: cursorRunId ?? state.planReviewerRunId,
-          stateRevision: state.stateRevision + 1,
-        };
-        const casOk = await store.compareAndSet({
-          issueKey: options.issueKey,
-          expectedRevision: state.stateRevision,
-          next: withAgent,
-        });
-        if (casOk) {
-          state = withAgent;
-        }
-        await events.log("plan_review_agent_persisted", "info", {
-          planReviewSubjectIdentity,
-          planReviewerAgentId: cursorAgentId,
-          planReviewerRunId: cursorRunId,
-          casOk,
-        });
-      }
+      const expectedPlanIdentity = {
+        planGenerationId: latestPlan.planGenerationId,
+        planArtifactHash: latestPlan.planArtifactHash,
+      };
       await mkdir(path.join(runDirectory, "outputs"), { recursive: true });
       const resultPath = getPlanReviewResultPath(runDirectory);
-      await writeFile(resultPath, `${observed.assistantText}\n`, "utf8");
+
+      let observed: Awaited<ReturnType<typeof sendAndObserve>>;
+      let repairTurnCount = 0;
+      let primaryArtifact: ReturnType<typeof selectPrimaryReviewArtifact> = null;
+      let extraction;
+
+      if (reusedExistingReviewer) {
+        cursorAgentId = state.planReviewerAgentId ?? null;
+        cursorRunId = state.planReviewerRunId ?? null;
+        let priorText = "";
+        if (state.planReviewerAgentId && state.planReviewerRunId) {
+          try {
+            const priorRun = await Agent.getRun(state.planReviewerRunId, {
+              runtime: "cloud",
+              agentId: state.planReviewerAgentId,
+              apiKey: cursorApiKey,
+            });
+            priorText = priorRun.result ?? "";
+          } catch (priorError) {
+            await events.log("plan_review_prior_run_fetch_failed", "warn", {
+              planReviewerRunId: state.planReviewerRunId,
+              message:
+                priorError instanceof Error
+                  ? priorError.message
+                  : String(priorError),
+            });
+          }
+        }
+        await writeFile(resultPath, `${priorText}\n`, "utf8");
+        const downloadedArtifacts = await downloadAgentReviewArtifacts(agent);
+        primaryArtifact = selectPrimaryReviewArtifact(downloadedArtifacts);
+        if (primaryArtifact) {
+          await writeFile(
+            path.join(runDirectory, "outputs", "plan-review-artifact.md"),
+            `${primaryArtifact.text}\n`,
+            "utf8",
+          );
+        }
+        extraction = extractReviewDecision({
+          kind: "plan_review",
+          rawResponse: priorText,
+          artifactText: primaryArtifact?.text ?? null,
+          artifactIdentity: primaryArtifact?.path ?? null,
+          expectedPlanIdentity,
+        });
+        await events.log("plan_review_reparse_attempt", "info", {
+          extractionSource: extraction.source,
+          decision: extraction.decision ?? null,
+          artifactUsed: Boolean(primaryArtifact),
+          priorTextLength: priorText.length,
+        });
+
+        if (!extraction.ok || !extraction.planOutcome) {
+          await events.log("cursor_event", "warn", {
+            phase: "plan_review",
+            event: "decision_repair_attempt",
+            priorFailure:
+              extraction.failureClassification ?? "decision_unresolved",
+            extractionSource: extraction.source,
+            mode: "reused_reviewer",
+          });
+          const repairObs =
+            phaseTrace?.startChild(
+              "p-dev.plan-review.decision-repair",
+              "generation",
+            ) ?? null;
+          observed = await observeWithTimeout(REVIEW_DECISION_REPAIR_PROMPT);
+          cursorAgentId = observed.agentId;
+          cursorRunId = observed.runId;
+          await writeFile(resultPath, `${observed.assistantText}\n`, "utf8");
+          extraction = extractReviewDecisionAfterRepair({
+            prior: extraction,
+            repairResponse: observed.assistantText,
+            kind: "plan_review",
+            expectedPlanIdentity,
+          });
+          repairTurnCount = extraction.repairTurnCount ?? 1;
+          repairObs?.end({
+            metadata: {
+              repairTurnCount,
+              extractionSource: extraction.source,
+              decision: extraction.decision ?? null,
+              failureClassification: extraction.failureClassification ?? null,
+            },
+          });
+        } else {
+          observed = {
+            agentId: cursorAgentId ?? state.planReviewerAgentId ?? "unknown",
+            runId: cursorRunId ?? state.planReviewerRunId ?? "reparse",
+            assistantText: priorText,
+            gitResult: null,
+            cancelOutcome: null,
+            model: { id: model },
+          };
+        }
+      } else {
+        observed = await observeWithTimeout(prompt);
+
+        cursorAgentId = observed.agentId;
+        cursorRunId = observed.runId;
+
+        // Persist agent/run ids separately from dispatch subject (crash recovery).
+        if (cursorAgentId || cursorRunId) {
+          const withAgent = {
+            ...state,
+            planReviewSubjectIdentity,
+            planReviewerAgentId: cursorAgentId ?? state.planReviewerAgentId,
+            planReviewerRunId: cursorRunId ?? state.planReviewerRunId,
+            stateRevision: state.stateRevision + 1,
+          };
+          const casOk = await store.compareAndSet({
+            issueKey: options.issueKey,
+            expectedRevision: state.stateRevision,
+            next: withAgent,
+          });
+          if (casOk) {
+            state = withAgent;
+          }
+          await events.log("plan_review_agent_persisted", "info", {
+            planReviewSubjectIdentity,
+            planReviewerAgentId: cursorAgentId,
+            planReviewerRunId: cursorRunId,
+            casOk,
+          });
+        }
+        await writeFile(resultPath, `${observed.assistantText}\n`, "utf8");
+
+        const downloadedArtifacts = await downloadAgentReviewArtifacts(agent);
+        primaryArtifact = selectPrimaryReviewArtifact(downloadedArtifacts);
+        if (primaryArtifact) {
+          await writeFile(
+            path.join(runDirectory, "outputs", "plan-review-artifact.md"),
+            `${primaryArtifact.text}\n`,
+            "utf8",
+          );
+        }
+
+        extraction = extractReviewDecision({
+          kind: "plan_review",
+          rawResponse: observed.assistantText,
+          artifactText: primaryArtifact?.text ?? null,
+          artifactIdentity: primaryArtifact?.path ?? null,
+          expectedPlanIdentity,
+        });
+
+        if (!extraction.ok || !extraction.planOutcome) {
+          await events.log("cursor_event", "warn", {
+            phase: "plan_review",
+            event: "decision_repair_attempt",
+            priorFailure:
+              extraction.failureClassification ?? "decision_unresolved",
+            extractionSource: extraction.source,
+          });
+          const repairObs =
+            phaseTrace?.startChild(
+              "p-dev.plan-review.decision-repair",
+              "generation",
+            ) ?? null;
+          observed = await observeWithTimeout(REVIEW_DECISION_REPAIR_PROMPT);
+          cursorAgentId = observed.agentId;
+          cursorRunId = observed.runId;
+          await writeFile(resultPath, `${observed.assistantText}\n`, "utf8");
+          extraction = extractReviewDecisionAfterRepair({
+            prior: extraction,
+            repairResponse: observed.assistantText,
+            kind: "plan_review",
+            expectedPlanIdentity,
+          });
+          repairTurnCount = extraction.repairTurnCount ?? 1;
+          repairObs?.end({
+            metadata: {
+              repairTurnCount,
+              extractionSource: extraction.source,
+              decision: extraction.decision ?? null,
+              failureClassification: extraction.failureClassification ?? null,
+            },
+          });
+        }
+      }
+
       const outputRef = await buildArtifactRef({
         runDirectory,
         absolutePath: resultPath,
         artifactKind: "agent_output",
       });
 
-      const validated = extractPlanReviewOutcomeFromText(observed.assistantText);
-      if (!validated.ok || !validated.outcome) {
-        // Infrastructure / schema failure — stay in Plan Review, no cycle increment.
+      if (!extraction.ok || !extraction.planOutcome || !extraction.decision) {
+        const failure =
+          extraction.failureClassification ?? "decision_unresolved";
         reviewerObs?.end({
           metadata: {
             modelId: observed.model?.id ?? model,
             modelRole: "plan_reviewer",
-            schemaFailure: validated.error ?? "malformed_json",
+            schemaFailure: failure,
+            extractionSource: extraction.source,
+            artifactUsed: Boolean(primaryArtifact),
+            repairTurnCount,
+            reparseOnly: reusedExistingReviewer,
           },
         });
         throw new PlanReviewError(
-          "validation_failed",
-          `Plan Review structured outcome invalid: ${validated.error ?? "unknown"}`,
+          failure === "decision_unresolved"
+            ? "decision_unresolved"
+            : "validation_failed",
+          `Plan Review decision could not be parsed: ${failure}`,
         );
       }
+
+      await events.log("plan_review_decision_extracted", "info", {
+        extractionSource: extraction.source,
+        decision: extraction.decision,
+        artifactUsed: Boolean(primaryArtifact),
+        artifactIdentity: primaryArtifact?.path ?? null,
+        repairTurnCount,
+        attempts: extraction.attempts,
+        reparseOnly: reusedExistingReviewer && repairTurnCount === 0,
+        promptVersion: version,
+      });
+
+      const validated = { ok: true as const, outcome: extraction.planOutcome };
 
       const reviewCycle =
         state.cycleCounters.plan_review_cycles ?? 0;
@@ -759,13 +944,14 @@ export async function executePlanReviewPhase(
           phase: "plan_review",
           runId,
           model,
-          promptVersion: promptVersion ?? "plan-review@1",
+          promptVersion: promptVersion ?? "plan-review@2",
           targetRepo: resolved.targetRepo,
           baseBranch: resolved.baseBranch,
           cursorAgentId: cursorAgentId ?? undefined,
           cursorRunId: cursorRunId ?? undefined,
         },
-        "planning",
+        "plan_review",
+        { errorClassification: errorClassification ?? undefined },
       );
     } catch {
       // best-effort

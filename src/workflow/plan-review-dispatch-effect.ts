@@ -21,8 +21,15 @@ import {
   markPlanReviewDispatchDispatched,
   upsertPendingSideEffect,
 } from "./state/side-effects.js";
-import { createPlanReviewJobAndDispatch } from "./job-request/dispatch-opaque.js";
+import {
+  createPlanReviewJobAndDispatch,
+  redispatchJobRequestById,
+} from "./job-request/dispatch-opaque.js";
 import { createGithubJobRequestStoreFromEnv } from "./job-request/runtime-store.js";
+import {
+  reopenFailedJobRequestForRetry,
+  reopenFalseDuplicateJobRequestForRetry,
+} from "./job-request/claim.js";
 import { resolveJobRequestId } from "./job-request/request-id.js";
 import { resolveDispatchGithubToken } from "../public-execution/runtime-repos.js";
 import { PLAN_REVIEW_DISPATCH_MAX_ATTEMPTS } from "./reconcile-health.js";
@@ -85,6 +92,12 @@ export type EnsurePlanReviewDispatchResult =
       reviewRequestId: string;
       state: WorkflowStateRecord;
       httpDispatched: false;
+    }
+  | {
+      outcome: "unresolved_decision_recovered";
+      reviewRequestId: string;
+      state: WorkflowStateRecord;
+      httpDispatched: boolean;
     };
 
 async function casBump(
@@ -327,4 +340,70 @@ export async function ensurePlanReviewJobDispatched(input: {
     state: afterMark,
     httpDispatched: result.dispatched && !result.duplicate,
   };
+}
+
+/**
+ * FRE-8 recovery: when a Plan Reviewer finished without an accepted decision,
+ * reopen the same-subject job request and redispatch so the phase can reparse
+ * artifacts / run one decision-only repair. Never invents a second subject.
+ */
+export async function recoverUnresolvedPlanReviewDispatch(input: {
+  store: WorkflowStateStore;
+  issueKey: string;
+  reviewSubjectIdentity: string;
+  state: WorkflowStateRecord;
+  env?: Record<string, string | undefined>;
+  fetchImpl?: typeof fetch;
+}): Promise<EnsurePlanReviewDispatchResult | null> {
+  const env = input.env ?? process.env;
+  const reviewRequestId = buildPlanReviewRequestId(input.reviewSubjectIdentity);
+  const state = input.state;
+
+  if (state.acceptedReviewSubjects?.[input.reviewSubjectIdentity]) {
+    return null;
+  }
+  // Prefer reparse via existing reviewer; require durable agent id.
+  if (!state.planReviewerAgentId?.trim()) {
+    return null;
+  }
+
+  try {
+    const jobStore = await createGithubJobRequestStoreFromEnv(env);
+    let reopened =
+      (await reopenFailedJobRequestForRetry(jobStore, {
+        requestId: reviewRequestId,
+      })) ??
+      (await reopenFalseDuplicateJobRequestForRetry(jobStore, {
+        requestId: reviewRequestId,
+        durableCompletionEvidenceAbsent: true,
+      }));
+    if (!reopened) {
+      // Also recover when envelope is still claimed/failed under other codes:
+      // load and force reopen only for failed+retryable already handled above.
+      return null;
+    }
+    const token = resolveDispatchGithubToken(env);
+    if (!token) {
+      return {
+        outcome: "missing_dispatch_token",
+        reviewRequestId,
+        state,
+        httpDispatched: false,
+      };
+    }
+    const redispatched = await redispatchJobRequestById({
+      requestId: reviewRequestId,
+      env,
+      fetchImpl: input.fetchImpl,
+      dispatchToken: token,
+    });
+    return {
+      outcome: "unresolved_decision_recovered",
+      reviewRequestId,
+      state,
+      httpDispatched: redispatched.dispatched,
+    };
+  } catch {
+    return null;
+  }
 }

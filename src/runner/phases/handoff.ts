@@ -885,6 +885,19 @@ export async function executeHandoffPhase(
       });
     }
 
+    // Clear the implementation-owned lease (not the handoff run id). Handoff
+    // run id never matches lease.ownerRunId, so clearActiveRunId: runId was a
+    // no-op and left Code Review blocked on active_run_conflict (FRE-7).
+    const implementationLease =
+      durable.activeRunLease &&
+      (durable.activeRunLease.phaseId === "implementation" ||
+        durable.activeRunLease.identity.startsWith("implementation:"))
+        ? {
+            expectedIdentity: durable.activeRunLease.identity,
+            expectedOwnerRunId: durable.activeRunLease.ownerRunId,
+          }
+        : undefined;
+
     const applied = await applyPhaseTransition({
       store,
       issueKey: options.issueKey,
@@ -900,7 +913,7 @@ export async function executeHandoffPhase(
       codeReviewEffectiveEnabled: codeReadiness.configuredReady,
       linearStatuses,
       latestImplementationArtifact: implementationArtifact,
-      clearActiveRunId: runId,
+      clearActiveRunLease: implementationLease,
     });
 
     if (!applied.applyOk || !applied.statusName) {

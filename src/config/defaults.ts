@@ -9,8 +9,8 @@ export const MILESTONE = RELEASE_PHASE;
 // `src/cursor/model.ts` for the cost-control rationale.
 export const DEFAULT_MODEL_ID = "composer-2.5";
 export const PLANNING_PROMPT_VERSION = "planning@1";
-export const PLAN_REVIEW_PROMPT_VERSION = "plan-review@1";
-export const CODE_REVIEW_PROMPT_VERSION = "code-review@1";
+export const PLAN_REVIEW_PROMPT_VERSION = "plan-review@2";
+export const CODE_REVIEW_PROMPT_VERSION = "code-review@2";
 export const CODE_REVISION_PROMPT_VERSION = "code-revision@1";
 export const IMPLEMENTATION_PROMPT_VERSION = "implementation@1";
 export const HANDOFF_PROMPT_VERSION = "handoff@1";

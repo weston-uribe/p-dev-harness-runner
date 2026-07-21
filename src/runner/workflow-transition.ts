@@ -155,6 +155,10 @@ export async function applyPhaseTransition(input: {
   productionBranch?: string;
   claimActiveRunId?: string;
   clearActiveRunId?: string;
+  clearActiveRunLease?: {
+    expectedIdentity: string;
+    expectedOwnerRunId: string;
+  };
   phaseExecutionId?: string;
   planReviewEffectiveEnabled?: boolean;
   codeReviewEffectiveEnabled?: boolean;
@@ -184,6 +188,7 @@ export async function applyPhaseTransition(input: {
     evidence: input.evidence,
     claimActiveRunId: input.claimActiveRunId,
     clearActiveRunId: input.clearActiveRunId,
+    clearActiveRunLease: input.clearActiveRunLease,
     phaseExecutionId: input.phaseExecutionId,
     returnDestination: input.returnDestination,
     latestPlanArtifact: input.latestPlanArtifact,

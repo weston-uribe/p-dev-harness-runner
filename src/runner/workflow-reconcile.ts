@@ -34,6 +34,7 @@ import {
 import {
   buildPlanReviewRequestId,
   ensurePlanReviewJobDispatched,
+  recoverUnresolvedPlanReviewDispatch,
 } from "../workflow/plan-review-dispatch-effect.js";
 import {
   buildImplementationRequestId,
@@ -417,6 +418,57 @@ export async function evaluateWorkflowReconcileIssue(input: {
     const hasReviewer = Boolean(authoritativeState?.planReviewerAgentId);
     const accepted =
       authoritativeState?.acceptedReviewSubjects?.[subject] ?? null;
+    // FRE-8: only when a failed/unresolved request can be reopened — not while
+    // a reviewer is simply still in flight.
+    if (
+      !accepted &&
+      hasReviewer &&
+      input.dispatch &&
+      !input.dryRun &&
+      authoritativeState &&
+      stateStore
+    ) {
+      const recovered = await recoverUnresolvedPlanReviewDispatch({
+        store: stateStore,
+        issueKey,
+        reviewSubjectIdentity: subject,
+        state: authoritativeState,
+      });
+      if (recovered?.outcome === "unresolved_decision_recovered") {
+        return {
+          issueKey,
+          linearStatus: issue.status,
+          phase: "plan_review",
+          action: recovered.httpDispatched ? "dispatch" : "noop",
+          reason: "pinned_plan_review_unresolved_decision_recovered",
+          shouldRun: recovered.httpDispatched,
+          dispatched: recovered.httpDispatched,
+          pendingRecorded: false,
+          incompleteSideEffectIdentities: incompleteSideEffects,
+          workflowStateRevision: recovered.state.stateRevision,
+          planReviewSubjectIdentity: subject,
+          planReviewRequestId: recovered.reviewRequestId,
+          pinMode: pinnedSubject ? "subject" : "phase",
+        };
+      }
+      if (recovered?.outcome === "missing_dispatch_token") {
+        return {
+          issueKey,
+          linearStatus: issue.status,
+          phase: "plan_review",
+          action: "blocker",
+          reason: "missing_dispatch_token",
+          shouldRun: true,
+          dispatched: false,
+          pendingRecorded: false,
+          incompleteSideEffectIdentities: incompleteSideEffects,
+          workflowStateRevision: authoritativeState.stateRevision,
+          planReviewSubjectIdentity: subject,
+          planReviewRequestId: requestId,
+          pinMode: pinnedSubject ? "subject" : "phase",
+        };
+      }
+    }
     let reason = "pinned_plan_review_pending";
     if (accepted) reason = "pinned_plan_review_subject_already_accepted";
     else if (hasReviewer) reason = "pinned_plan_review_reviewer_already_present";
@@ -647,7 +699,8 @@ export async function evaluateWorkflowReconcileIssue(input: {
         dispatchResult.outcome === "request_already_present" ||
         dispatchResult.outcome === "already_dispatched" ||
         dispatchResult.outcome === "decision_already_accepted" ||
-        dispatchResult.outcome === "reviewer_already_active";
+        dispatchResult.outcome === "reviewer_already_active" ||
+        dispatchResult.outcome === "false_duplicate_recovered";
       return {
         issueKey,
         linearStatus: issue.status,
@@ -669,6 +722,47 @@ export async function evaluateWorkflowReconcileIssue(input: {
         codeReviewRequestId: dispatchResult.reviewRequestId,
         pinMode: pinnedSubject ? "subject" : "phase",
       };
+    }
+
+    // FRE-7: already-dispatched effect may still need false-duplicate reopen.
+    if (
+      input.dispatch &&
+      !input.dryRun &&
+      !accepted &&
+      !leaseActive &&
+      (reason === "pinned_code_review_already_dispatched" ||
+        reason === "pinned_code_review_effect_completed") &&
+      authoritativeState &&
+      stateStore
+    ) {
+      const { recoverFalseDuplicateCodeReviewDispatch } = await import(
+        "../workflow/code-review-dispatch-effect.js"
+      );
+      const recovered = await recoverFalseDuplicateCodeReviewDispatch({
+        store: stateStore,
+        issueKey,
+        reviewSubjectIdentity: subject,
+        state: authoritativeState,
+      });
+      if (recovered?.outcome === "false_duplicate_recovered") {
+        return {
+          issueKey,
+          linearStatus: issue.status,
+          phase: "code_review",
+          action: recovered.httpDispatched ? "dispatch" : "noop",
+          reason: "pinned_code_review_false_duplicate_recovered",
+          shouldRun: recovered.httpDispatched,
+          dispatched: recovered.httpDispatched,
+          pendingRecorded: false,
+          incompleteSideEffectIdentities: listIncompleteSideEffects(
+            recovered.state,
+          ).map((e) => e.identity),
+          workflowStateRevision: recovered.state.stateRevision,
+          codeReviewSubjectIdentity: subject,
+          codeReviewRequestId: recovered.reviewRequestId,
+          pinMode: pinnedSubject ? "subject" : "phase",
+        };
+      }
     }
 
     return {
@@ -920,7 +1014,47 @@ export async function evaluateWorkflowReconcileIssue(input: {
       lease?.identity === leaseIdentity &&
       !isActiveRunLeaseExpired(lease, Date.now());
     const hasReviewerAgent = Boolean(authoritativeState.planReviewerAgentId);
-    if (!accepted && !leaseActive && !hasReviewerAgent) {
+    // FRE-8: reviewer finished without accepted decision — reparse recovery.
+    if (!accepted && hasReviewerAgent && input.dispatch && !input.dryRun) {
+      const recovered = await recoverUnresolvedPlanReviewDispatch({
+        store: stateStore,
+        issueKey,
+        reviewSubjectIdentity: subjectIdentity,
+        state: authoritativeState,
+      });
+      if (recovered?.outcome === "unresolved_decision_recovered") {
+        planReviewRecoveryHandled = true;
+        action = recovered.httpDispatched ? "dispatch" : "noop";
+        reason = "plan_review_unresolved_decision_recovered";
+        dispatched = recovered.httpDispatched;
+        authoritativeState = recovered.state;
+        planReviewSubjectIdentityOut = subjectIdentity;
+        planReviewRequestIdOut = recovered.reviewRequestId;
+      } else if (recovered?.outcome === "missing_dispatch_token") {
+        return {
+          issueKey,
+          linearStatus: issue.status,
+          phase: "plan_review",
+          action: "blocker",
+          reason: "missing_dispatch_token",
+          shouldRun: true,
+          dispatched: false,
+          pendingRecorded,
+          incompleteSideEffectIdentities: incompleteSideEffects,
+          workflowStateRevision: authoritativeState.stateRevision,
+          pmFeedbackCommentId,
+          mergePrUrl,
+          planReviewSubjectIdentity: subjectIdentity,
+          planReviewRequestId: buildPlanReviewRequestId(subjectIdentity),
+        };
+      }
+    }
+    if (
+      !planReviewRecoveryHandled &&
+      !accepted &&
+      !leaseActive &&
+      !hasReviewerAgent
+    ) {
       action = "dispatch";
       reason = "plan_review_subject_missing_active_or_completed";
       const planReviewRequestId = buildPlanReviewRequestId(subjectIdentity);
@@ -1044,9 +1178,10 @@ export async function evaluateWorkflowReconcileIssue(input: {
           reason = "plan_review_dispatch_claim_lost";
         }
       }
-    } else {
+    } else if (!planReviewRecoveryHandled) {
       // Route may mark Plan Review eligible even after subject/agent exists;
       // treat as effect-level no-op so we never hit requires_subject_dispatch.
+      // Exception: unresolved decision with reviewer is handled above.
       planReviewRecoveryHandled = true;
       action = "noop";
       planReviewSubjectIdentityOut = subjectIdentity;
