@@ -133,9 +133,12 @@ describe("recording runtime factory smoke", () => {
   it("exposes EvaluationRuntime shape for DI", async () => {
     const runtime: EvaluationRuntime = {
       enabled: false,
+      namespace: "default",
       async startPhaseTrace() {
         return null;
       },
+      recordScore() {},
+      async recordAcknowledgedScore() {},
       async flushAndShutdown() {},
     };
     expect(runtime.enabled).toBe(false);

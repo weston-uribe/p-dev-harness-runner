@@ -93,11 +93,11 @@ SDK runners handle planning through merge and production sync. Linear status cha
 | Layer | Status |
 |-------|--------|
 | Product onboarding | `p-dev` guided Configure GUI (implemented) |
-| Issue intake | ChatGPT prompt + Cursor skill + validate-issue CLI |
+| Issue intake | External standalone ChatGPT skill ([`.agents/skills/issue-intake/SKILL.md`](.agents/skills/issue-intake/SKILL.md)) + validate-issue CLI for the resulting issue contract |
 | Planning / implementation / handoff / revision / merge | SDK runners (implemented) |
 | Production sync | SDK runner + optional dispatch (implemented) |
 | Auto-run from Linear status | Webhook bridge + GitHub Actions (implemented) |
-| Canonical harness skills | `issue-intake`, `code-health-audit`, `architecture-evolution-audit`, `security-audit`, `planner`, `implementation` |
+| Canonical skills | `issue-intake` (external ChatGPT copy/paste; not harness-executed), `code-health-audit`, `architecture-evolution-audit`, `security-audit`, `planner`, `implementation` |
 
 ## Configuration and portability posture
 

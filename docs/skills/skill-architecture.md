@@ -1,6 +1,6 @@
 # Skill architecture
 
-**Status:** Implemented — architecture artifact and canonical path. Operator-invoked skills: `issue-intake`, `code-health-audit`, `architecture-evolution-audit`, and `security-audit` are implemented. Runner/agent phase skills: `planner` and `implementation` are implemented.
+**Status:** Implemented — architecture artifact and canonical path. External standalone ChatGPT skill: `issue-intake` (manual copy/paste; not harness-executed). Operator-invoked audit skills: `code-health-audit`, `architecture-evolution-audit`, and `security-audit`. Runner/agent phase skills: `planner` and `implementation`.
 
 This document defines the harness skill system. It does **not** create the full skill set.
 
@@ -72,6 +72,12 @@ Skill creation and promotion are **human-owned** product/architecture decisions.
 
 ## Skill categories
 
+### External standalone skills
+
+| Skill | Purpose |
+|-------|---------|
+| `issue-intake` | Standalone ChatGPT product-discovery and technical-scoping agent. Operator copies [`.agents/skills/issue-intake/SKILL.md`](../../.agents/skills/issue-intake/SKILL.md) into a normal ChatGPT conversation. Creates Linear issues; harness begins afterward. Not executed by the harness runtime. |
+
 ### Operator-invoked skills
 
 Used directly by the operator in an agent client (Cursor, future clients). The operator chooses when to invoke the skill.
@@ -80,7 +86,6 @@ Used directly by the operator in an agent client (Cursor, future clients). The o
 
 | Skill | Purpose |
 |-------|---------|
-| `issue-intake` | Turn a fuzzy product idea into a harness-compatible Linear issue |
 | `code-health-audit` | Report-only inspection of code health |
 | `architecture-evolution-audit` | Report-only inspection of architecture evolution and future-change readiness |
 | `security-audit` | Report-only security risk inspection |
@@ -152,7 +157,7 @@ Some cross-cutting concerns are embedded in skill boundaries rather than promote
 |---------|--------|
 | **PR slicing** | Implemented as a shared planner capability — not a standalone skill |
 | **Scope control** | Embedded in planner and implementation skill boundaries |
-| **Validation expectations / behavioral acceptance verification** | Embedded by role — **intake** defines observable success and expected proof; **planner** designs the Acceptance Verification Plan (automated + behavioral + repair loop + environment + evidence); **implementation** (initial-build, revision, integration-repair) executes the strategy and repairs until `verified_complete`; **handoff** independently inspects PR/evidence. Audit skills remain read-only. Docker is not universally required. |
+| **Validation expectations / behavioral acceptance verification** | Embedded by role — **external intake** (ChatGPT skill) defines observable success and expected proof in the Linear issue; **planner** designs the Acceptance Verification Plan (automated + behavioral + repair loop + environment + evidence); **implementation** (initial-build, revision, integration-repair) executes the strategy and repairs until `verified_complete`; **handoff** independently inspects PR/evidence. Audit skills remain read-only. Docker is not universally required. |
 | **UI/design standards** | Planned future implementation reference — not a standalone skill and not implemented in this PR |
 
 ## Relationship to runner prompts
@@ -161,7 +166,7 @@ SDK runner prompts in [`src/prompts/`](../src/prompts/) are **implementation det
 
 | Layer | Location | Status |
 |-------|----------|--------|
-| Canonical skills | `.agents/skills/<skill-name>/SKILL.md` | `issue-intake`, `code-health-audit`, `architecture-evolution-audit`, `security-audit`, `planner`, `implementation` implemented |
+| Canonical skills | `.agents/skills/<skill-name>/SKILL.md` | `issue-intake` (external ChatGPT), `code-health-audit`, `architecture-evolution-audit`, `security-audit`, `planner`, `implementation` implemented |
 | Runner prompts | `src/prompts/*.md` | Implemented for SDK phases |
 | Client adapters | `.cursor/skills`, etc. | Manual install/export only |
 
@@ -173,7 +178,7 @@ After this document and the accompanying migration:
 
 | Item | Status |
 |------|--------|
-| `issue-intake` | **Implemented** at [`.agents/skills/issue-intake/SKILL.md`](../../.agents/skills/issue-intake/SKILL.md) |
+| `issue-intake` | **Implemented** as external standalone ChatGPT skill at [`.agents/skills/issue-intake/SKILL.md`](../../.agents/skills/issue-intake/SKILL.md) (not harness-executed) |
 | `code-health-audit` | **Implemented** at [`.agents/skills/code-health-audit/SKILL.md`](../../.agents/skills/code-health-audit/SKILL.md) |
 | `planner` | **Implemented** at [`.agents/skills/planner/SKILL.md`](../../.agents/skills/planner/SKILL.md) |
 | `implementation` | **Implemented** at [`.agents/skills/implementation/SKILL.md`](../../.agents/skills/implementation/SKILL.md) |

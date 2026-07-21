@@ -105,9 +105,10 @@ npm run harness:doctor
 
 ## PM issue intake
 
-1. Copy [`prompts/issue-intake-chatgpt.md`](../prompts/issue-intake-chatgpt.md) into ChatGPT, **or**
-2. Use [`.agents/skills/issue-intake/SKILL.md`](../.agents/skills/issue-intake/SKILL.md) in Cursor
-3. Validate: `npm run harness:validate-issue`
+1. Copy the entire [`.agents/skills/issue-intake/SKILL.md`](../.agents/skills/issue-intake/SKILL.md) into a normal ChatGPT conversation (standalone skill; harness does not run intake)
+2. Review the proposed Linear issue set; approve creation (default status: Backlog)
+3. Move each issue to Ready for Planning or Ready for Build when ready
+4. Optionally validate the resulting issue contract: `npm run harness:validate-issue`
 
 ---
 

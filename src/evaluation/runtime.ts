@@ -27,6 +27,7 @@ export function createNoopRuntime(): EvaluationRuntime {
       return null;
     },
     recordScore(_input): void {},
+    async recordAcknowledgedScore(_input): Promise<void> {},
     async flushAndShutdown(): Promise<void> {},
   };
 }

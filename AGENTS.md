@@ -6,9 +6,9 @@ Instructions for AI agents working in **agentic-product-development-harness**. R
 
 v0.4.0 harness repo: SDK runners (M1–M8), templates, eval contracts, event-driven Linear auto-run, guided Configure GUI, and public `p-dev-harness` npm package. Read this before making changes.
 
-The harness has **M1–M8 SDK runners and tooling** (planning through merge, issue intake validation, and event-driven auto-run via Linear webhook + GitHub Actions).
+The harness has **M1–M8 SDK runners and tooling** (planning through merge, issue contract validation, and event-driven auto-run via Linear webhook + GitHub Actions).
 
-For new harness work intake, use [`.agents/skills/issue-intake/SKILL.md`](.agents/skills/issue-intake/SKILL.md) and validate with `npm run harness:validate-issue`.
+Issue intake is an **external ChatGPT workflow**, not a harness execution subsystem. For new work, copy [`.agents/skills/issue-intake/SKILL.md`](.agents/skills/issue-intake/SKILL.md) into a normal ChatGPT conversation; after Linear issues exist, optionally validate the issue contract with `npm run harness:validate-issue`.
 
 Status changes on allowlisted Linear statuses trigger cloud harness runs automatically — see [`docs/linear-watcher-setup.md`](docs/linear-watcher-setup.md).
 
@@ -130,7 +130,7 @@ docs/decisions/     → Architecture decision records
 docs/research/      → Workflow research notes
 templates/          → Issue, plan, readiness, eval templates
 evals/              → Eval rubric contracts (manual first)
-.agents/skills/     → Canonical harness skills (issue-intake, code-health-audit, architecture-evolution-audit, security-audit, planner, implementation)
+.agents/skills/     → Canonical skills (issue-intake is external ChatGPT copy/paste; code-health-audit, architecture-evolution-audit, security-audit, planner, implementation)
 docs/skills/        → Skill system architecture
 skills/             → Compatibility pointers only
 examples/           → Example runs

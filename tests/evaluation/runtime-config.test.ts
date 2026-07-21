@@ -30,9 +30,12 @@ describe("evaluation runtime configuration", () => {
   it("creates Langfuse runtime when config is valid via injected factory", async () => {
     const fake: EvaluationRuntime = {
       enabled: true,
+      namespace: "weston-dogfood",
       async startPhaseTrace() {
         return null;
       },
+      recordScore() {},
+      async recordAcknowledgedScore() {},
       async flushAndShutdown() {},
     };
     setLangfuseRuntimeFactoryForTests(async () => fake);

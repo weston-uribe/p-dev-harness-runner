@@ -688,6 +688,84 @@ export function findProductionSyncMarkerForMergeCommit(
   });
 }
 
+export interface AdoptableProductionSyncCommentMatch {
+  body: string;
+  markers: ReturnType<typeof parseHarnessMarkers>;
+  matchKind: "production_effect_id" | "production_completion_id" | "legacy_tuple";
+}
+
+/**
+ * Find a production-sync comment that can satisfy linear_production_comment
+ * for the current completion without posting a duplicate.
+ */
+export function findAdoptableProductionSyncComment(input: {
+  comments: { body: string }[];
+  orchestratorMarker: string;
+  productionCompletionId: string;
+  productionEffectId: string;
+  issueKey: string;
+  targetRepository: string;
+  mergeToDevSha: string;
+  productionBranch: string;
+}): AdoptableProductionSyncCommentMatch | null {
+  const mergeSha = input.mergeToDevSha.trim().toLowerCase();
+  const issueKey = input.issueKey.trim().toUpperCase();
+  const targetRepo = input.targetRepository.trim().toLowerCase();
+  const productionBranch = input.productionBranch.trim();
+
+  for (const comment of input.comments) {
+    const markers = parseHarnessMarkers(comment.body);
+    if (
+      markers.orchestratorMarker !== input.orchestratorMarker ||
+      markers.phase !== "production_sync" ||
+      !markers.runId
+    ) {
+      continue;
+    }
+
+    if (
+      markers.productionEffectId &&
+      markers.productionEffectId === input.productionEffectId
+    ) {
+      return {
+        body: comment.body,
+        markers,
+        matchKind: "production_effect_id",
+      };
+    }
+
+    if (
+      markers.productionCompletionId &&
+      markers.productionCompletionId === input.productionCompletionId
+    ) {
+      return {
+        body: comment.body,
+        markers,
+        matchKind: "production_completion_id",
+      };
+    }
+
+    const markerMerge = markers.mergeCommitSha?.trim().toLowerCase();
+    const markerIssue = markers.issueKey?.trim().toUpperCase();
+    const markerRepo = markers.targetRepo?.trim().toLowerCase();
+    const markerBranch = markers.productionBranch?.trim();
+    if (
+      markerMerge === mergeSha &&
+      markerIssue === issueKey &&
+      markerRepo === targetRepo &&
+      markerBranch === productionBranch
+    ) {
+      return {
+        body: comment.body,
+        markers,
+        matchKind: "legacy_tuple",
+      };
+    }
+  }
+
+  return null;
+}
+
 export interface MergeCompletionCommentBodyInput {
   prUrl: string;
   branch: string;

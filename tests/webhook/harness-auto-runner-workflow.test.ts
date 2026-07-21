@@ -114,7 +114,25 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
     it("defines sync-production job gated on production_promoted", () => {
       expect(workflow).toContain("sync-production:");
       expect(workflow).toContain("github.event.action == 'production_promoted'");
-      expect(workflow).toContain("harness:sync-production");
+      expect(workflow).toContain("sync-production");
+      expect(workflow).toContain("--json-out");
+    });
+
+    it("uses shared global production-sync concurrency without cancel", () => {
+      const syncSection = extractJobSection(workflow, "sync-production");
+      expect(syncSection).toContain("group: harness-production-sync");
+      expect(syncSection).toContain("cancel-in-progress: false");
+      expect(syncSection).not.toContain("cancel-in-progress: true");
+      expect(syncSection).not.toMatch(
+        /group:\s*harness-production-sync-\$\{/,
+      );
+    });
+
+    it("validates machine JSON via redact-json-file before upload", () => {
+      const syncSection = extractJobSection(workflow, "sync-production");
+      expect(syncSection).toContain("redact-json-file");
+      expect(syncSection).toContain("sync-production-raw.json");
+      expect(syncSection).toContain("sync-production-output.json");
     });
 
     it("uses harness secrets for sync without CURSOR_API_KEY", () => {

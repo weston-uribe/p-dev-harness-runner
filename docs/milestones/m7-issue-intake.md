@@ -1,20 +1,21 @@
 # Milestone 7 — Issue intake
 
-**Status:** Implemented (issue-intake skill, template alignment, validate-issue CLI)
+**Status:** Implemented (standalone ChatGPT issue-intake skill, template alignment, validate-issue CLI)
 
 ## What exists
 
-- **Issue intake skill** — [`.agents/skills/issue-intake/SKILL.md`](../.agents/skills/issue-intake/SKILL.md) interviews Weston and produces a Linear-ready issue package
-- **Parser-aligned template** — [`templates/linear-issue.md`](../templates/linear-issue.md)
+- **Standalone issue-intake skill** — [`.agents/skills/issue-intake/SKILL.md`](../../.agents/skills/issue-intake/SKILL.md) is the single behavioral source. Operators copy it into a normal ChatGPT conversation for product discovery, technical investigation, scoping, and Linear issue creation. The harness does **not** execute or observe intake.
+- **Parser-aligned template** — [`templates/linear-issue.md`](../../templates/linear-issue.md)
 - **Operator guide** — [`docs/issue-intake.md`](../issue-intake.md)
-- **Read-only validator CLI** — `harness validate-issue` with route-specific `--intended-phase planning|implementation`
+- **Read-only validator CLI** — `harness validate-issue` with route-specific `--intended-phase planning|implementation` (validates the resulting issue contract, not intake conversation behavior)
 - Reuses parser, resolver, allowlist, advisory narrow heuristic, and optional planning-marker detection
-- Tests and fixtures for validation paths
+- Tests and fixtures for validation paths (issue contract / harness behavior — not intake agent reasoning)
 
-## What is deferred
+## What is deferred / out of model
 
-- Lead agent skill, `performance-cost-audit`, skill registry/package manager, manifests, provider/client adapters, and runner-skill integration (see [`docs/skills/skill-architecture.md`](../skills/skill-architecture.md))
-- ChatGPT/Linear automation for intake
+- Lead agent skill, `performance-cost-audit`, skill registry/package manager, manifests, provider/client adapters (see [`docs/skills/skill-architecture.md`](../skills/skill-architecture.md))
+- Custom GPT packaging for intake (deprecated; see [`gpt/issue-intake/README.md`](../../gpt/issue-intake/README.md))
+- Runtime harness integration of intake (not planned; intake remains external)
 - Label enforcement in runner code
 - Writing to Linear from the validator
 
@@ -57,7 +58,7 @@ npm run harness:run -- --issue WES-FIXTURE --dry-run \
 
 ## Pass criteria
 
-- Skill output passes route-specific validator for recommended status
+- Created issues pass route-specific validator for the intended status
 - `--intended-phase implementation` accepts broad issues when structurally valid; narrow heuristics are advisory only (uninitialized-product still blocks)
 - Validator catches `ambiguous_issue`, `missing_target_repo`, `unknown_repo_denied`
 - No Linear writes from validator

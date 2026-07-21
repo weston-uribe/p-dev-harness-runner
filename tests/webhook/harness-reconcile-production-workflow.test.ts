@@ -18,9 +18,20 @@ describe("harness-reconcile-production workflow", () => {
     expect(yaml).toContain("VERCEL_TOKEN");
     expect(yaml).toContain("P_DEV_EVALUATION_PROVIDER");
     expect(yaml).toContain("LANGFUSE_SECRET_KEY");
-    expect(yaml).toContain(
-      "group: harness-reconcile-production-${{ github.event.inputs.repo || 'all' }}",
+    expect(yaml).toContain("group: harness-production-sync");
+    expect(yaml).toContain("cancel-in-progress: false");
+    expect(yaml).not.toContain("harness-reconcile-production-");
+  });
+
+  it("shares the exact concurrency group with event-driven sync-production", () => {
+    const autoRunner = readFileSync(
+      path.join(repoRoot, ".github/workflows/harness-auto-runner.yml"),
+      "utf8",
     );
+    const syncJob = autoRunner.slice(autoRunner.indexOf("sync-production:"));
+    expect(syncJob).toContain("group: harness-production-sync");
+    expect(syncJob).toContain("cancel-in-progress: false");
+    expect(yaml).toContain("group: harness-production-sync");
   });
 
   it("does not overload the revision reconciler workflow", () => {

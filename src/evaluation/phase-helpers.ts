@@ -148,6 +148,32 @@ export function safeRecordScore(
   }
 }
 
+/**
+ * Production-effect Langfuse projection: create + flush acknowledgement.
+ * When evaluation is disabled/no-op, succeeds without network I/O.
+ * Throws with langfuse_projection_failure on create/flush failure.
+ */
+export async function recordAcknowledgedProductionScore(
+  runtime: EvaluationRuntime | null | undefined,
+  score: EvaluationScoreInput,
+): Promise<void> {
+  if (!runtime || !runtime.enabled) {
+    return;
+  }
+  try {
+    await runtime.recordAcknowledgedScore(score);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error);
+    if (message.includes("langfuse_projection_failure")) {
+      throw error instanceof Error
+        ? error
+        : new Error(`langfuse_projection_failure: ${message}`);
+    }
+    throw new Error(`langfuse_projection_failure: ${message}`);
+  }
+}
+
 export function recordPhaseSuccess(
   runtime: EvaluationRuntime | null | undefined,
   correlation: EvaluationCorrelation | null,

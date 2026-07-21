@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { EXIT_CONFIG } from "../exit-codes.js";
 import { loadHarnessConfig } from "../../config/load-config.js";
 import { executeProductionSyncForIssue } from "../../runner/phases/production-sync.js";
@@ -18,13 +19,21 @@ export interface SyncProductionCommandOptions {
   sourceRepo?: string;
   productionBranch?: string;
   ref?: string;
+  after?: string;
+  trigger?: string;
   dryRun?: boolean;
   force?: boolean;
   json?: boolean;
+  jsonOut?: string;
 }
 
 export interface SyncProductionSummary {
+  trigger?: string;
   repoId: string;
+  sourceRepo?: string;
+  productionBranch?: string;
+  after?: string;
+  ref?: string;
   issuesInspected: number;
   issuesUpdated: number;
   issuesSkipped: number;
@@ -33,9 +42,11 @@ export interface SyncProductionSummary {
     issueKey: string;
     finalOutcome: string;
     skippedReason?: string;
+    errorClassification?: string | null;
     diagnosticIssueKeyCommits?: string[];
     productionCompletionId?: string;
     productionState?: string;
+    durableStateRevision?: number;
   }>;
 }
 
@@ -47,6 +58,8 @@ export async function executeSyncProduction(input: {
   sourceRepo?: string;
   productionBranch?: string;
   ref?: string;
+  after?: string;
+  trigger?: string;
   dryRun?: boolean;
   force?: boolean;
   linearApiKey: string;
@@ -75,7 +88,12 @@ export async function executeSyncProduction(input: {
 
     if (repoConfig.baseBranch === repoConfig.productionBranch) {
       return {
+        trigger: input.trigger,
         repoId: input.repo,
+        sourceRepo: input.sourceRepo,
+        productionBranch: input.productionBranch,
+        after: input.after,
+        ref: input.ref,
         issuesInspected: 0,
         issuesUpdated: 0,
         issuesSkipped: 0,
@@ -93,7 +111,12 @@ export async function executeSyncProduction(input: {
   }
 
   const summary: SyncProductionSummary = {
+    trigger: input.trigger,
     repoId: input.repo ?? "single-issue",
+    sourceRepo: input.sourceRepo,
+    productionBranch: input.productionBranch,
+    after: input.after,
+    ref: input.ref,
     issuesInspected: issueKeys.length,
     issuesUpdated: 0,
     issuesSkipped: 0,
@@ -153,6 +176,7 @@ export async function executeSyncProduction(input: {
         issueKey,
         finalOutcome: result.manifest.finalOutcome,
         skippedReason: result.skippedReason,
+        errorClassification: result.manifest.errorClassification,
         diagnosticIssueKeyCommits: result.diagnosticIssueKeyCommits,
         productionCompletionId: result.productionCompletionId,
         productionState: result.productionState,
@@ -207,6 +231,8 @@ export async function runSyncProductionCommand(
       sourceRepo: options.sourceRepo,
       productionBranch: options.productionBranch,
       ref: options.ref,
+      after: options.after,
+      trigger: options.trigger,
       dryRun: options.dryRun,
       force: options.force,
       linearApiKey,
@@ -220,9 +246,26 @@ export async function runSyncProductionCommand(
     return EXIT_CONFIG;
   }
 
+  if (options.jsonOut) {
+    try {
+      await writeFile(
+        options.jsonOut,
+        `${JSON.stringify(summary, null, 2)}\n`,
+        "utf8",
+      );
+    } catch (error) {
+      console.error(
+        error instanceof Error
+          ? `invalid_machine_output: failed to write --json-out: ${error.message}`
+          : "invalid_machine_output: failed to write --json-out",
+      );
+      return EXIT_CONFIG;
+    }
+  }
+
   if (options.json) {
     console.log(JSON.stringify(summary, null, 2));
-  } else {
+  } else if (!options.jsonOut) {
     console.log(`Production sync inspected ${summary.issuesInspected} issue(s).`);
     console.log(`Updated: ${summary.issuesUpdated}`);
     console.log(`Skipped: ${summary.issuesSkipped}`);

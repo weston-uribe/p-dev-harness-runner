@@ -92,13 +92,13 @@ Planning is **optional** in the target Linear workflow. Low-risk issues may bypa
 
 ### Issue intake
 
-**Purpose:** Capture product intent in a structured, reviewable issue before any code is written.
+**Purpose:** External product-discovery and technical-scoping workflow that creates harness-compatible Linear issues before planning or implementation runs.
 
-**Status:** **Implemented** — Canonical ChatGPT prompt at [`prompts/issue-intake-chatgpt.md`](prompts/issue-intake-chatgpt.md) for PM intake; [`.agents/skills/issue-intake/SKILL.md`](.agents/skills/issue-intake/SKILL.md) for Cursor drafting; [`templates/linear-issue.md`](templates/linear-issue.md) aligned to parser contract; `harness validate-issue` for read-only validation with route-specific `--intended-phase`. Deferred Custom GPT package at [`gpt/issue-intake/`](gpt/issue-intake/). Skill system: [`docs/skills/skill-architecture.md`](docs/skills/skill-architecture.md).
+**Status:** **Implemented** as a **standalone ChatGPT skill** at [`.agents/skills/issue-intake/SKILL.md`](.agents/skills/issue-intake/SKILL.md) (operator manually copies the file into a normal ChatGPT conversation). The harness does **not** execute or observe intake. [`templates/linear-issue.md`](templates/linear-issue.md) remains aligned to the parser contract; `harness validate-issue` validates the resulting issue contract (not intake conversation behavior). [`prompts/issue-intake-chatgpt.md`](prompts/issue-intake-chatgpt.md) and [`gpt/issue-intake/`](gpt/issue-intake/) are compatibility pointers only (Custom GPT path deprecated). Operator guide: [`docs/issue-intake.md`](docs/issue-intake.md). Skill system: [`docs/skills/skill-architecture.md`](docs/skills/skill-architecture.md).
 
-**Inputs:** Problem statement, user context, acceptance criteria, out-of-scope boundaries.
+**Inputs:** Product idea, problem, or desired outcome (investigated by the intake agent via connected tools).
 
-**Outputs:** A single issue artifact that an implementation plan or direct build can reference. Routing is the **Linear status field** (Ready for Planning, Ready for Build), not a description section.
+**Outputs:** One or more Linear issues (default **Backlog**), each targeting exactly one repository and one PR-sized outcome. The human later moves status to Ready for Planning or Ready for Build. Routing is the **Linear status field**, not a description section.
 
 **Labels (operational):** `requires-plan` — should go through planning; `skip-plan` — may go directly to Ready for Build. Runner does not read labels today.
 
@@ -252,7 +252,7 @@ Planning is **optional** in the target Linear workflow. Low-risk issues may bypa
 
 **Implemented (Milestone 8):** Event-driven auto-runner — Vercel webhook bridge verifies Linear signatures, filters to dispatch allowlist statuses, and triggers GitHub Actions via `repository_dispatch`. See [`docs/milestones/m8-linear-watcher.md`](docs/milestones/m8-linear-watcher.md).
 
-**Implemented (skills):** Canonical operator-invoked and runner/agent phase skills — `issue-intake`, `code-health-audit`, `architecture-evolution-audit`, `security-audit`, `planner`, and `implementation` at [`.agents/skills/`](.agents/skills/). See [`docs/skills/skill-architecture.md`](docs/skills/skill-architecture.md).
+**Implemented (skills):** Canonical skills at [`.agents/skills/`](.agents/skills/) — external standalone ChatGPT intake (`issue-intake`), operator-invoked audits (`code-health-audit`, `architecture-evolution-audit`, `security-audit`), and runner/agent phase skills (`planner`, `implementation`). `issue-intake` is not harness-executed. See [`docs/skills/skill-architecture.md`](docs/skills/skill-architecture.md).
 
 **Still deferred:** Additional audit skill (`performance-cost-audit`), skill registry/package manager, skill manifests, provider/client adapters, and runner-skill prompt integration. SDK runners continue to use [`src/prompts/`](src/prompts/) today.
 

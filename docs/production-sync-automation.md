@@ -57,9 +57,81 @@ If workflow files cannot be pushed, use the exact YAML below via GitHub UI. Do *
 The harness workflow must include:
 
 - `repository_dispatch` type **`production_promoted`**
-- Job **`sync-production`** running `npm run harness:sync-production -- --repo … --json`
+- Job **`sync-production`** writing machine output via `--json-out` (then parse → redact → re-parse → upload)
+- Shared global concurrency group **`harness-production-sync`** with **`cancel-in-progress: false`** (also used by `harness-reconcile-production.yml`)
 - Optional **`workflow_dispatch`** input **`sync_repo`** (e.g. `target-app`) for manual cloud sync
-- Optional **`workflow_dispatch`** input **`sync_dry_run`** (default **`true`**) — passes `--dry-run` to `harness:sync-production` so manual cloud validation inspects Linear without writes
+- Optional **`workflow_dispatch`** input **`sync_dry_run`** (default **`true`**) — passes `--dry-run` so manual cloud validation inspects Linear without writes
+
+---
+
+## Crash-safe projection (effect-level)
+
+Production sync reconciles **individual effects**, not a whole-phase marker.
+
+### Deterministic identities
+
+- **`productionCompletionId`**: hash of `issueKey + targetRepository + mergeToDevSha + productionBranch`
+- **`productionEffectId`**: hash of `productionCompletionId + effect kind` (e.g. `linear_production_comment`)
+- Langfuse production scores use deterministic score IDs derived from session + completion + milestone / delivery outcome
+
+### Load order
+
+1. Resolve merge metadata and completion identity
+2. Load the configured durable workflow-state store
+3. Fail closed on managed-state load/auth failures (`durable_state_unavailable`) before any Linear/Langfuse writes
+4. Resolve the production-completion record
+5. Decide completed no-op vs effect recovery
+
+A production-sync comment marker alone never skips the phase. Unexpected Linear status fails with **`wrong_status`** and performs no new writes.
+
+### Linear adoption
+
+Before posting a production comment, the harness adopts an existing comment when:
+
+- `production_effect_id` matches, or
+- `production_completion_id` matches, or
+- legacy FRE-compatible tuple matches (orchestrator + `production_sync` + merge SHA + issue key + target repo + production branch)
+
+If the issue is already in the configured production-success status, the status effect is adopted without transitioning again.
+
+### Immediate persistence (mutation CAS)
+
+After each adopted or executed external effect, durable state is persisted through a compare-and-set **mutation** that reloads the latest workflow record, applies one narrow update, unions effects by identity, never downgrades `completed`, and preserves unrelated outer fields. Exhaustion throws **`durable_state_cas_exhausted`**.
+
+### Acknowledged Langfuse projection
+
+Ordinary telemetry may use best-effort `safeRecordScore`. Production effects use an acknowledged path: create score → await flush → only then mark the durable Langfuse effect completed. Create/flush failures classify as **`langfuse_projection_failure`**. Retries reuse the same deterministic score ID.
+
+### Concurrency
+
+Event-driven `sync-production` and scheduled `harness-reconcile-production` share:
+
+```yaml
+concurrency:
+  group: harness-production-sync
+  cancel-in-progress: false
+```
+
+This mutually excludes overlapping projection jobs so one run cannot cancel another after a Linear comment but before durable persist.
+
+### Machine-readable artifact
+
+```bash
+npx tsx src/index.ts sync-production --repo <id> --json-out sync-production-raw.json
+npx tsx src/index.ts redact-json-file --in sync-production-raw.json --out sync-production-output.json
+```
+
+Diagnostics go to stderr only. Invalid JSON fails the workflow (`invalid_machine_output`) and is not uploaded.
+
+### Operator action when retries exhaust
+
+| Classification | Meaning | Action |
+|----------------|---------|--------|
+| `durable_state_unavailable` | Managed state store missing/unreachable | Fix state repo token / vars; re-run reconcile |
+| `durable_state_cas_exhausted` | Contended writes exhausted | Re-run reconcile; inspect state revision churn |
+| `linear_comment_failure` / `linear_status_transition_failure` | Linear write failed after partial progress | Re-run reconcile (adoption prevents duplicates) |
+| `langfuse_projection_failure` | Score create/flush failed | Re-run reconcile; Linear state remains authoritative |
+| `wrong_status` | Issue not in integration/production success | Move issue to the configured status or investigate manually |
 
 ### Manual cloud sync (harness Actions)
 
