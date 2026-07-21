@@ -35,6 +35,7 @@ export function generateHarnessConfigB64Instructions(options?: {
 
 export function generateGitHubSecretInstructions(options?: {
   harnessRepo?: string;
+  includeVercelToken?: boolean;
 }): GeneratedInstructions {
   const harnessRepo = resolveHarnessRepoLabel(options?.harnessRepo);
   const secretNames = [
@@ -42,6 +43,7 @@ export function generateGitHubSecretInstructions(options?: {
     "LINEAR_API_KEY",
     "CURSOR_API_KEY",
     "HARNESS_GITHUB_TOKEN",
+    ...(options?.includeVercelToken ? (["VERCEL_TOKEN"] as const) : []),
   ];
 
   return {
@@ -52,6 +54,11 @@ export function generateGitHubSecretInstructions(options?: {
       `Create or update these secret names: ${secretNames.join(", ")}.`,
       "Set HARNESS_CONFIG_JSON_B64 from the base64-encoded full private harness config.",
       "Set LINEAR_API_KEY, CURSOR_API_KEY, and HARNESS_GITHUB_TOKEN from your operator credentials.",
+      ...(options?.includeVercelToken
+        ? [
+            "Set VERCEL_TOKEN when any target repo requires Vercel production deployment verification for terminal Merged / Deployed projection.",
+          ]
+        : []),
       "Never print secret values in logs, docs, PR comments, or generated setup previews.",
     ],
   };

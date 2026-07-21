@@ -22,6 +22,8 @@ function localSecretAvailableForHarnessAction(
       return envKeyPresence.CURSOR_API_KEY;
     case "HARNESS_GITHUB_TOKEN":
       return envKeyPresence.GITHUB_TOKEN;
+    case "VERCEL_TOKEN":
+      return envKeyPresence.VERCEL_TOKEN;
     case "HARNESS_CONFIG_JSON_B64":
       return false;
   }

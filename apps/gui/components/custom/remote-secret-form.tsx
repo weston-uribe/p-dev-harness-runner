@@ -13,12 +13,15 @@ export interface RemoteSecretFormValues {
   linearApiKey: string;
   cursorApiKey: string;
   harnessGithubToken: string;
+  vercelToken: string;
 }
 
 interface RemoteSecretFormProps {
   values: RemoteSecretFormValues;
   secretStatuses: HarnessSecretStatusEntry[];
   onChange: (values: RemoteSecretFormValues) => void;
+  /** When true, show VERCEL_TOKEN as required for production deployment verification. */
+  requireVercelToken?: boolean;
 }
 
 const SECRET_LABELS: Record<HarnessActionsSecretName, string> = {
@@ -26,6 +29,7 @@ const SECRET_LABELS: Record<HarnessActionsSecretName, string> = {
   LINEAR_API_KEY: "LINEAR_API_KEY",
   CURSOR_API_KEY: "CURSOR_API_KEY",
   HARNESS_GITHUB_TOKEN: "HARNESS_GITHUB_TOKEN",
+  VERCEL_TOKEN: "VERCEL_TOKEN",
 };
 
 function statusVariant(
@@ -40,6 +44,7 @@ export function RemoteSecretForm({
   values,
   secretStatuses,
   onChange,
+  requireVercelToken = false,
 }: RemoteSecretFormProps) {
   const update = (patch: Partial<RemoteSecretFormValues>) => {
     onChange({ ...values, ...patch });
@@ -84,6 +89,21 @@ export function RemoteSecretForm({
         value={values.harnessGithubToken}
         onChange={(harnessGithubToken) => update({ harnessGithubToken })}
       />
+      {requireVercelToken ? (
+        <div className={FORM.fieldStack}>
+          <RemoteSecretField
+            id="remote-vercel-token"
+            label={SECRET_LABELS.VERCEL_TOKEN}
+            status={statusByName.get("VERCEL_TOKEN") ?? "unknown"}
+            value={values.vercelToken}
+            onChange={(vercelToken) => update({ vercelToken })}
+          />
+          <p className="text-sm text-muted-foreground">
+            Required when a target repo uses Vercel production deployment
+            verification for terminal Merged / Deployed projection.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

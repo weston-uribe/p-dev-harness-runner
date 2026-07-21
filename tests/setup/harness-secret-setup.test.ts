@@ -194,6 +194,7 @@ describe("harness-secret-setup", () => {
       linearApiKey: "enriched-local",
       cursorApiKey: "enriched-local",
       harnessGithubToken: "enriched-local",
+      vercelToken: "absent",
     });
   });
 

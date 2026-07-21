@@ -64,6 +64,7 @@ function baseRemoteSummary(
     harnessDispatchRepoResolved: false,
     harnessDispatchRepoSource: "unresolved",
     harnessRepoAccess: "unknown",
+    requireVercelProductionToken: false,
     harnessSecretStatuses: HARNESS_ACTIONS_SECRET_NAMES.map((name) => ({
       name,
       status: "missing" as const,

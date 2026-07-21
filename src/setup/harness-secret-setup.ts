@@ -9,13 +9,14 @@ import {
 } from "./harness-dispatch-repo.js";
 import { generateGitHubSecretInstructions } from "./generated-instructions.js";
 import {
-  HARNESS_ACTIONS_SECRET_NAMES,
   REMOTE_SETUP_ACTIONS,
+  resolveRequiredHarnessActionsSecretNames,
   type HarnessActionsSecretName,
   type HarnessSecretStatusEntry,
   type HarnessSecretWritePlanEntry,
   type RemoteAccessStatus,
 } from "./remote-actions.js";
+import type { ProductionSyncRepoLike } from "../preview/production-verification-requirement.js";
 import {
   computeHarnessSecretFingerprint,
   type CredentialInputSource,
@@ -28,12 +29,14 @@ export interface HarnessSecretOperatorInput {
   linearApiKey?: string;
   cursorApiKey?: string;
   githubToken?: string;
+  vercelToken?: string;
   /** Credential secrets listed here were explicitly submitted for replacement. */
   explicitCredentialReplacements?: HarnessActionsSecretName[];
   credentialInputSources?: {
     linearApiKey: CredentialInputSource;
     cursorApiKey: CredentialInputSource;
     harnessGithubToken: CredentialInputSource;
+    vercelToken?: CredentialInputSource;
   };
 }
 
@@ -60,6 +63,7 @@ export async function resolveHarnessCredentialFingerprintContext(options: {
     linearApiKey: "absent",
     cursorApiKey: "absent",
     harnessGithubToken: "absent",
+    vercelToken: "absent",
   };
 
   return {
@@ -95,6 +99,9 @@ function operatorCredentialValue(
   if (name === "HARNESS_GITHUB_TOKEN") {
     return input?.githubToken;
   }
+  if (name === "VERCEL_TOKEN") {
+    return input?.vercelToken;
+  }
   return undefined;
 }
 
@@ -113,6 +120,9 @@ function credentialAvailable(
     if (name === "HARNESS_GITHUB_TOKEN") {
       return sources.harnessGithubToken !== "absent";
     }
+    if (name === "VERCEL_TOKEN") {
+      return (sources.vercelToken ?? "absent") !== "absent";
+    }
   }
 
   return Boolean(operatorCredentialValue(input, name)?.trim());
@@ -124,6 +134,8 @@ export interface HarnessSecretSetupOptions {
   manualHarnessDispatchRepo?: string;
   secretStatuses?: HarnessSecretStatusEntry[];
   repoAccess?: RemoteAccessStatus;
+  repos?: ProductionSyncRepoLike[];
+  requireVercelProductionToken?: boolean;
 }
 
 export async function readValidatedConfigLocalBytes(
@@ -146,14 +158,21 @@ export function buildHarnessSecretWritePlan(input: {
   operatorInput?: HarnessSecretOperatorInput;
   configLocalExists: boolean;
   secretStatuses?: HarnessSecretStatusEntry[];
+  /** When set, only plan writes for secrets required by the production-verification contract. */
+  repos?: ProductionSyncRepoLike[];
+  requireVercelProductionToken?: boolean;
 }): HarnessSecretWritePlanEntry[] {
   const statusByName = new Map(
     (input.secretStatuses ?? []).map((entry) => [entry.name, entry.status]),
   );
 
   const plan: HarnessSecretWritePlanEntry[] = [];
+  const requiredNames = resolveRequiredHarnessActionsSecretNames({
+    requireVercelProductionToken: input.requireVercelProductionToken,
+    repos: input.repos,
+  });
 
-  for (const name of HARNESS_ACTIONS_SECRET_NAMES) {
+  for (const name of requiredNames) {
     if (name === "HARNESS_CONFIG_JSON_B64") {
       if (!input.configLocalExists) {
         plan.push({
@@ -229,6 +248,8 @@ export async function buildHarnessSecretPreviewContext(options: {
   manualHarnessDispatchRepo?: string;
   secretStatuses?: HarnessSecretStatusEntry[];
   repoAccess?: RemoteAccessStatus;
+  repos?: ProductionSyncRepoLike[];
+  requireVercelProductionToken?: boolean;
 }): Promise<{
   harnessDispatchRepo: HarnessDispatchRepoResolution;
   configLocalExists: boolean;
@@ -244,11 +265,22 @@ export async function buildHarnessSecretPreviewContext(options: {
   let configLocalExists = false;
   let configLocalHash = "";
   let validationError: string | undefined;
+  let repos = options.repos;
 
   try {
     const config = await readValidatedConfigLocalBytes(options.cwd);
     configLocalExists = true;
     configLocalHash = config.hash;
+    if (!repos) {
+      try {
+        const parsed = JSON.parse(config.bytes.toString("utf8")) as {
+          repos?: ProductionSyncRepoLike[];
+        };
+        repos = parsed.repos;
+      } catch {
+        // keep optional repos unset
+      }
+    }
   } catch (error) {
     validationError =
       error instanceof Error ? error.message : String(error);
@@ -258,6 +290,8 @@ export async function buildHarnessSecretPreviewContext(options: {
     operatorInput: options.operatorInput,
     configLocalExists,
     secretStatuses: options.secretStatuses,
+    repos,
+    requireVercelProductionToken: options.requireVercelProductionToken,
   });
 
   return {
@@ -284,8 +318,13 @@ export async function previewHarnessSecretSetup(
   const harnessDispatchRepoSlug = formatHarnessDispatchRepo(
     context.harnessDispatchRepo,
   );
+  const requireVercel = resolveRequiredHarnessActionsSecretNames({
+    requireVercelProductionToken: options.requireVercelProductionToken,
+    repos: options.repos,
+  }).includes("VERCEL_TOKEN");
   const manualInstructions = generateGitHubSecretInstructions({
     harnessRepo: harnessDispatchRepoSlug,
+    includeVercelToken: requireVercel,
   }).steps;
 
   const credentialInputContext = await resolveHarnessCredentialFingerprintContext(
@@ -337,6 +376,7 @@ export interface HarnessSecretOperatorPayload {
   linearApiKey?: string;
   cursorApiKey?: string;
   harnessGithubToken?: string;
+  vercelToken?: string;
 }
 
 export async function resolveHarnessSecretOperatorInput(options: {
@@ -368,10 +408,18 @@ export async function resolveHarnessSecretOperatorInput(options: {
     githubToken = existingEnv?.values.GITHUB_TOKEN?.trim() || undefined;
   }
 
+  let vercelToken = options.payload.vercelToken?.trim();
+  if (vercelToken) {
+    explicitCredentialReplacements.push("VERCEL_TOKEN");
+  } else {
+    vercelToken = existingEnv?.values.VERCEL_TOKEN?.trim() || undefined;
+  }
+
   return {
     linearApiKey,
     cursorApiKey,
     githubToken,
+    vercelToken,
     explicitCredentialReplacements:
       explicitCredentialReplacements.length > 0
         ? explicitCredentialReplacements
@@ -394,6 +442,12 @@ export async function resolveHarnessSecretOperatorInput(options: {
           "HARNESS_GITHUB_TOKEN",
         ),
         envPresent: existingEnv?.presence.GITHUB_TOKEN ?? false,
+      }),
+      vercelToken: resolveCredentialInputSource({
+        explicitReplacement: explicitCredentialReplacements.includes(
+          "VERCEL_TOKEN",
+        ),
+        envPresent: existingEnv?.presence.VERCEL_TOKEN ?? false,
       }),
     },
   };
@@ -434,6 +488,11 @@ export async function buildManualHarnessSecretCopyValues(options?: {
     values.HARNESS_GITHUB_TOKEN = githubToken;
   } else {
     missing.push("HARNESS_GITHUB_TOKEN");
+  }
+
+  const vercelToken = existingEnv?.values.VERCEL_TOKEN?.trim();
+  if (vercelToken) {
+    values.VERCEL_TOKEN = vercelToken;
   }
 
   return { values, missing };

@@ -176,6 +176,7 @@ Production sync assumes merge commits are promoted to the configured `production
 |------------|-------|---------|
 | `HARNESS_CONFIG_JSON_B64` | Harness GHA secrets | Private config (sensitive metadata, not a write token) |
 | `LINEAR_API_KEY`, `CURSOR_API_KEY`, `HARNESS_GITHUB_TOKEN` | Harness GHA secrets | Live harness phases |
+| `VERCEL_TOKEN` | Harness GHA secret (conditional) | Required when a configured repo uses Vercel production deployment verification (`previewProvider: "vercel"` with distinct integration vs production branches) |
 | `HARNESS_DISPATCH_TOKEN` | Target repo GHA secrets | Dispatch-only PAT scoped to harness repo |
 
 Full matrix: [`docs/security.md`](security.md)

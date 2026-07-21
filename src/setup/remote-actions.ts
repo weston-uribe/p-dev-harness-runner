@@ -1,11 +1,25 @@
 import type { SetupPermission, SetupPermissionScope } from "./permission-model.js";
 import { SETUP_PERMISSIONS } from "./permission-model.js";
+import {
+  configRequiresVercelProductionDeploymentVerification,
+  type ProductionSyncRepoLike,
+} from "../preview/production-verification-requirement.js";
 
-export const HARNESS_ACTIONS_SECRET_NAMES = [
+/** Always required on the managed runner. */
+export const HARNESS_ACTIONS_CORE_SECRET_NAMES = [
   "HARNESS_CONFIG_JSON_B64",
   "LINEAR_API_KEY",
   "CURSOR_API_KEY",
   "HARNESS_GITHUB_TOKEN",
+] as const;
+
+/** Required only when terminal production projection needs Vercel verification. */
+export const HARNESS_ACTIONS_CONDITIONAL_SECRET_NAMES = ["VERCEL_TOKEN"] as const;
+
+/** All Actions secret names the harness may write or inspect. */
+export const HARNESS_ACTIONS_SECRET_NAMES = [
+  ...HARNESS_ACTIONS_CORE_SECRET_NAMES,
+  ...HARNESS_ACTIONS_CONDITIONAL_SECRET_NAMES,
 ] as const;
 
 export type HarnessActionsSecretName =
@@ -14,18 +28,41 @@ export type HarnessActionsSecretName =
 export const MANUAL_HARNESS_DISPATCH_REPO_PLACEHOLDER =
   "<harness-dispatch-repo>";
 
+export function resolveRequiredHarnessActionsSecretNames(input?: {
+  requireVercelProductionToken?: boolean;
+  repos?: ProductionSyncRepoLike[];
+}): readonly HarnessActionsSecretName[] {
+  const requireVercel =
+    input?.requireVercelProductionToken ??
+    (input?.repos
+      ? configRequiresVercelProductionDeploymentVerification({
+          repos: input.repos,
+        })
+      : false);
+
+  if (requireVercel) {
+    return HARNESS_ACTIONS_SECRET_NAMES;
+  }
+  return HARNESS_ACTIONS_CORE_SECRET_NAMES;
+}
+
 export function evaluateHarnessSecretPresence(
   statuses: HarnessSecretStatusEntry[],
+  options?: {
+    requiredNames?: readonly HarnessActionsSecretName[];
+  },
 ): {
   allPresent: boolean;
   missing: HarnessActionsSecretName[];
   unknown: HarnessActionsSecretName[];
 } {
+  const required =
+    options?.requiredNames ?? HARNESS_ACTIONS_CORE_SECRET_NAMES;
   const statusByName = new Map(statuses.map((entry) => [entry.name, entry.status]));
   const missing: HarnessActionsSecretName[] = [];
   const unknown: HarnessActionsSecretName[] = [];
 
-  for (const name of HARNESS_ACTIONS_SECRET_NAMES) {
+  for (const name of required) {
     const status = statusByName.get(name);
     if (status === "present") {
       continue;

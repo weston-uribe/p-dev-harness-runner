@@ -215,6 +215,7 @@ export interface RemoteSecretFormPayload {
   linearApiKey?: string;
   cursorApiKey?: string;
   harnessGithubToken?: string;
+  vercelToken?: string;
   manualHarnessDispatchRepo?: string;
 }
 
@@ -407,11 +408,15 @@ function toOperatorInput(
   if (payload.harnessGithubToken?.trim()) {
     explicitCredentialReplacements.push("HARNESS_GITHUB_TOKEN");
   }
+  if (payload.vercelToken?.trim()) {
+    explicitCredentialReplacements.push("VERCEL_TOKEN");
+  }
 
   return {
     linearApiKey: payload.linearApiKey,
     cursorApiKey: payload.cursorApiKey,
     githubToken: payload.harnessGithubToken,
+    vercelToken: payload.vercelToken,
     explicitCredentialReplacements:
       explicitCredentialReplacements.length > 0
         ? explicitCredentialReplacements

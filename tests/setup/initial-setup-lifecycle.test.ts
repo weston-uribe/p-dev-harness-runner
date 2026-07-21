@@ -60,6 +60,7 @@ function completeRemoteSummary(): RemoteSetupSummary {
     harnessDispatchRepoResolved: true,
     harnessDispatchRepoSource: "explicit-config",
     harnessRepoAccess: "available",
+    requireVercelProductionToken: false,
     harnessSecretStatuses: HARNESS_ACTIONS_SECRET_NAMES.map((name) => ({
       name,
       status: "present" as const,
@@ -74,7 +75,11 @@ function completeRemoteSummary(): RemoteSetupSummary {
         harnessDispatchRepo: "owner/harness-repo",
       },
     ],
-    staleSmokeDiagnostics: [],
+    staleSmokeDiagnostics: {
+      hasStaleConfig: false,
+      findings: [],
+      staleTargetRepos: [],
+    },
   };
 }
 

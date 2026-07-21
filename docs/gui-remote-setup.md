@@ -55,6 +55,7 @@ It does **not**:
    - `LINEAR_API_KEY`
    - `CURSOR_API_KEY`
    - `HARNESS_GITHUB_TOKEN`
+   - `VERCEL_TOKEN` (required when any configured repo uses Vercel production deployment verification — typically `previewProvider: "vercel"` with distinct integration vs production branches)
 4. `HARNESS_CONFIG_JSON_B64` is generated server-side from validated `.harness/config.local.json` during apply — it is never shown in previews or API responses.
 5. Click **Preview harness secrets** — required before apply.
 6. Review the redacted plan (key names and actions only) and manual instructions.

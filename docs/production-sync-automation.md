@@ -20,7 +20,7 @@ A scheduled reconciler also runs every 20 minutes (`harness-reconcile-production
 
 **Deploy gate:** when `previewProvider=vercel`, Linear **Merged / Deployed** requires a READY production deployment whose SHA contains the merge-to-dev commit, plus alias/head proof. Promotion alone records Langfuse `promoted_to_main` only.
 
-**Target workflow upgrades:** stale dispatch targets (e.g. archived `p-dev-harness`) are a managed product upgrade via `npm run harness:upgrade-target-workflows` (contract v2 marker + upgrade PR). Do not hand-edit target workflows outside that path.
+**Target workflow upgrades:** stale dispatch targets (e.g. archived `p-dev-harness`) or invalid HTML-prefixed contract markers are a managed product upgrade via `npm run harness:upgrade-target-workflows` (contract v3 YAML `#` marker + upgrade PR). Do not hand-edit target workflows outside that path.
 
 Powerful tokens stay in the **harness repo** GitHub Actions secrets only. The target repo receives at most **`HARNESS_DISPATCH_TOKEN`** (dispatch-only PAT scoped to the harness repo).
 

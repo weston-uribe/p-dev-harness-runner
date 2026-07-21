@@ -56,12 +56,14 @@ export function collectRemoteSecretInputs(input?: {
   linearApiKey?: string;
   cursorApiKey?: string;
   githubToken?: string;
+  vercelToken?: string;
   harnessConfigJsonB64?: string;
 }): string[] {
   return [
     input?.linearApiKey,
     input?.cursorApiKey,
     input?.githubToken,
+    input?.vercelToken,
     input?.harnessConfigJsonB64,
   ].filter((value): value is string => Boolean(value));
 }

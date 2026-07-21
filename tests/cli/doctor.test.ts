@@ -210,4 +210,34 @@ describe("runDoctor", () => {
     const code = await runDoctor({ configPath, profile: "merge" });
     expect(code).toBe(EXIT_CONFIG);
   });
+
+  it("production profile fails closed when required VERCEL_TOKEN is absent", async () => {
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        orchestratorMarker: "harness-orchestrator-v1",
+        logDirectory: path.join(tempRoot, "runs"),
+        repos: [
+          {
+            id: "portfolio",
+            linearProjects: ["Portfolio"],
+            targetRepo: "https://github.com/owner/portfolio",
+            baseBranch: "dev",
+            productionBranch: "main",
+            previewProvider: "vercel",
+            validation: { commands: ["npm test"] },
+          },
+        ],
+        allowedTargetRepos: ["https://github.com/owner/portfolio"],
+      }),
+      "utf8",
+    );
+    process.env.GITHUB_TOKEN = "test-github";
+    process.env.GITHUB_DISPATCH_TOKEN = "test-dispatch";
+    delete process.env.VERCEL_TOKEN;
+
+    const code = await runDoctor({ configPath, profile: "production" });
+    expect(code).toBe(EXIT_CONFIG);
+  });
 });

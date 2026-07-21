@@ -13,6 +13,7 @@ function sampleSummary(overrides: Partial<RemoteSetupSummary> = {}): RemoteSetup
     harnessDispatchRepoResolved: true,
     harnessDispatchRepoSource: "explicit-config",
     harnessRepoAccess: "available",
+    requireVercelProductionToken: false,
     harnessSecretStatuses: [],
     targetRepos: [],
     staleSmokeDiagnostics: {

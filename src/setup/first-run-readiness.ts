@@ -2,7 +2,8 @@ import type { SetupGuiViewModel } from "./gui-view-model.js";
 import type { RemoteSetupSummary } from "./remote-setup-summary.js";
 import {
   evaluateHarnessSecretPresence,
-  HARNESS_ACTIONS_SECRET_NAMES,
+  HARNESS_ACTIONS_CORE_SECRET_NAMES,
+  resolveRequiredHarnessActionsSecretNames,
   type HarnessActionsSecretName,
   type RemoteHarnessSecretApplyResult,
 } from "./remote-actions.js";
@@ -338,18 +339,32 @@ export function collectLocalReadinessBlockers(
 
 function missingHarnessSecrets(
   remoteSummary: RemoteSetupSummary,
+  requiredNames: readonly HarnessActionsSecretName[] = HARNESS_ACTIONS_CORE_SECRET_NAMES,
 ): HarnessActionsSecretName[] {
   const statusByName = new Map(
     remoteSummary.harnessSecretStatuses.map((entry) => [entry.name, entry.status]),
   );
 
-  return HARNESS_ACTIONS_SECRET_NAMES.filter(
+  return requiredNames.filter(
     (name) => statusByName.get(name) === "missing",
   );
 }
 
+export function requiredHarnessSecretNamesForSetupSummary(
+  setupSummary: SetupGuiViewModel,
+): readonly HarnessActionsSecretName[] {
+  return resolveRequiredHarnessActionsSecretNames({
+    repos: (setupSummary.configSummary?.repos ?? []).map((repo) => ({
+      id: repo.id,
+      previewProvider: repo.previewProvider,
+      baseBranch: repo.baseBranch,
+      productionBranch: repo.productionBranch,
+    })),
+  });
+}
+
 export function collectCloudSecretsBlockers(
-  _summary: SetupGuiViewModel,
+  summary: SetupGuiViewModel,
   remoteSummary: RemoteSetupSummary,
   uiState?: FirstRunReadinessUiState,
   staleSmokeDiagnostics?: StaleSmokeDiagnostics,
@@ -357,6 +372,7 @@ export function collectCloudSecretsBlockers(
 ): { blockers: ReadinessBlocker[]; warnings: ReadinessBlocker[] } {
   const blockers: ReadinessBlocker[] = [];
   const warnings: ReadinessBlocker[] = [];
+  const requiredSecretNames = requiredHarnessSecretNamesForSetupSummary(summary);
   const suppressDownstream = staleSmokeDiagnostics
     ? shouldSuppressRemoteDownstreamStatus(
         staleSmokeDiagnostics,
@@ -413,13 +429,18 @@ export function collectCloudSecretsBlockers(
     });
   }
 
-  for (const secretName of missingHarnessSecrets(remoteSummary)) {
+  for (const secretName of missingHarnessSecrets(
+    remoteSummary,
+    requiredSecretNames,
+  )) {
     pushBlocker(blockers, {
       id: `missing-harness-secret-${secretName}`,
       stepId: "cloud-secrets",
       message: `Blocked: Required cloud secret ${secretName} is missing.`,
       action:
-        "Next: Review generated secrets, confirm, then create or update encrypted GitHub Actions secrets.",
+        secretName === "VERCEL_TOKEN"
+          ? "Next: Add VERCEL_TOKEN for Vercel production deployment verification, then confirm and create or update secrets."
+          : "Next: Review generated secrets, confirm, then create or update encrypted GitHub Actions secrets.",
       priority: 303,
     });
   }
@@ -471,8 +492,14 @@ export function collectCloudSecretsBlockers(
 
 export function step6PostApplyVerificationReady(
   summary: RemoteSetupSummary,
+  options?: {
+    requiredSecretNames?: readonly HarnessActionsSecretName[];
+  },
 ): boolean {
-  const presence = evaluateHarnessSecretPresence(summary.harnessSecretStatuses);
+  const presence = evaluateHarnessSecretPresence(summary.harnessSecretStatuses, {
+    requiredNames:
+      options?.requiredSecretNames ?? HARNESS_ACTIONS_CORE_SECRET_NAMES,
+  });
   return (
     summary.harnessDispatchRepoResolved &&
     summary.harnessRepoAccess !== "denied" &&
@@ -514,8 +541,13 @@ export function buildAuthoritativeCloudSecretsApplyEvidence(input: {
   remoteSummary?: RemoteSetupSummary;
 }): CloudSecretsApplyEvidence {
   const remoteSummary = input.remoteSummary;
+  const requiredSecretNames = requiredHarnessSecretNamesForSetupSummary(
+    input.setupSummary,
+  );
   const secretPresence = remoteSummary
-    ? evaluateHarnessSecretPresence(remoteSummary.harnessSecretStatuses)
+    ? evaluateHarnessSecretPresence(remoteSummary.harnessSecretStatuses, {
+        requiredNames: requiredSecretNames,
+      })
     : undefined;
 
   return {
@@ -534,7 +566,9 @@ export function buildAuthoritativeCloudSecretsApplyEvidence(input: {
     harnessDispatchRepoSource: remoteSummary?.harnessDispatchRepoSource,
     harnessRepoAccess: remoteSummary?.harnessRepoAccess,
     postApplyVerificationReady: remoteSummary
-      ? step6PostApplyVerificationReady(remoteSummary)
+      ? step6PostApplyVerificationReady(remoteSummary, {
+          requiredSecretNames,
+        })
       : undefined,
     secretPresence: secretPresence
       ? {
@@ -819,8 +853,12 @@ export function deriveStep6RemoteActionEligibility(
 export function deriveStep6ContinueEligibility(
   input: DeriveStep6ContinueEligibilityInput,
 ): Step6ContinueEligibility {
+  const requiredSecretNames = requiredHarnessSecretNamesForSetupSummary(
+    input.setupSummary,
+  );
   const postApplyVerificationReady = step6PostApplyVerificationReady(
     input.summary,
+    { requiredSecretNames },
   );
   const previewStaleCleared = input.previewStaleCleared ?? false;
 

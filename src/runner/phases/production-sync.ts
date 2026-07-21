@@ -23,6 +23,7 @@ import { resolvePromotionProof } from "../../github/commit-reachability.js";
 import { resolveTargetRepo } from "../../resolver/target-repo.js";
 import { shouldCaptureApplicationPreview } from "../../preview/preview-capability.js";
 import { verifyVercelProductionDeployment } from "../../preview/production-deployment-verify.js";
+import { requiresVercelProductionDeploymentVerification } from "../../preview/production-verification-requirement.js";
 import { loadHarnessConfig } from "../../config/load-config.js";
 import { resolveHarnessWorkspaceRootFromConfigSource } from "../../config/workspace-root.js";
 import { checkProductionSyncIdempotency } from "../idempotency.js";
@@ -471,10 +472,10 @@ export async function executeProductionSyncForIssue(
               }
             }
 
-            const previewProvider = (
-              resolved.previewProvider ?? ""
-            ).trim().toLowerCase();
-            const requiresVercelDeploy = previewProvider === "vercel";
+            const requiresVercelDeploy =
+              requiresVercelProductionDeploymentVerification({
+                previewProvider: resolved.previewProvider,
+              });
 
             if (!requiresVercelDeploy) {
               // No deployment provider: record promotion only; do not project terminal.

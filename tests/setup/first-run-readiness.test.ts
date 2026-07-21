@@ -150,6 +150,7 @@ function baseRemoteSummary(
     harnessDispatchRepoResolved: true,
     harnessDispatchRepoSource: "git remote",
     harnessRepoAccess: "unknown",
+    requireVercelProductionToken: false,
     harnessSecretStatuses: HARNESS_ACTIONS_SECRET_NAMES.map((name) => ({
       name,
       status: "unknown" as const,
@@ -204,6 +205,7 @@ function allSecretsPresentRemoteSummary(
   return baseRemoteSummary({
     githubTokenConfigured: true,
     harnessRepoAccess: "available",
+    requireVercelProductionToken: false,
     harnessSecretStatuses: HARNESS_ACTIONS_SECRET_NAMES.map((name) => ({
       name,
       status: "present" as const,

@@ -45,6 +45,7 @@ export function RemoteSetupSection({
     linearApiKey: "",
     cursorApiKey: "",
     harnessGithubToken: "",
+    vercelToken: "",
   });
   const [preview, setPreview] = useState<RemoteHarnessSecretPreview | null>(
     null,
@@ -68,6 +69,7 @@ export function RemoteSetupSection({
       linearApiKey: secretValues.linearApiKey || undefined,
       cursorApiKey: secretValues.cursorApiKey || undefined,
       harnessGithubToken: secretValues.harnessGithubToken || undefined,
+      vercelToken: secretValues.vercelToken || undefined,
     }),
     [secretValues],
   );
@@ -166,6 +168,7 @@ export function RemoteSetupSection({
         linearApiKey: "",
         cursorApiKey: "",
         harnessGithubToken: "",
+        vercelToken: "",
       });
       setPreview(null);
       setPreviewPayload(null);
@@ -266,6 +269,7 @@ export function RemoteSetupSection({
             <RemoteSecretForm
               values={secretValues}
               secretStatuses={summary.harnessSecretStatuses}
+              requireVercelToken={summary.requireVercelProductionToken}
               onChange={(values) => {
                 resetSecretApplyState();
                 setPreview(null);
