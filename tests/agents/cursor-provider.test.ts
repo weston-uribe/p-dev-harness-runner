@@ -285,7 +285,7 @@ describe("cursorAgentProvider", () => {
       cacheReadTokens: 4,
       cacheWriteTokens: 2,
       reasoningTokens: 1,
-      cost: { costSource: "unavailable" },
+      cost: { costSource: "pricing_registry" },
     });
     expect(observed.completeness?.model_present).toBe(true);
   });

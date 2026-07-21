@@ -87,6 +87,10 @@ describe("workspace snapshot .npmrc contract", () => {
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, content);
 
+    // npm pack strips any file named `.npmrc`; the snapshot must use an alias.
+    expect(path.basename(destination)).toBe("npmrc.snapshot");
+    expect(destination.endsWith(`${path.sep}.npmrc`)).toBe(false);
+
     const managedWorkspace = await mkdtemp(path.join(tmpdir(), "p-dev-managed-ws-"));
     tempDirs.push(managedWorkspace);
     await writeFile(path.join(managedWorkspace, ".npmrc"), content);

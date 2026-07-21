@@ -1,0 +1,18 @@
+{
+  "runId": "fixture-planning-FRE-3",
+  "issueKey": "FRE-3",
+  "phase": "planning",
+  "phaseInferredFromStatus": "Ready for Planning",
+  "linearStatusBefore": "Ready for Planning",
+  "linearStatusAfter": "Ready for Build",
+  "targetRepo": "https://github.com/owner/example-target-app",
+  "baseBranch": "dev",
+  "resolutionSource": "explicit",
+  "dryRun": false,
+  "finalOutcome": "success",
+  "errorClassification": null,
+  "startedAt": "2026-01-01T00:00:00.000Z",
+  "finishedAt": "2026-01-01T00:01:00.000Z",
+  "model": "composer-2.5",
+  "modelRole": "planner"
+}

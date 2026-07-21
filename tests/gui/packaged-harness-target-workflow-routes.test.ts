@@ -23,10 +23,12 @@ describe("packaged harness target workflow route regression", () => {
   let provider: MockGitHubRemoteSetupProvider;
   let intendedWorkflowContent = "";
   const originalRepoRoot = process.env.HARNESS_REPO_ROOT;
+  const originalDevHome = process.env.P_DEV_HOME;
   const originalRuntimeMode = process.env.P_DEV_RUNTIME_MODE;
   const originalPackagedVersion = process.env.P_DEV_PACKAGE_VERSION;
   const originalTestSeam = process.env.HARNESS_VITEST_REMOTE_SETUP_MOCK;
   const originalConfigPath = process.env.HARNESS_CONFIG_PATH;
+  const DISPATCH_REPO = "test-operator/p-dev-harness-runner";
 
   beforeEach(async () => {
     process.env.P_DEV_RUNTIME_MODE = "packaged";
@@ -36,7 +38,12 @@ describe("packaged harness target workflow route regression", () => {
 
     workspaceDir = await mkdtemp(path.join(tmpdir(), "packaged-route-target-workflow-"));
     process.env.HARNESS_REPO_ROOT = workspaceDir;
-    process.env.HARNESS_CONFIG_PATH = ".harness/config.local.json";
+    process.env.P_DEV_HOME = workspaceDir;
+    process.env.HARNESS_CONFIG_PATH = path.join(
+      workspaceDir,
+      ".harness",
+      "config.local.json",
+    );
     await mkdir(path.join(workspaceDir, ".harness"), { recursive: true });
     const configBody = JSON.stringify(
       {
@@ -64,15 +71,15 @@ describe("packaged harness target workflow route regression", () => {
       path.join(workspaceDir, ".env.local"),
       [
         "GITHUB_TOKEN=ghp_test_token",
-        "HARNESS_CONFIG_PATH=.harness/config.local.json",
-        "GITHUB_DISPATCH_REPOSITORY=weston-uribe/p-dev-harness",
+        `HARNESS_CONFIG_PATH=${process.env.HARNESS_CONFIG_PATH}`,
+        `GITHUB_DISPATCH_REPOSITORY=${DISPATCH_REPO}`,
       ].join("\n"),
       "utf8",
     );
 
     const harnessDispatchRepo = await resolveHarnessDispatchRepo({
       cwd: workspaceDir,
-      manualRepo: "weston-uribe/p-dev-harness",
+      manualRepo: DISPATCH_REPO,
     });
     intendedWorkflowContent = previewTargetWorkflowSetup({
       repoConfigId: "weston-uribe-portfolio",
@@ -106,6 +113,11 @@ describe("packaged harness target workflow route regression", () => {
     } else {
       process.env.HARNESS_REPO_ROOT = originalRepoRoot;
     }
+    if (originalDevHome === undefined) {
+      delete process.env.P_DEV_HOME;
+    } else {
+      process.env.P_DEV_HOME = originalDevHome;
+    }
     if (originalRuntimeMode === undefined) {
       delete process.env.P_DEV_RUNTIME_MODE;
     } else {
@@ -134,7 +146,9 @@ describe("packaged harness target workflow route regression", () => {
     const summaryBeforeBody = (await summaryBefore.json()) as {
       targetRepos: Array<{ workflowStatus: string }>;
     };
-    expect(summaryBeforeBody.targetRepos[0]?.workflowStatus).toBe("differs");
+    expect(summaryBeforeBody.targetRepos[0]?.workflowStatus).toBe(
+      "contract_outdated",
+    );
 
     const previewResponse = await previewRoute(
       new Request("http://localhost/api/setup/preview-target-workflow", {

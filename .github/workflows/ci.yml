@@ -10,9 +10,32 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "1"
+      # Keep the default PR gate free of inherited live operator state.
+      HARNESS_CONFIG_PATH: ""
+      HARNESS_CONFIG_JSON: ""
+      HARNESS_CONFIG_JSON_B64: ""
+      P_DEV_HOME: ""
+      HARNESS_REPO_ROOT: ""
+      P_DEV_WORKFLOW_STATE_STORE_MODE: ""
+      LINEAR_API_KEY: ""
+      CURSOR_API_KEY: ""
+      # Do not blank Actions' built-in GITHUB_TOKEN (needed for artifacts).
+      GITHUB_DISPATCH_TOKEN: ""
+      HARNESS_GITHUB_TOKEN: ""
+      VERCEL_TOKEN: ""
+      LANGFUSE_PUBLIC_KEY: ""
+      LANGFUSE_SECRET_KEY: ""
+      LANGFUSE_BASE_URL: ""
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -20,7 +43,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -30,4 +53,12 @@ jobs:
         run: npm run build
 
       - name: Test
-        run: npm test
+        run: npm test -- --reporter=default --reporter=json --outputFile=vitest-results.json
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vitest-results
+          path: vitest-results.json
+          if-no-files-found: ignore

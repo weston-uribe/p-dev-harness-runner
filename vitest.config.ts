@@ -10,7 +10,10 @@ export default defineConfig({
   },
   test: {
     include: ["tests/**/*.test.ts"],
-    setupFiles: ["tests/setup/mock-canonical-preflight.ts"],
+    setupFiles: [
+      "tests/setup/hermetic-env.ts",
+      "tests/setup/mock-canonical-preflight.ts",
+    ],
     environment: "node",
     hookTimeout: 300_000,
     testTimeout: 120_000,

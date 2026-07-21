@@ -15,6 +15,7 @@ const REQUIRED_PATHS = [
   ".harness/config.example.json",
   ".env.example",
   ".npmrc",
+  ".nvmrc",
   "AGENTS.md",
   "ARCHITECTURE.md",
   "CHANGELOG.md",
@@ -65,6 +66,7 @@ const INCLUDE_PREFIXES = [
 const INCLUDE_FILES = [
   ".env.example",
   ".npmrc",
+  ".nvmrc",
   "AGENTS.md",
   "ARCHITECTURE.md",
   "CHANGELOG.md",
@@ -186,12 +188,26 @@ export function assertNoForbiddenSnapshotPaths(selectedPaths: string[]): void {
   }
 }
 
+/**
+ * npm pack always omits files named `.npmrc` (any depth). Store that logical
+ * snapshot path under a pack-safe alias; provisioning still writes `.npmrc`
+ * into managed workspaces via the manifest path.
+ */
+const SNAPSHOT_PACK_SAFE_STORAGE_ALIASES: Readonly<Record<string, string>> = {
+  ".npmrc": "npmrc.snapshot",
+};
+
+export function toSnapshotStoragePath(snapshotPath: string): string {
+  const normalized = normalizeSnapshotPath(snapshotPath);
+  return SNAPSHOT_PACK_SAFE_STORAGE_ALIASES[normalized] ?? normalized;
+}
+
 export function resolveSnapshotOutputPath(
   snapshotRoot: string,
   snapshotPath: string,
 ): string {
-  const normalized = normalizeSnapshotPath(snapshotPath);
-  const absolute = path.resolve(snapshotRoot, "files", normalized);
+  const storagePath = toSnapshotStoragePath(snapshotPath);
+  const absolute = path.resolve(snapshotRoot, "files", storagePath);
   const filesRoot = path.resolve(snapshotRoot, "files");
   if (!absolute.startsWith(`${filesRoot}${path.sep}`) && absolute !== filesRoot) {
     throw new Error(`Snapshot output path escapes files root: ${snapshotPath}`);

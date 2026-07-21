@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runLangfuseReproject } from "../../src/evaluation/langfuse-reproject/run.js";
+
+const fixtureCache = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../fixtures/evaluation/fre3-artifact-cache",
+);
 
 describe("langfuse reproject dry-run", () => {
   it("loads FRE-3 cached artifacts and plans planning trace creation", async () => {
-    const cache = path.resolve("runs/.fre3-artifact-cache");
     const { report, exitCode } = await runLangfuseReproject({
       issueKey: "FRE-3",
       namespace: "weston-dogfood",
-      artifactCache: cache,
+      artifactCache: fixtureCache,
+      // Keep logDirectory off the live repo runs/ tree.
+      logDirectory: path.join(fixtureCache, ".empty-runs"),
       dryRun: true,
       apply: false,
     });
