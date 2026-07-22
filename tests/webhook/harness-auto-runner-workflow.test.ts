@@ -135,6 +135,36 @@ function assertHarnessWorkflowContracts(workflow: string, label: string): void {
       expect(syncSection).toContain("sync-production-output.json");
     });
 
+    it("propagates sync CLI exit after redact and uploads artifact always", () => {
+      const syncSection = extractJobSection(workflow, "sync-production");
+      const syncInvocation = syncSection.indexOf(
+        "npx tsx src/index.ts sync-production",
+      );
+      const exitCapture = syncSection.indexOf("EXIT_CODE=$?");
+      const redact = syncSection.indexOf("redact-json-file");
+      const exitPropagate = syncSection.indexOf("exit $EXIT_CODE");
+      const uploadStep = syncSection.indexOf("Upload sync artifacts");
+      const uploadAlways = syncSection.indexOf("if: always()", uploadStep);
+      const uploadPath = syncSection.indexOf(
+        "path: sync-production-output.json",
+        uploadStep,
+      );
+
+      expect(syncInvocation).toBeGreaterThanOrEqual(0);
+      expect(exitCapture).toBeGreaterThan(syncInvocation);
+      expect(redact).toBeGreaterThan(exitCapture);
+      expect(exitPropagate).toBeGreaterThan(redact);
+      expect(uploadStep).toBeGreaterThan(exitPropagate);
+      expect(uploadAlways).toBeGreaterThan(uploadStep);
+      expect(uploadPath).toBeGreaterThan(uploadStep);
+
+      // After successful redaction the sync step must propagate the captured CLI
+      // exit, not force success (issue-level failures stay nonzero while artifact exists).
+      const afterRedact = syncSection.slice(redact, uploadStep);
+      expect(afterRedact).toContain("exit $EXIT_CODE");
+      expect(afterRedact).not.toMatch(/^\s*exit 0\s*$/m);
+    });
+
     it("uses harness secrets for sync without CURSOR_API_KEY", () => {
       const syncSection = extractJobSection(workflow, "sync-production");
       expect(syncSection).toContain("LINEAR_API_KEY");

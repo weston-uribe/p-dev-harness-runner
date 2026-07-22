@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runSyncProductionCommand } from "../../src/cli/commands/sync-production.js";
-import { EXIT_CONFIG } from "../../src/cli/exit-codes.js";
+import { EXIT_CONFIG, EXIT_SUCCESS } from "../../src/cli/exit-codes.js";
 import type { HarnessConfig } from "../../src/config/types.js";
 import * as issueQuery from "../../src/linear/issue-query.js";
 import * as linearWriter from "../../src/linear/writer.js";
@@ -54,7 +54,7 @@ describe("runSyncProductionCommand dispatch validation", () => {
       json: true,
     });
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(EXIT_SUCCESS);
   });
 
   it("rejects real-target when absent from injected config", async () => {
