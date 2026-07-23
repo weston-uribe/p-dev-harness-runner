@@ -1,15 +1,52 @@
+import {
+  assertCanonicalProviderIdentityHash,
+  hashProviderIdentity,
+  ProviderIdentityHashError,
+} from "../identity/provider-identity-hash.js";
+
+export type HarnessMarkerParseErrorCode =
+  | "invalid_identity_hash_marker"
+  | "conflicting_identity_markers";
+
+export class HarnessMarkerParseError extends Error {
+  readonly code: HarnessMarkerParseErrorCode;
+
+  constructor(code: HarnessMarkerParseErrorCode, message: string) {
+    super(message);
+    this.name = "HarnessMarkerParseError";
+    this.code = code;
+  }
+}
+
+/** Explicit fail-closed classification for control-flow marker integrity. */
+export class HarnessMarkerIntegrityError extends Error {
+  readonly code = "marker_integrity" as const;
+  readonly parseCode: HarnessMarkerParseErrorCode;
+
+  constructor(cause: HarnessMarkerParseError) {
+    super(`marker_integrity: ${cause.message}`);
+    this.name = "HarnessMarkerIntegrityError";
+    this.parseCode = cause.code;
+    this.cause = cause;
+  }
+}
+
 export interface HarnessMarkers {
   orchestratorMarker?: string;
   phase?: string;
   runId?: string;
   cursorAgentId?: string;
+  cursorAgentIdHash?: string;
   cursorRunId?: string;
+  cursorRunIdHash?: string;
   builderAgentId?: string;
+  builderAgentIdHash?: string;
   builderThreadGeneration?: string;
   builderThreadAction?: string;
   builderOriginRunId?: string;
   builderThreadIdempotencyKey?: string;
   previousBuilderAgentId?: string;
+  previousBuilderAgentIdHash?: string;
   builderThreadReplacementReason?: string;
   model?: string;
   promptVersion?: string;
@@ -80,8 +117,88 @@ export function extractHarnessMetadataBlock(commentBody: string): string | null 
   return null;
 }
 
+const IDENTITY_HASH_MARKER_KEYS = new Set([
+  "cursor_agent_id_hash",
+  "cursor_run_id_hash",
+  "builder_agent_id_hash",
+  "previous_builder_agent_id_hash",
+]);
+
+function assertIdentityHashMarker(key: string, value: string): void {
+  try {
+    assertCanonicalProviderIdentityHash(value);
+  } catch (error) {
+    if (error instanceof ProviderIdentityHashError) {
+      throw new HarnessMarkerParseError(
+        "invalid_identity_hash_marker",
+        `Invalid identity hash marker "${key}": ${error.message}`,
+      );
+    }
+    throw error;
+  }
+}
+
+function recordMarkerKey(
+  seenKeys: Map<string, string>,
+  key: string,
+  value: string,
+): void {
+  const existing = seenKeys.get(key);
+  if (existing !== undefined && existing !== value) {
+    throw new HarnessMarkerParseError(
+      "conflicting_identity_markers",
+      `Conflicting values for marker key "${key}".`,
+    );
+  }
+  seenKeys.set(key, value);
+}
+
+function assertIdentityMarkerConsistency(markers: HarnessMarkers): void {
+  const pairs: Array<{
+    rawKey: string;
+    hashKey: string;
+    raw?: string;
+    hash?: string;
+  }> = [
+    {
+      rawKey: "cursor_agent_id",
+      hashKey: "cursor_agent_id_hash",
+      raw: markers.cursorAgentId,
+      hash: markers.cursorAgentIdHash,
+    },
+    {
+      rawKey: "cursor_run_id",
+      hashKey: "cursor_run_id_hash",
+      raw: markers.cursorRunId,
+      hash: markers.cursorRunIdHash,
+    },
+    {
+      rawKey: "builder_agent_id",
+      hashKey: "builder_agent_id_hash",
+      raw: markers.builderAgentId,
+      hash: markers.builderAgentIdHash,
+    },
+    {
+      rawKey: "previous_builder_agent_id",
+      hashKey: "previous_builder_agent_id_hash",
+      raw: markers.previousBuilderAgentId,
+      hash: markers.previousBuilderAgentIdHash,
+    },
+  ];
+
+  for (const { rawKey, hashKey, raw, hash } of pairs) {
+    if (raw !== undefined && hash !== undefined && hashProviderIdentity(raw) !== hash) {
+      throw new HarnessMarkerParseError(
+        "conflicting_identity_markers",
+        `Marker "${rawKey}" and "${hashKey}" are inconsistent.`,
+      );
+    }
+  }
+}
+
 function parseHarnessMarkerLines(block: string): HarnessMarkers {
   const markers: HarnessMarkers = {};
+  const seenKeys = new Map<string, string>();
 
   for (const line of block.split("\n")) {
     const trimmed = line.trim();
@@ -98,6 +215,11 @@ function parseHarnessMarkerLines(block: string): HarnessMarkers {
     const key = trimmed.slice(0, colonIndex).trim().toLowerCase();
     const value = trimmed.slice(colonIndex + 1).trim();
 
+    if (IDENTITY_HASH_MARKER_KEYS.has(key)) {
+      assertIdentityHashMarker(key, value);
+    }
+    recordMarkerKey(seenKeys, key, value);
+
     switch (key) {
       case "phase":
         markers.phase = value;
@@ -108,11 +230,20 @@ function parseHarnessMarkerLines(block: string): HarnessMarkers {
       case "cursor_agent_id":
         markers.cursorAgentId = value;
         break;
+      case "cursor_agent_id_hash":
+        markers.cursorAgentIdHash = value;
+        break;
       case "cursor_run_id":
         markers.cursorRunId = value;
         break;
+      case "cursor_run_id_hash":
+        markers.cursorRunIdHash = value;
+        break;
       case "builder_agent_id":
         markers.builderAgentId = value;
+        break;
+      case "builder_agent_id_hash":
+        markers.builderAgentIdHash = value;
         break;
       case "builder_thread_generation":
         markers.builderThreadGeneration = value;
@@ -128,6 +259,9 @@ function parseHarnessMarkerLines(block: string): HarnessMarkers {
         break;
       case "previous_builder_agent_id":
         markers.previousBuilderAgentId = value;
+        break;
+      case "previous_builder_agent_id_hash":
+        markers.previousBuilderAgentIdHash = value;
         break;
       case "builder_thread_replacement_reason":
         markers.builderThreadReplacementReason = value;
@@ -285,6 +419,8 @@ function parseHarnessMarkerLines(block: string): HarnessMarkers {
     markers.orchestratorMarker = "harness-orchestrator-v1";
   }
 
+  assertIdentityMarkerConsistency(markers);
+
   return markers;
 }
 
@@ -303,10 +439,15 @@ function parseLegacyVisibleFooter(commentBody: string): HarnessMarkers {
   return parseHarnessMarkerLines(footerSegment);
 }
 
-export function parseHarnessMarkers(commentBody: string): HarnessMarkers {
+export function parseHarnessMarkersStrict(commentBody: string): HarnessMarkers {
   const htmlBlock = extractHarnessMetadataBlock(commentBody);
   if (htmlBlock) {
     return parseHarnessMarkerLines(htmlBlock);
   }
   return parseLegacyVisibleFooter(commentBody);
+}
+
+/** Fail-closed marker parsing; throws {@link HarnessMarkerParseError} on invalid hash markers. */
+export function parseHarnessMarkers(commentBody: string): HarnessMarkers {
+  return parseHarnessMarkersStrict(commentBody);
 }

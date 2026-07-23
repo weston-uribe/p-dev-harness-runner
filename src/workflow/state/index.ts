@@ -77,7 +77,9 @@ export {
   claimAgentRun,
   clearActiveRunLeaseIfMatches,
   DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
+  PLANNING_ONLY_TERMINALIZATION_REASON,
   isActiveRunLeaseExpired,
   type ApplyWorkflowTransitionInput,
   type ApplyWorkflowTransitionResult,
+  type PlanningOnlyTerminalizationInput,
 } from "./apply.js";

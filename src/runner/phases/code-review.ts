@@ -29,6 +29,7 @@ import {
   postIssueComment,
   transitionIssueStatus,
 } from "../../linear/writer.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import { formatCodeReviewComment } from "../../linear/code-review-comment.js";
 import {
   buildHandoffCommentBody,
@@ -1044,8 +1045,10 @@ export async function executeCodeReviewPhase(
           promptVersion: version,
           targetRepo: resolved.targetRepo,
           baseBranch: resolved.baseBranch,
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
+          ...toPublicProviderIdentityHashes({
+            cursorAgentId,
+            cursorRunId,
+          }),
           decisionIdentity: review.decisionIdentity,
           reviewedPrNumber: validated.outcome.reviewedPrNumber,
           reviewedHeadSha: validated.outcome.reviewedHeadSha,
@@ -1212,8 +1215,10 @@ export async function executeCodeReviewPhase(
             promptVersion: promptVersion ?? "code-review@1",
             targetRepo: resolved.targetRepo,
             baseBranch: resolved.baseBranch,
-            cursorAgentId: cursorAgentId ?? undefined,
-            cursorRunId: cursorRunId ?? undefined,
+            ...toPublicProviderIdentityHashes({
+              cursorAgentId,
+              cursorRunId,
+            }),
             prUrl: latestImplementation.prUrl,
           },
           "code_review",

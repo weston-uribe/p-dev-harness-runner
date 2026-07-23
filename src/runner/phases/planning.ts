@@ -20,6 +20,7 @@ import {
   getPlanningResultPath,
 } from "../../artifacts/paths.js";
 import { writeCommentsArtifact } from "../../linear/comments.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import { fetchLinearIssue } from "../../linear/client.js";
 import {
   createLinearClient,
@@ -28,6 +29,7 @@ import {
   postPhaseStartCommentIfNeeded,
   postPlanningComment,
   transitionIssueStatus,
+  transitionIssueStatusById,
 } from "../../linear/writer.js";
 import {
   createPlanningAgent,
@@ -261,6 +263,9 @@ export async function executePlanningPhase(
   let phaseTrace: PhaseTraceHandle | null = null;
   let plannerObs: NestedObservationHandle | null = null;
   let extraEvalMetadata: Record<string, unknown> | undefined;
+  let activeExecutionPolicyFreeze: import("../../workflow/state/types.js").ExecutionPolicyFreeze | null =
+    null;
+  const workflowSchemaVersion = "product-development-v2";
 
   const footerBase = {
     orchestratorMarker: config.orchestratorMarker,
@@ -598,6 +603,118 @@ export async function executePlanningPhase(
       operationOrdinal: 1,
     });
 
+    const { listTeamWorkflowStates } = await import(
+      "../../setup/linear-setup-client.js"
+    );
+    const { resolveAuthoritativeLinearTeamIdFromConfig } = await import(
+      "../../config/resolve-linear-team.js"
+    );
+    const {
+      claimOrAdoptExecutionPolicyFreeze,
+      persistExecutionPolicyFreezeClaim,
+      resolveAuthoritativeLinearDeliveryId,
+      ExecutionPolicyError,
+    } = await import("../../workflow/execution-policy.js");
+
+    const policyState = await loadPlanningState({
+      store: planningStateStore,
+      issueKey: options.issueKey,
+      workflowSchemaVersion,
+      currentPhaseId: "planning",
+    });
+    let teamWorkflowStates: Array<{ id: string; name: string }> = [];
+    const policyTeamId =
+      issue.teamId ?? resolveAuthoritativeLinearTeamIdFromConfig(config);
+    if (policyTeamId) {
+      try {
+        teamWorkflowStates = await listTeamWorkflowStates(client, policyTeamId);
+      } catch {
+        teamWorkflowStates = [];
+      }
+    }
+    let policyClaim;
+    try {
+      policyClaim = claimOrAdoptExecutionPolicyFreeze({
+        issueKey: options.issueKey,
+        issueInternalId: issue.id,
+        linearTeamId: policyTeamId ?? "",
+        labels: issue.labels ?? [],
+        teamStates: teamWorkflowStates,
+        workflowSchemaVersion,
+        linearDeliveryId: resolveAuthoritativeLinearDeliveryId(),
+        firstPlanningRunId: runId,
+        existingFreeze: policyState.executionPolicyFreeze,
+        existingResult: policyState.executionPolicyResult,
+      });
+    } catch (error) {
+      if (error instanceof ExecutionPolicyError) {
+        throw new PlanningError("configuration_error", error.message);
+      }
+      throw error;
+    }
+    if (policyClaim.kind === "already_terminalized") {
+      await events.log("idempotency_skip", "info", {
+        reason: "execution_policy_already_terminalized",
+      });
+      finalOutcome = "duplicate";
+      errorClassification = "duplicate_phase_completed";
+      linearStatusAfter = policyClaim.freeze.terminalStatusName;
+      const manifest: RunManifest = {
+        runId,
+        issueKey: options.issueKey,
+        phase,
+        phaseInferredFromStatus,
+        linearStatusBefore,
+        linearStatusAfter,
+        targetRepo: resolved.targetRepo,
+        baseBranch: resolved.baseBranch,
+        resolutionSource: resolved.resolutionSource,
+        dryRun: false,
+        finalOutcome,
+        errorClassification,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+        milestone: MILESTONE,
+        promptVersion,
+        cursorAgentId,
+        cursorRunId,
+        branch: null,
+        prUrl: null,
+        previewUrl: null,
+        validationSummary: null,
+        changedFiles: null,
+        checkSummary: null,
+        previousImplementationRunId: null,
+        previousHandoffRunId: null,
+        pmFeedbackCommentId: null,
+        ...emptyMergeManifestFields(),
+        model,
+        deliveryId,
+        runGeneration,
+        runOwnedStatuses,
+      };
+      return writeFinalManifest(
+        manifest,
+        runDirectory,
+        parsed,
+        resolved,
+        events,
+        finalOutcome,
+        errorClassification,
+      );
+    }
+    if (policyClaim.kind === "claimed") {
+      await persistExecutionPolicyFreezeClaim({
+        store: planningStateStore,
+        issueKey: options.issueKey,
+        expectedRevision: policyState.stateRevision,
+        freeze: policyClaim.freeze,
+      });
+      activeExecutionPolicyFreeze = policyClaim.freeze;
+    } else if (policyClaim.kind === "adopted") {
+      activeExecutionPolicyFreeze = policyClaim.freeze;
+    }
+
     const agent = await createPlanningAgent({
       apiKey: cursorApiKey,
       config,
@@ -863,6 +980,101 @@ export async function executePlanningPhase(
           : null,
     });
 
+    const executionFreeze =
+      activeExecutionPolicyFreeze ?? priorState.executionPolicyFreeze ?? null;
+
+    if (executionFreeze) {
+      const { resolveDefinitionForConfig } = await import(
+        "../workflow-transition.js"
+      );
+      const {
+        applyPlanningOnlySuccessTransition,
+        completePlanningOnlyTerminalization,
+      } = await import("../../workflow/execution-policy.js");
+
+      const planningComment = await postPlanningComment(
+        client,
+        issue.id,
+        observed.assistantText,
+        {
+          ...footerBase,
+          promptVersion: version,
+          ...toPublicProviderIdentityHashes({ cursorAgentId, cursorRunId }),
+          planGenerationId: planArtifact.planGenerationId,
+          planArtifactHash: planArtifact.planArtifactHash,
+        },
+        { planningOnlyTerminal: true },
+      );
+      commentsWritten.push(observed.assistantText);
+      await events.log("linear_comment_posted", "info", {
+        phase: "planning",
+        commentId: planningComment,
+        planGenerationId: planArtifact.planGenerationId,
+        planArtifactHash: planArtifact.planArtifactHash,
+        planningOnlyTerminal: true,
+      });
+
+      const definition = resolveDefinitionForConfig({
+        config,
+        planReviewEffectiveEnabled: false,
+      });
+      const { state: afterCas1 } = await applyPlanningOnlySuccessTransition({
+        store,
+        issueKey: options.issueKey,
+        definition,
+        expectedStateRevision: priorState.stateRevision,
+        freeze: executionFreeze,
+        planArtifact,
+        planningRunId: runId,
+        planningStatusName: planningStatus,
+      });
+
+      const issueAfterPlan = await fetchLinearIssue(
+        options.issueKey,
+        linearApiKey,
+      );
+      if (issueAfterPlan.statusId !== executionFreeze.terminalStatusId) {
+        await transitionIssueStatusById(
+          client,
+          issueAfterPlan,
+          executionFreeze.terminalStatusId,
+        );
+      }
+
+      await completePlanningOnlyTerminalization({
+        store,
+        issueKey: options.issueKey,
+        freeze: executionFreeze,
+        expectedStateRevision: afterCas1.stateRevision,
+      });
+
+      linearStatusAfter = executionFreeze.terminalStatusName;
+      runOwnedStatuses = [
+        ...runOwnedStatuses,
+        executionFreeze.terminalStatusName,
+      ];
+      await events.log("linear_status_changed", "info", {
+        from: planningStatus,
+        to: executionFreeze.terminalStatusName,
+        transitionReason: "planning_only_terminalized",
+        planGenerationId: planArtifact.planGenerationId,
+        planArtifactHash: planArtifact.planArtifactHash,
+      });
+
+      const afterIssue = await fetchLinearIssue(options.issueKey, linearApiKey);
+      await writeFile(
+        getIssueSnapshotAfterPath(runDirectory),
+        `${JSON.stringify(afterIssue, null, 2)}\n`,
+        "utf8",
+      );
+
+      if (commentsWritten.length > 0) {
+        await writeCommentsArtifact(runDirectory, commentsWritten);
+      }
+
+      finalOutcome = "success";
+      errorClassification = null;
+    } else {
     const planningComment = await postPlanningComment(
       client,
       issue.id,
@@ -870,8 +1082,7 @@ export async function executePlanningPhase(
       {
         ...footerBase,
         promptVersion: version,
-        cursorAgentId,
-        cursorRunId,
+        ...toPublicProviderIdentityHashes({ cursorAgentId, cursorRunId }),
         planGenerationId: planArtifact.planGenerationId,
         planArtifactHash: planArtifact.planArtifactHash,
       },
@@ -1003,6 +1214,7 @@ export async function executePlanningPhase(
 
     finalOutcome = "success";
     errorClassification = null;
+    }
     } finally {
       await disposeAgent(agent);
     }
@@ -1032,8 +1244,10 @@ export async function executePlanningPhase(
         await postErrorComment(client, issue.id, message, {
           ...footerBase,
           promptVersion: promptVersion ?? "planning@1",
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
+          ...toPublicProviderIdentityHashes({
+            cursorAgentId,
+            cursorRunId,
+          }),
         });
         const blocked = resolveNextStatusName({
           config,

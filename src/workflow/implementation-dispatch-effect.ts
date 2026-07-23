@@ -11,6 +11,7 @@
 
 import type { WorkflowStateStore } from "./state/index.js";
 import type { WorkflowStateRecord } from "./state/types.js";
+import { isPlanningOnlySuppressed } from "./execution-policy.js";
 import {
   buildSideEffectIdentity,
   claimImplementationDispatchEffect,
@@ -121,6 +122,9 @@ export async function ensureImplementationDispatchPending(input: {
   implementationSubjectIdentity: string;
   state: WorkflowStateRecord;
 }): Promise<WorkflowStateRecord> {
+  if (isPlanningOnlySuppressed(input.state)) {
+    return input.state;
+  }
   const effectId = buildImplementationDispatchEffectId(
     input.implementationSubjectIdentity,
   );
@@ -164,6 +168,16 @@ export async function ensureImplementationJobDispatched(input: {
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
 }): Promise<EnsureImplementationDispatchResult> {
+  if (isPlanningOnlySuppressed(input.state)) {
+    return {
+      outcome: "already_dispatched",
+      reviewRequestId: buildImplementationRequestId(
+        input.implementationSubjectIdentity,
+      ),
+      state: input.state,
+      httpDispatched: false,
+    };
+  }
   const env = input.env ?? process.env;
   const reviewRequestId = buildImplementationRequestId(
     input.implementationSubjectIdentity,

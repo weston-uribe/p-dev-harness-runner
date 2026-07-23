@@ -6,6 +6,8 @@ export interface LinearIssueSnapshot {
   title: string;
   description: string | null;
   status: string | null;
+  statusId?: string | null;
+  labels?: Array<{ id: string; name: string }>;
   projectId: string | null;
   projectName: string | null;
   teamName: string | null;
@@ -31,11 +33,17 @@ export async function fetchLinearIssue(
     throw new Error(`Linear issue not found: ${issueKey}`);
   }
 
-  const [state, project, team] = await Promise.all([
+  const [state, project, team, labelsConnection] = await Promise.all([
     issue.state,
     issue.project,
     issue.team,
+    issue.labels(),
   ]);
+
+  const labels = (labelsConnection.nodes ?? []).map((label) => ({
+    id: label.id,
+    name: label.name ?? "",
+  }));
 
   return {
     id: issue.id,
@@ -43,6 +51,8 @@ export async function fetchLinearIssue(
     title: issue.title,
     description: issue.description ?? null,
     status: state?.name ?? null,
+    statusId: state?.id ?? null,
+    labels,
     projectId: project?.id ?? null,
     projectName: project?.name ?? null,
     teamName: team?.name ?? null,

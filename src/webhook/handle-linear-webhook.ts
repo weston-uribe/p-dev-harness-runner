@@ -7,6 +7,7 @@ import {
   type CreateEnvelopeAndDispatchResult,
 } from "../workflow/job-request/dispatch-opaque.js";
 import { ensureImplementationJobDispatched } from "../workflow/implementation-dispatch-effect.js";
+import { isPlanningOnlySuppressed } from "../workflow/execution-policy.js";
 import { resolveImplementationSubject } from "../workflow/resolve-implementation-subject.js";
 import { createEmptyWorkflowState } from "../workflow/state/types.js";
 import {
@@ -283,6 +284,17 @@ export async function handleLinearWebhook(
         issueKey,
         linearApiKey,
       });
+      if (resolved.state && isPlanningOnlySuppressed(resolved.state)) {
+        logWebhookEvent({
+          linearDeliveryId,
+          accepted: false,
+          reason: "planning_only_suppressed",
+        });
+        return jsonResponse(200, {
+          accepted: false,
+          reason: "planning_only_suppressed",
+        });
+      }
       const subjectDispatch =
         options.implementationSubjectDispatch ??
         (async (input) =>

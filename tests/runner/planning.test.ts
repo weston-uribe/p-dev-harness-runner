@@ -79,6 +79,7 @@ vi.mock("../../src/linear/client.js", async (importOriginal) => {
 
 import { executePlanningPhase } from "../../src/runner/phases/planning.js";
 import type { HarnessConfig } from "../../src/config/types.js";
+import { hashProviderIdentity } from "../../src/identity/provider-identity-hash.js";
 
 describe("executePlanningPhase", () => {
   let tempRoot = "";
@@ -254,7 +255,7 @@ describe("executePlanningPhase", () => {
       "issue-plan",
       VALID_IMPLEMENTATION_READY_PLAN,
       expect.objectContaining({
-        cursorRunId: "run-repaired",
+        cursorRunIdHash: hashProviderIdentity("run-repaired"),
         phase: "planning",
       }),
       { planReviewNext: false },

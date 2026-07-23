@@ -167,6 +167,9 @@ export async function applyPhaseTransition(input: {
   latestPlanArtifact?: PlanArtifactIdentity | null;
   latestImplementationArtifact?: ImplementationArtifactIdentity | null;
   phaseExecutionFreeze?: PhaseExecutionFreeze | null;
+  executionPolicyFreeze?: import("../workflow/state/types.js").ExecutionPolicyFreeze | null;
+  executionPolicyResult?: import("../workflow/state/types.js").ExecutionPolicyResult | null;
+  planningOnlyDownstreamSuppressed?: boolean;
 }): Promise<{
   statusName: string | null;
   applyOk: boolean;
@@ -194,6 +197,9 @@ export async function applyPhaseTransition(input: {
     latestPlanArtifact: input.latestPlanArtifact,
     latestImplementationArtifact: input.latestImplementationArtifact,
     phaseExecutionFreeze: input.phaseExecutionFreeze,
+    executionPolicyFreeze: input.executionPolicyFreeze,
+    executionPolicyResult: input.executionPolicyResult,
+    planningOnlyDownstreamSuppressed: input.planningOnlyDownstreamSuppressed,
   });
   return {
     statusName: applied.transition?.nextStatusName ?? null,

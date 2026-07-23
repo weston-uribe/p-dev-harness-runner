@@ -80,3 +80,22 @@ export function writeHarnessIssueKeyToGithubEnv(issueKey: string): void {
 
   appendFileSync(githubEnvPath, `HARNESS_ISSUE_KEY=${trimmed}\n`, "utf8");
 }
+
+/**
+ * Persist authoritative Linear delivery id from a claimed job request.
+ */
+export function writeLinearDeliveryIdToGithubEnv(linearDeliveryId: string): void {
+  const trimmed = linearDeliveryId.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  maskValueForGithubActions(trimmed);
+
+  const githubEnvPath = process.env.GITHUB_ENV?.trim();
+  if (!githubEnvPath) {
+    return;
+  }
+
+  appendFileSync(githubEnvPath, `LINEAR_DELIVERY_ID=${trimmed}\n`, "utf8");
+}

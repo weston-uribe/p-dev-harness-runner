@@ -20,14 +20,34 @@ import {
 } from "./store.js";
 import type { PlanArtifactIdentity } from "../plan-artifact.js";
 import type { ImplementationArtifactIdentity } from "../implementation-artifact.js";
+import { upsertPlanningOnlyTerminalEffect } from "./side-effects.js";
 import type {
   ActiveRunLease,
+  ExecutionPolicyFreeze,
+  ExecutionPolicyResult,
   PhaseExecutionFreeze,
   WorkflowStateRecord,
 } from "./types.js";
 
 /** Default Code Review / agent lease TTL (covers long Cursor runs + queue delay). */
 export const DEFAULT_ACTIVE_RUN_LEASE_TTL_MS = 45 * 60 * 1000;
+
+/** Authoritative reason for planning-only terminalization CAS1. */
+export const PLANNING_ONLY_TERMINALIZATION_REASON =
+  "planning_only_terminalization_pending" as const;
+
+/**
+ * Narrow planning-only terminalization contract. Ordinary callers must omit this.
+ * When present, apply constructs a planning-only TransitionResult and atomically
+ * persists freeze + suppression + terminalization_pending + terminal side effect.
+ */
+export interface PlanningOnlyTerminalizationInput {
+  freeze: ExecutionPolicyFreeze;
+  planArtifact: PlanArtifactIdentity;
+  planningRunId: string;
+  /** Must equal `planning_only_terminal_transition:${freeze.policyIdentity}`. */
+  terminalEffectIdentity: string;
+}
 
 export interface ApplyWorkflowTransitionInput {
   store: WorkflowStateStore;
@@ -57,8 +77,189 @@ export interface ApplyWorkflowTransitionInput {
   latestPlanArtifact?: PlanArtifactIdentity | null;
   latestImplementationArtifact?: ImplementationArtifactIdentity | null;
   phaseExecutionFreeze?: PhaseExecutionFreeze | null;
+  executionPolicyFreeze?: import("./types.js").ExecutionPolicyFreeze | null;
+  executionPolicyResult?: import("./types.js").ExecutionPolicyResult | null;
+  planningOnlyDownstreamSuppressed?: boolean;
+  /**
+   * Narrow stop-after-planning success contract. Mutually exclusive with partial
+   * policy field overrides: when set, apply supplies freeze/result/suppression
+   * and the terminal side effect atomically.
+   */
+  planningOnlyTerminalization?: PlanningOnlyTerminalizationInput;
   maxRetries?: number;
   now?: () => string;
+}
+
+const DOWNSTREAM_PHASE_IDS = new Set([
+  "plan_review",
+  "implementation",
+  "implementation_dispatch",
+  "planning_dispatch",
+  "code_review",
+  "handoff",
+  "revision",
+  "merge",
+]);
+
+function isEquivalentPlanningOnlyPending(
+  state: WorkflowStateRecord,
+  contract: PlanningOnlyTerminalizationInput,
+): boolean {
+  const result = state.executionPolicyResult;
+  return (
+    state.planningOnlyDownstreamSuppressed === true &&
+    state.executionPolicyFreeze?.policyIdentity ===
+      contract.freeze.policyIdentity &&
+    (result?.kind === "terminalization_pending" ||
+      result?.kind === "terminalized") &&
+    result.policyIdentity === contract.freeze.policyIdentity
+  );
+}
+
+function buildPlanningOnlyTransitionResult(input: {
+  evaluated: TransitionResult;
+  contract: PlanningOnlyTerminalizationInput;
+  planningAttemptIdentity: string;
+}): TransitionResult {
+  const { evaluated, contract, planningAttemptIdentity } = input;
+  if (!evaluated.accepted) {
+    throw new Error("planning_only_terminalization_requires_accepted_validation");
+  }
+  if (
+    evaluated.nextPhaseId &&
+    DOWNSTREAM_PHASE_IDS.has(evaluated.nextPhaseId)
+  ) {
+    // Validation proved planning success is legal; replace destination.
+  }
+  return {
+    accepted: true,
+    nextPhaseId: null,
+    nextStatusId: contract.freeze.terminalStatusId,
+    nextStatusName: contract.freeze.terminalStatusName,
+    reason: PLANNING_ONLY_TERMINALIZATION_REASON,
+    updatedCounters: evaluated.updatedCounters,
+    requiredAction: "noop",
+    bypass: null,
+    terminal: false,
+    blocked: false,
+    idempotencyIdentity: `planning_only_terminalization:planning:${planningAttemptIdentity}:${contract.freeze.policyIdentity}`,
+  };
+}
+
+function assertPlanningOnlyTerminalizationContract(input: {
+  currentPhaseId: string;
+  outcome: PhaseOutcome;
+  transition: TransitionResult;
+  next: WorkflowStateRecord;
+  contract: PlanningOnlyTerminalizationInput;
+}): void {
+  const { currentPhaseId, outcome, transition, next, contract } = input;
+  if (currentPhaseId !== "planning") {
+    throw new Error(
+      "planning_only_terminalization_invalid: current phase must be planning",
+    );
+  }
+  if (outcome.kind !== "success" || outcome.phaseId !== "planning") {
+    throw new Error(
+      "planning_only_terminalization_invalid: outcome must be planning success",
+    );
+  }
+  if (contract.freeze.policyKind !== "stop_after_planning") {
+    throw new Error(
+      "planning_only_terminalization_invalid: freeze must be stop_after_planning",
+    );
+  }
+  const expectedEffectIdentity = `planning_only_terminal_transition:${contract.freeze.policyIdentity}`;
+  if (contract.terminalEffectIdentity !== expectedEffectIdentity) {
+    throw new Error(
+      "planning_only_terminalization_invalid: terminal effect identity mismatch",
+    );
+  }
+  if (next.planningOnlyDownstreamSuppressed !== true) {
+    throw new Error(
+      "planning_only_terminalization_invalid: downstream suppression required",
+    );
+  }
+  const result = next.executionPolicyResult;
+  if (
+    !result ||
+    result.kind !== "terminalization_pending" ||
+    result.policyIdentity !== contract.freeze.policyIdentity ||
+    result.terminalStatusId !== contract.freeze.terminalStatusId
+  ) {
+    throw new Error(
+      "planning_only_terminalization_invalid: terminalization_pending result required",
+    );
+  }
+  if (
+    !next.executionPolicyFreeze ||
+    next.executionPolicyFreeze.policyIdentity !== contract.freeze.policyIdentity
+  ) {
+    throw new Error(
+      "planning_only_terminalization_invalid: freeze binding required",
+    );
+  }
+  if (!next.latestPlanArtifact) {
+    throw new Error(
+      "planning_only_terminalization_invalid: plan artifact required",
+    );
+  }
+  const terminalEffects = (next.sideEffects ?? []).filter(
+    (effect) => effect.kind === "planning_only_terminal_transition",
+  );
+  if (terminalEffects.length !== 1) {
+    throw new Error(
+      "planning_only_terminalization_invalid: exactly one planning_only_terminal_transition required",
+    );
+  }
+  const effect = terminalEffects[0]!;
+  if (
+    effect.identity !== expectedEffectIdentity ||
+    effect.terminalStatusId !== contract.freeze.terminalStatusId ||
+    effect.status !== "pending"
+  ) {
+    throw new Error(
+      "planning_only_terminalization_invalid: terminal side effect mismatch",
+    );
+  }
+  const forbiddenKinds = new Set([
+    "plan_review_dispatch",
+    "implementation_dispatch",
+  ]);
+  if ((next.sideEffects ?? []).some((effect) => forbiddenKinds.has(effect.kind))) {
+    throw new Error(
+      "planning_only_terminalization_invalid: plan review/implementation effects forbidden",
+    );
+  }
+  if (
+    next.planReviewSubjectIdentity ||
+    next.implementationSubjectIdentity ||
+    next.activeReviewSubjectIdentity
+  ) {
+    throw new Error(
+      "planning_only_terminalization_invalid: plan review/implementation subjects forbidden",
+    );
+  }
+  if (
+    next.currentPhaseId !== null ||
+    transition.nextPhaseId !== null ||
+    transition.reason !== PLANNING_ONLY_TERMINALIZATION_REASON ||
+    transition.bypass !== null ||
+    transition.requiredAction !== "noop" ||
+    !transition.idempotencyIdentity.startsWith("planning_only_terminalization:")
+  ) {
+    throw new Error(
+      "planning_only_terminalization_invalid: transition metadata must be planning-only",
+    );
+  }
+  if (
+    next.currentPhaseId !== null &&
+    DOWNSTREAM_PHASE_IDS.has(next.currentPhaseId)
+  ) {
+    throw new Error(
+      "planning_only_terminalization_invalid: downstream currentPhaseId forbidden",
+    );
+  }
 }
 
 export interface ApplyWorkflowTransitionResult {
@@ -83,6 +284,10 @@ function normalizeWorkflowState(record: WorkflowStateRecord): WorkflowStateRecor
     latestPlanArtifact: record.latestPlanArtifact ?? null,
     latestImplementationArtifact: record.latestImplementationArtifact ?? null,
     phaseExecutionFreeze: record.phaseExecutionFreeze ?? null,
+    executionPolicyFreeze: record.executionPolicyFreeze ?? null,
+    executionPolicyResult: record.executionPolicyResult ?? null,
+    planningOnlyDownstreamSuppressed:
+      record.planningOnlyDownstreamSuppressed ?? false,
     supersededGenerationIdentities: record.supersededGenerationIdentities ?? [],
     activeRunLease: record.activeRunLease ?? null,
     productionCompletion: record.productionCompletion ?? null,
@@ -119,6 +324,9 @@ function buildNextState(input: {
   latestPlanArtifact?: PlanArtifactIdentity | null;
   latestImplementationArtifact?: ImplementationArtifactIdentity | null;
   phaseExecutionFreeze?: PhaseExecutionFreeze | null;
+  executionPolicyFreeze?: import("./types.js").ExecutionPolicyFreeze | null;
+  executionPolicyResult?: import("./types.js").ExecutionPolicyResult | null;
+  planningOnlyDownstreamSuppressed?: boolean;
   now: string;
 }): WorkflowStateRecord {
   const previous = normalizeWorkflowState(input.previous);
@@ -272,6 +480,22 @@ function buildNextState(input: {
     // keep previous unless explicitly cleared via null
   }
 
+  let executionPolicyFreeze = previous.executionPolicyFreeze ?? null;
+  if (input.executionPolicyFreeze !== undefined) {
+    executionPolicyFreeze = input.executionPolicyFreeze;
+  }
+
+  let executionPolicyResult = previous.executionPolicyResult ?? null;
+  if (input.executionPolicyResult !== undefined) {
+    executionPolicyResult = input.executionPolicyResult;
+  }
+
+  let planningOnlyDownstreamSuppressed =
+    previous.planningOnlyDownstreamSuppressed ?? false;
+  if (input.planningOnlyDownstreamSuppressed !== undefined) {
+    planningOnlyDownstreamSuppressed = input.planningOnlyDownstreamSuppressed;
+  }
+
   return {
     ...previous,
     stateRevision: previous.stateRevision + 1,
@@ -294,6 +518,9 @@ function buildNextState(input: {
     latestPlanArtifact,
     latestImplementationArtifact,
     phaseExecutionFreeze,
+    executionPolicyFreeze,
+    executionPolicyResult,
+    planningOnlyDownstreamSuppressed,
   };
 }
 
@@ -343,6 +570,21 @@ export async function applyWorkflowTransition(
 
     if (persisted && loaded.stateRevision !== expectedRevision) {
       if (isSameAttempt(loaded, input.outcome.attemptIdentity)) {
+        return {
+          ok: true,
+          state: loaded,
+          transition: null,
+          reason: "duplicate_transition",
+          attempts,
+        };
+      }
+      if (
+        input.planningOnlyTerminalization &&
+        isEquivalentPlanningOnlyPending(
+          loaded,
+          input.planningOnlyTerminalization,
+        )
+      ) {
         return {
           ok: true,
           state: loaded,
@@ -453,7 +695,7 @@ export async function applyWorkflowTransition(
       };
     }
 
-    const transition = evaluateTransition({
+    const evaluated = evaluateTransition({
       definition: input.definition,
       currentPhaseId: input.currentPhaseId,
       outcome: input.outcome,
@@ -461,15 +703,15 @@ export async function applyWorkflowTransition(
       evidence,
     });
 
-    if (!transition.accepted) {
+    if (!evaluated.accepted) {
       if (
-        transition.rejectReason === "duplicate_phase_completion" ||
-        transition.rejectReason === "duplicate_decision"
+        evaluated.rejectReason === "duplicate_phase_completion" ||
+        evaluated.rejectReason === "duplicate_decision"
       ) {
         return {
           ok: true,
           state: loaded,
-          transition,
+          transition: evaluated,
           reason: "duplicate_transition",
           attempts,
         };
@@ -477,15 +719,55 @@ export async function applyWorkflowTransition(
       return {
         ok: false,
         state: loaded,
-        transition,
-        reason: transition.rejectReason ?? "illegal_transition",
+        transition: evaluated,
+        reason: evaluated.rejectReason ?? "illegal_transition",
         attempts,
       };
     }
 
-    const next = buildNextState({
+    const planningOnly = input.planningOnlyTerminalization;
+    let transition: TransitionResult = evaluated;
+    let executionPolicyFreeze = input.executionPolicyFreeze;
+    let executionPolicyResult = input.executionPolicyResult;
+    let planningOnlyDownstreamSuppressed =
+      input.planningOnlyDownstreamSuppressed;
+    let latestPlanArtifact = input.latestPlanArtifact;
+
+    if (planningOnly) {
+      if (
+        input.currentPhaseId !== "planning" ||
+        input.outcome.kind !== "success" ||
+        input.outcome.phaseId !== "planning"
+      ) {
+        return {
+          ok: false,
+          state: loaded,
+          transition: evaluated,
+          reason: "planning_only_terminalization_invalid",
+          attempts,
+        };
+      }
+      transition = buildPlanningOnlyTransitionResult({
+        evaluated,
+        contract: planningOnly,
+        planningAttemptIdentity: input.outcome.attemptIdentity,
+      });
+      const pendingResult: ExecutionPolicyResult = {
+        kind: "terminalization_pending",
+        policyIdentity: planningOnly.freeze.policyIdentity,
+        terminalStatusId: planningOnly.freeze.terminalStatusId,
+        planningPhaseExecutionId: planningOnly.planningRunId,
+        planGenerationId: planningOnly.planArtifact.planGenerationId,
+      };
+      executionPolicyFreeze = planningOnly.freeze;
+      executionPolicyResult = pendingResult;
+      planningOnlyDownstreamSuppressed = true;
+      latestPlanArtifact = planningOnly.planArtifact;
+    }
+
+    let next = buildNextState({
       previous: loaded,
-      transition: transition,
+      transition,
       currentPhaseId: input.currentPhaseId,
       outcome: input.outcome,
       claimLeaseIdentity: input.claimLeaseIdentity,
@@ -496,11 +778,48 @@ export async function applyWorkflowTransition(
       clearActiveRunId: input.clearActiveRunId,
       clearActiveRunLease: input.clearActiveRunLease,
       returnDestination: input.returnDestination,
-      latestPlanArtifact: input.latestPlanArtifact,
+      latestPlanArtifact,
       latestImplementationArtifact: input.latestImplementationArtifact,
       phaseExecutionFreeze: input.phaseExecutionFreeze,
+      executionPolicyFreeze,
+      executionPolicyResult,
+      planningOnlyDownstreamSuppressed,
       now: now(),
     });
+
+    if (planningOnly) {
+      next = upsertPlanningOnlyTerminalEffect(next, {
+        identity: planningOnly.terminalEffectIdentity,
+        terminalStatusId: planningOnly.freeze.terminalStatusId,
+      });
+      // Clear any accidental downstream subjects from prior state.
+      next = {
+        ...next,
+        planReviewSubjectIdentity: null,
+        implementationSubjectIdentity: null,
+        activeReviewSubjectIdentity: null,
+      };
+      try {
+        assertPlanningOnlyTerminalizationContract({
+          currentPhaseId: input.currentPhaseId,
+          outcome: input.outcome,
+          transition,
+          next,
+          contract: planningOnly,
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          state: loaded,
+          transition,
+          reason:
+            error instanceof Error
+              ? error.message
+              : "planning_only_terminalization_invalid",
+          attempts,
+        };
+      }
+    }
 
     const casRevision = persisted ? expectedRevision : 0;
     if (!persisted) {
@@ -530,6 +849,19 @@ export async function applyWorkflowTransition(
     });
     const latest = await input.store.load(input.issueKey);
     if (latest && isSameAttempt(latest, input.outcome.attemptIdentity)) {
+      return {
+        ok: true,
+        state: latest,
+        transition,
+        reason: "duplicate_transition",
+        attempts,
+      };
+    }
+    if (
+      planningOnly &&
+      latest &&
+      isEquivalentPlanningOnlyPending(latest, planningOnly)
+    ) {
       return {
         ok: true,
         state: latest,

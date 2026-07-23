@@ -404,6 +404,33 @@ export function markImplementationDispatchCompleted(
   });
 }
 
+export function upsertPlanningOnlyTerminalEffect(
+  state: WorkflowStateRecord,
+  input: {
+    identity: string;
+    terminalStatusId: string;
+    createdAt?: string;
+  },
+): WorkflowStateRecord {
+  const withPending = upsertPendingSideEffect(state, {
+    identity: input.identity,
+    kind: "planning_only_terminal_transition",
+    createdAt: input.createdAt,
+  });
+  const existing = getSideEffect(withPending, input.identity);
+  if (existing?.terminalStatusId === input.terminalStatusId) {
+    return withPending;
+  }
+  return {
+    ...withPending,
+    sideEffects: (withPending.sideEffects ?? []).map((entry) =>
+      entry.identity === input.identity
+        ? { ...entry, terminalStatusId: input.terminalStatusId }
+        : entry,
+    ),
+  };
+}
+
 export function buildSideEffectIdentity(parts: {
   kind: WorkflowSideEffectKind;
   subjectIdentity: string;

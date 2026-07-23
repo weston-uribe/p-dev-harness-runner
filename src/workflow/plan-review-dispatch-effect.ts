@@ -12,6 +12,7 @@
 
 import type { WorkflowStateStore } from "./state/index.js";
 import type { WorkflowStateRecord } from "./state/types.js";
+import { isPlanningOnlySuppressed } from "./execution-policy.js";
 import {
   buildSideEffectIdentity,
   claimPlanReviewDispatchEffect,
@@ -125,6 +126,9 @@ export async function ensurePlanReviewDispatchPending(input: {
   reviewSubjectIdentity: string;
   state: WorkflowStateRecord;
 }): Promise<WorkflowStateRecord> {
+  if (isPlanningOnlySuppressed(input.state)) {
+    return input.state;
+  }
   const effectId = buildPlanReviewDispatchEffectId(input.reviewSubjectIdentity);
   const reviewRequestId = buildPlanReviewRequestId(input.reviewSubjectIdentity);
   let state: WorkflowStateRecord = {
@@ -165,6 +169,14 @@ export async function ensurePlanReviewJobDispatched(input: {
   env?: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
 }): Promise<EnsurePlanReviewDispatchResult> {
+  if (isPlanningOnlySuppressed(input.state)) {
+    return {
+      outcome: "already_dispatched",
+      reviewRequestId: buildPlanReviewRequestId(input.reviewSubjectIdentity),
+      state: input.state,
+      httpDispatched: false,
+    };
+  }
   const env = input.env ?? process.env;
   const reviewRequestId = buildPlanReviewRequestId(input.reviewSubjectIdentity);
   const effectId = buildPlanReviewDispatchEffectId(input.reviewSubjectIdentity);

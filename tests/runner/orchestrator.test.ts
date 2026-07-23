@@ -76,6 +76,11 @@ describe("shouldContinueToImplementationAfterPlanning", () => {
         baseManifest({ finalOutcome: "failed" }),
       ),
     ).toBe(false);
+    expect(
+      shouldContinueToImplementationAfterPlanning(
+        baseManifest({ linearStatusAfter: "Canceled", finalOutcome: "success" }),
+      ),
+    ).toBe(false);
   });
 });
 

@@ -1,5 +1,14 @@
-import { parseHarnessMarkers, type HarnessMarkers } from "../linear/markers.js";
+import {
+  extractHarnessMetadataBlock,
+  HarnessMarkerParseError,
+  parseHarnessMarkers,
+  type HarnessMarkers,
+} from "../linear/markers.js";
 import type { LinearCommentRecord } from "../linear/writer.js";
+import {
+  assertCanonicalProviderIdentityHash,
+  hashProviderIdentity,
+} from "../identity/provider-identity-hash.js";
 import { normalizeRepoUrl } from "../resolver/normalize-repo.js";
 import {
   BuilderThreadLineageError,
@@ -38,6 +47,11 @@ export interface ResolveBuilderThreadInput {
   prUrl?: string;
   previousImplementationRunId?: string;
   previousRevisionRunId?: string;
+  workflowState?: {
+    builderAgentId?: string | null;
+    builderRunId?: string | null;
+    issueKey?: string;
+  } | null;
 }
 
 interface CandidateMarker {
@@ -48,12 +62,25 @@ interface CandidateMarker {
 
 type MarkerLineageKind = "legacy" | "modern";
 
+interface ValidatedCandidate {
+  candidate: CandidateMarker;
+  reference: BuilderThreadReference;
+  generation: number;
+}
+
 function parseTime(value?: string): number {
   if (!value) {
     return 0;
   }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function privateBuilderAgentId(
+  input: ResolveBuilderThreadInput,
+): string | undefined {
+  const agentId = input.workflowState?.builderAgentId?.trim();
+  return agentId ? agentId : undefined;
 }
 
 function isOrchestratorMarker(
@@ -65,6 +92,19 @@ function isOrchestratorMarker(
     Boolean(markers.phase) &&
     Boolean(markers.runId)
   );
+}
+
+function isBuilderCarryHarnessComment(
+  commentBody: string,
+  orchestratorMarker: string,
+): boolean {
+  const block = extractHarnessMetadataBlock(commentBody);
+  if (!block || !block.includes(orchestratorMarker)) {
+    return false;
+  }
+  const phaseMatch = block.match(/^phase:\s*(\S+)/m);
+  const phase = phaseMatch?.[1];
+  return Boolean(phase && BUILDER_CARRY_PHASES.has(phase));
 }
 
 function readGeneration(markers: HarnessMarkers): number {
@@ -79,8 +119,24 @@ function readGeneration(markers: HarnessMarkers): number {
   return parsed;
 }
 
+function hasHashOnlyIdentity(markers: HarnessMarkers): boolean {
+  if (markers.builderAgentIdHash && !markers.builderAgentId) {
+    return true;
+  }
+  const phase = markers.phase;
+  if (
+    phase &&
+    BUILDER_START_PHASES.has(phase) &&
+    markers.cursorAgentIdHash &&
+    !markers.cursorAgentId
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function classifyMarkerLineage(markers: HarnessMarkers): MarkerLineageKind | null {
-  if (markers.builderAgentId) {
+  if (markers.builderAgentId || markers.builderAgentIdHash) {
     return "modern";
   }
   const phase = markers.phase;
@@ -88,7 +144,8 @@ function classifyMarkerLineage(markers: HarnessMarkers): MarkerLineageKind | nul
     phase &&
     LEGACY_AGENT_PHASES.has(phase) &&
     markers.cursorAgentId &&
-    !markers.builderAgentId
+    !markers.builderAgentId &&
+    !markers.builderAgentIdHash
   ) {
     return "legacy";
   }
@@ -288,7 +345,7 @@ function assertMarkerShape(
   if (!kind) {
     throw new BuilderThreadLineageError(
       "incomplete_modern_marker",
-      "Builder marker is neither a valid legacy implementation_start marker nor a modern builder_agent_id marker",
+      "Builder marker is neither a valid legacy implementation_start marker nor a modern builder identity marker",
       { commentId, commentPhase: markers.phase, runId: markers.runId },
     );
   }
@@ -314,10 +371,30 @@ function assertMarkerShape(
     return kind;
   }
 
-  if (!markers.builderAgentId) {
+  if (!markers.builderAgentId && !markers.builderAgentIdHash) {
     throw new BuilderThreadLineageError(
       "incomplete_modern_marker",
-      "Modern Builder marker is missing builder_agent_id",
+      "Modern Builder marker is missing builder identity",
+      { commentId, commentPhase: markers.phase },
+    );
+  }
+
+  if (markers.builderAgentIdHash) {
+    assertCanonicalProviderIdentityHash(markers.builderAgentIdHash);
+  }
+
+  if (!privateBuilderAgentId(input) && hasHashOnlyIdentity(markers)) {
+    throw new BuilderThreadLineageError(
+      "missing_private_identity",
+      "Builder marker exposes only a hashed identity; private workflow state is required to resume",
+      { commentId, commentPhase: markers.phase },
+    );
+  }
+
+  if (!privateBuilderAgentId(input) && !resolveBuilderAgentId(markers)) {
+    throw new BuilderThreadLineageError(
+      "missing_private_identity",
+      "Builder marker cannot be resumed without private workflow state",
       { commentId, commentPhase: markers.phase },
     );
   }
@@ -345,8 +422,9 @@ function toReference(
   markers: HarnessMarkers,
   input: ResolveBuilderThreadInput,
   kind: MarkerLineageKind,
+  agentIdOverride?: string,
 ): BuilderThreadReference {
-  const agentId = resolveBuilderAgentId(markers);
+  const agentId = agentIdOverride ?? resolveBuilderAgentId(markers);
   if (!agentId) {
     throw new BuilderThreadLineageError(
       kind === "legacy" ? "invalid_legacy_marker" : "incomplete_modern_marker",
@@ -366,6 +444,7 @@ function toReference(
   const originRunId =
     markers.builderOriginRunId ??
     markers.runId ??
+    input.workflowState?.builderRunId ??
     input.previousImplementationRunId;
   if (!originRunId) {
     throw new BuilderThreadLineageError(
@@ -387,13 +466,148 @@ function toReference(
   };
 }
 
+function buildReferenceFromPrivateState(
+  input: ResolveBuilderThreadInput,
+  markers: HarnessMarkers | null,
+  sourcePhaseOverride?: BuilderThreadSourcePhase,
+): BuilderThreadReference {
+  const agentId = privateBuilderAgentId(input)!;
+  const generation = markers ? readGeneration(markers) : 1;
+  const sourcePhase =
+    sourcePhaseOverride ??
+    (markers ? sourcePhaseFromMarkerPhase(markers.phase) : undefined) ??
+    "implementation";
+  const originRunId =
+    markers?.builderOriginRunId ??
+    markers?.runId ??
+    input.workflowState?.builderRunId ??
+    input.previousImplementationRunId ??
+    input.workflowState?.builderRunId;
+  if (!originRunId) {
+    throw new BuilderThreadLineageError(
+      "incomplete_modern_marker",
+      "Private builder lineage is missing origin run context",
+      { builderAgentId: agentId },
+    );
+  }
+  return {
+    agentId,
+    generation,
+    originHarnessRunId: originRunId,
+    latestHarnessRunId: markers?.runId ?? originRunId,
+    sourcePhase,
+    targetRepo: normalizeRepoUrl(markers?.targetRepo ?? input.targetRepo),
+    branch: markers?.branch ?? input.branch,
+    prUrl: markers?.prUrl ?? input.prUrl,
+    idempotencyKey: markers?.builderThreadIdempotencyKey,
+  };
+}
+
+function validateMarkerIdentityAgainstState(
+  markers: HarnessMarkers,
+  builderAgentId: string,
+  commentId: string,
+): void {
+  if (markers.builderAgentIdHash) {
+    assertCanonicalProviderIdentityHash(markers.builderAgentIdHash);
+    if (hashProviderIdentity(builderAgentId) !== markers.builderAgentIdHash) {
+      throw new BuilderThreadLineageError(
+        "hash_state_mismatch",
+        "Builder marker hash does not match private workflow state builder identity",
+        {
+          commentId,
+          commentPhase: markers.phase,
+          markerHash: markers.builderAgentIdHash,
+        },
+      );
+    }
+  }
+
+  if (markers.builderAgentId && markers.builderAgentId !== builderAgentId) {
+    throw new BuilderThreadLineageError(
+      "legacy_state_mismatch",
+      "Builder marker raw agent id does not match private workflow state",
+      {
+        commentId,
+        commentPhase: markers.phase,
+        markerAgentId: markers.builderAgentId,
+      },
+    );
+  }
+
+  if (
+    markers.phase &&
+    BUILDER_START_PHASES.has(markers.phase) &&
+    markers.cursorAgentId &&
+    markers.cursorAgentId !== builderAgentId
+  ) {
+    throw new BuilderThreadLineageError(
+      "legacy_state_mismatch",
+      "Legacy cursor agent id does not match private workflow state",
+      {
+        commentId,
+        commentPhase: markers.phase,
+        markerAgentId: markers.cursorAgentId,
+      },
+    );
+  }
+
+  if (
+    markers.phase &&
+    BUILDER_START_PHASES.has(markers.phase) &&
+    markers.cursorAgentIdHash
+  ) {
+    assertCanonicalProviderIdentityHash(markers.cursorAgentIdHash);
+    if (hashProviderIdentity(builderAgentId) !== markers.cursorAgentIdHash) {
+      throw new BuilderThreadLineageError(
+        "hash_state_mismatch",
+        "Legacy cursor agent hash does not match private workflow state builder identity",
+        {
+          commentId,
+          commentPhase: markers.phase,
+          markerHash: markers.cursorAgentIdHash,
+        },
+      );
+    }
+  }
+}
+
+function parseMarkersForLineage(
+  commentBody: string,
+  orchestratorMarker: string,
+  commentId: string,
+): HarnessMarkers | null {
+  try {
+    return parseHarnessMarkers(commentBody);
+  } catch (error) {
+    if (error instanceof HarnessMarkerParseError) {
+      if (isBuilderCarryHarnessComment(commentBody, orchestratorMarker)) {
+        throw new BuilderThreadLineageError(
+          "invalid_identity_hash_marker",
+          error.message,
+          { commentId, parseErrorCode: error.code },
+        );
+      }
+      return null;
+    }
+    throw error;
+  }
+}
+
 function collectCandidates(
   comments: LinearCommentRecord[],
   orchestratorMarker: string,
 ): CandidateMarker[] {
   const candidates: CandidateMarker[] = [];
   for (const comment of comments) {
-    const markers = parseHarnessMarkers(comment.body);
+    const markers = parseMarkersForLineage(
+      comment.body,
+      orchestratorMarker,
+      comment.id,
+    );
+    if (!markers) {
+      continue;
+    }
     if (!isOrchestratorMarker(markers, orchestratorMarker)) {
       continue;
     }
@@ -412,13 +626,9 @@ function collectCandidates(
   return candidates;
 }
 
-function rejectConflictingHighestGeneration(
-  entries: Array<{
-    candidate: CandidateMarker;
-    reference: BuilderThreadReference;
-    generation: number;
-  }>,
-): BuilderThreadReference {
+function selectHighestGenerationWinner(
+  entries: ValidatedCandidate[],
+): ValidatedCandidate {
   const maxGeneration = Math.max(...entries.map((entry) => entry.generation));
   const atMaxGeneration = entries.filter((entry) => entry.generation === maxGeneration);
   const agentIds = new Set(atMaxGeneration.map((entry) => entry.reference.agentId));
@@ -434,7 +644,7 @@ function rejectConflictingHighestGeneration(
     );
   }
   atMaxGeneration.sort((a, b) => b.candidate.createdAt - a.candidate.createdAt);
-  const winner = atMaxGeneration[0]?.reference;
+  const winner = atMaxGeneration[0];
   if (!winner) {
     throw new BuilderThreadLineageError(
       "lineage_context_mismatch",
@@ -444,21 +654,26 @@ function rejectConflictingHighestGeneration(
   return winner;
 }
 
-function resolveValidatedCandidates(input: ResolveBuilderThreadInput): Array<{
-  candidate: CandidateMarker;
-  reference: BuilderThreadReference;
-  generation: number;
-}> {
+function rejectConflictingHighestGeneration(
+  entries: ValidatedCandidate[],
+): BuilderThreadReference {
+  return selectHighestGenerationWinner(entries).reference;
+}
+
+const SOFT_SKIP_LINEAGE_REASONS = new Set<BuilderThreadLineageFailureReason>([
+  "lineage_context_mismatch",
+  "incomplete_modern_marker",
+  "invalid_legacy_marker",
+]);
+
+function resolveValidatedCandidates(input: ResolveBuilderThreadInput): ValidatedCandidate[] {
   const rawCandidates = collectCandidates(input.comments, input.orchestratorMarker);
   if (rawCandidates.length === 0) {
     return [];
   }
 
-  const validated: Array<{
-    candidate: CandidateMarker;
-    reference: BuilderThreadReference;
-    generation: number;
-  }> = [];
+  const stateAgentId = privateBuilderAgentId(input);
+  const validated: ValidatedCandidate[] = [];
 
   for (const candidate of rawCandidates) {
     try {
@@ -466,17 +681,17 @@ function resolveValidatedCandidates(input: ResolveBuilderThreadInput): Array<{
       const generation = assertValidGeneration(candidate.markers, candidate.commentId);
       validated.push({
         candidate,
-        reference: toReference(candidate.markers, input, kind),
+        reference: toReference(
+          candidate.markers,
+          input,
+          kind,
+          stateAgentId,
+        ),
         generation,
       });
     } catch (error) {
       if (error instanceof BuilderThreadLineageError) {
-        const reason = error.reason;
-        if (
-          reason === "lineage_context_mismatch" ||
-          reason === "incomplete_modern_marker" ||
-          reason === "invalid_legacy_marker"
-        ) {
+        if (SOFT_SKIP_LINEAGE_REASONS.has(error.reason)) {
           continue;
         }
         throw error;
@@ -491,10 +706,38 @@ function resolveValidatedCandidates(input: ResolveBuilderThreadInput): Array<{
 export function resolveBuilderThreadReference(
   input: ResolveBuilderThreadInput,
 ): BuilderThreadReference | null {
+  const stateAgentId = privateBuilderAgentId(input);
+
+  if (stateAgentId) {
+    const validated = resolveValidatedCandidates(input);
+    for (const entry of validated) {
+      validateMarkerIdentityAgainstState(
+        entry.candidate.markers,
+        stateAgentId,
+        entry.candidate.commentId,
+      );
+    }
+
+    if (validated.length === 0) {
+      return buildReferenceFromPrivateState(input, null);
+    }
+
+    const winner = selectHighestGenerationWinner(validated);
+    return buildReferenceFromPrivateState(input, winner.candidate.markers);
+  }
+
   const validated = resolveValidatedCandidates(input);
   if (validated.length === 0) {
     return null;
   }
+
+  if (validated.some((entry) => hasHashOnlyIdentity(entry.candidate.markers))) {
+    throw new BuilderThreadLineageError(
+      "missing_private_identity",
+      "Builder marker exposes only a hashed identity; private workflow state is required to resume",
+    );
+  }
+
   return rejectConflictingHighestGeneration(validated);
 }
 
@@ -533,7 +776,15 @@ export function findImplementationStartBuilderAgentId(
   targetRepo: string,
 ): string | null {
   for (const comment of comments) {
-    const markers = parseHarnessMarkers(comment.body);
+    let markers: HarnessMarkers | null;
+    try {
+      markers = parseMarkersForLineage(comment.body, orchestratorMarker, comment.id);
+    } catch {
+      continue;
+    }
+    if (!markers) {
+      continue;
+    }
     if (
       markers.orchestratorMarker !== orchestratorMarker ||
       markers.phase !== "implementation_start" ||

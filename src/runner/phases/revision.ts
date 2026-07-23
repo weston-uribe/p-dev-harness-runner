@@ -39,6 +39,7 @@ import {
   postRevisionComment,
   transitionIssueStatus,
 } from "../../linear/writer.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import { GitHubClient } from "../../github/client.js";
 import { assertPrBaseBranchMatches } from "../../github/base-branch.js";
 import {
@@ -119,6 +120,7 @@ import {
 } from "../../workflow/state/index.js";
 import { resolvePhaseWorkflowStateStore } from "../../workflow/state/resolve-store.js";
 import { createImplementationArtifactIdentity } from "../../workflow/implementation-artifact.js";
+import { loadWorkflowStateForIssue } from "../../workflow/resolve-implementation-subject.js";
 
 export interface RevisionPhaseOptions {
   issueKey: string;
@@ -721,6 +723,11 @@ export async function executeRevisionPhase(
       issueKey: issue.identifier,
       pmFeedbackCommentId,
     });
+    const { state: revisionWorkflowState } = await loadWorkflowStateForIssue({
+      config,
+      issueKey: options.issueKey,
+      issueTeamId: issue.teamId,
+    });
     const acquired = await acquireBuilderAgent({
       apiKey: cursorApiKey,
       config,
@@ -737,6 +744,13 @@ export async function executeRevisionPhase(
         comments,
         orchestratorMarker: config.orchestratorMarker,
         previousImplementationRunId: previousImplementationRunId ?? undefined,
+        workflowState: revisionWorkflowState
+          ? {
+              builderAgentId: revisionWorkflowState.builderAgentId,
+              builderRunId: revisionWorkflowState.builderRunId,
+              issueKey: issue.identifier,
+            }
+          : null,
       },
       buildLaunchContext: (info) =>
         buildPhaseLaunchContext({
@@ -1154,19 +1168,21 @@ export async function executeRevisionPhase(
     const revisionCommentId = await postRevisionComment(client, issue.id, revisionBody, {
       ...footerBase,
       promptVersion,
-      cursorAgentId: cursorAgentId ?? undefined,
-      cursorRunId: cursorRunId ?? undefined,
+      ...toPublicProviderIdentityHashes({
+        cursorAgentId,
+        cursorRunId,
+        builderAgentId: builderEvidence.builderAgentId,
+        previousBuilderAgentId: builderEvidence.previousBuilderAgentId,
+      }),
       branch: branch ?? undefined,
       prUrl: prUrl ?? undefined,
       previewUrl: previewUrl ?? undefined,
       previousHandoffRunId: previousHandoffRunId ?? undefined,
       pmFeedbackCommentId,
-      builderAgentId: builderEvidence.builderAgentId,
       builderThreadGeneration: builderEvidence.builderThreadGeneration,
       builderThreadAction: builderEvidence.builderThreadAction,
       builderOriginRunId: builderEvidence.builderOriginRunId,
       builderThreadIdempotencyKey: builderEvidence.builderThreadIdempotencyKey,
-      previousBuilderAgentId: builderEvidence.previousBuilderAgentId,
       builderThreadReplacementReason: builderEvidence.builderThreadReplacementReason,
     });
     commentsWritten.push(revisionBody);
@@ -1321,8 +1337,10 @@ export async function executeRevisionPhase(
           message,
           {
             ...footerBase,
-            cursorAgentId: cursorAgentId ?? undefined,
-            cursorRunId: cursorRunId ?? undefined,
+            ...toPublicProviderIdentityHashes({
+              cursorAgentId,
+              cursorRunId,
+            }),
             branch: branch ?? undefined,
             prUrl: prUrl ?? undefined,
             previewUrl: previewUrl ?? undefined,

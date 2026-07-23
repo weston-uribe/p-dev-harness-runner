@@ -4,7 +4,11 @@ export type BuilderThreadLineageFailureReason =
   | "lineage_context_mismatch"
   | "incomplete_modern_marker"
   | "invalid_legacy_marker"
-  | "missing_pr_lineage";
+  | "missing_pr_lineage"
+  | "hash_state_mismatch"
+  | "legacy_state_mismatch"
+  | "missing_private_identity"
+  | "invalid_identity_hash_marker";
 
 export class BuilderThreadLineageError extends Error {
   readonly reason: BuilderThreadLineageFailureReason;

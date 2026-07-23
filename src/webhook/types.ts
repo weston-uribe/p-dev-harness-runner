@@ -38,7 +38,8 @@ export type WebhookIgnoreReason =
   | "ignored_status"
   | "missing_issue_key"
   | "linear_team_project_not_configured"
-  | "missing_linear_api_key_for_implementation_subject";
+  | "missing_linear_api_key_for_implementation_subject"
+  | "planning_only_suppressed";
 
 export interface WebhookAcceptedResponse {
   accepted: true;

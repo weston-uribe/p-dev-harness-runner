@@ -10,6 +10,7 @@ import {
   createGithubJobRequestStoreFromEnv,
   JobRequestRuntimeError,
   writeHarnessIssueKeyToGithubEnv,
+  writeLinearDeliveryIdToGithubEnv,
 } from "../../workflow/job-request/runtime-store.js";
 
 export interface ClaimJobRequestCommandOptions {
@@ -38,6 +39,9 @@ export async function runClaimJobRequestCommand(
     });
 
     writeHarnessIssueKeyToGithubEnv(result.record.issueKey);
+    if (result.record.linearDeliveryId?.trim()) {
+      writeLinearDeliveryIdToGithubEnv(result.record.linearDeliveryId);
+    }
 
     if (options.json || isPublicRunnerMode()) {
       new PublicSafeLogger().log({
@@ -84,5 +88,8 @@ export async function resolveIssueKeyFromRequestId(
     claimIdentity,
   });
   writeHarnessIssueKeyToGithubEnv(result.record.issueKey);
+  if (result.record.linearDeliveryId?.trim()) {
+    writeLinearDeliveryIdToGithubEnv(result.record.linearDeliveryId);
+  }
   return result.record.issueKey;
 }
