@@ -34,7 +34,7 @@ Attribution is agent→phase (not per-run `provider_exact`). Proxies are not bil
 
 ### What still blocks Ready
 
-Native Cursor-run generations still lack `usageDetails` / truthful USD cost. CSV score-backed tokens do **not** feed `generationCostComplete`. Public hard acceptance correctly remains incomplete until numeric provider cost or approved cache pricing exists.
+Native Cursor-run generations still lack `usageDetails` / truthful USD cost. CSV score-backed tokens do **not** feed `generationCostComplete`. Public hard acceptance correctly remains incomplete until numeric provider cost or approved cache pricing exists. Score enrichment via Settings → Cursor usage (see [cursor-usage-import-operator.md](cursor-usage-import-operator.md)) does **not** repair the native generation cost dashboard. Admin API remains aggregate-only under the current documented contract.
 
 ## Public Actions privacy
 

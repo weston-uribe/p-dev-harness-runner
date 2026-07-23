@@ -60,6 +60,28 @@ export interface SendAndObserveOptions {
   fetchCloudRun?: typeof Agent.getRun;
   onAgentCreated?: (details: { agentId: string; runId: string }) => Promise<void>;
   onBeforeSend?: (details: { agentId: string }) => Promise<void>;
+  /**
+   * Invoked immediately after agent.send returns the provider run,
+   * before telemetry, Linear progression, or success handling.
+   */
+  onRunAcknowledged?: (details: {
+    agentId: string;
+    runId: string;
+    acknowledgedAt: string;
+    providerRunCreatedAt?: string | null;
+  }) => Promise<void>;
+  /**
+   * Invoked immediately after authoritative terminal run.wait/poll result,
+   * before classification, assistant-text validation, git policy, or phase errors.
+   */
+  onRunTerminal?: (details: {
+    agentId: string;
+    runId: string;
+    terminalStatus: string;
+    terminalAt: string;
+    providerTerminalAt?: string | null;
+    hasAuthoritativeTerminalResult: true;
+  }) => Promise<void>;
   onTelemetryEvent?: OnTelemetryEvent;
   telemetryCorrelation?: TelemetryCorrelationContext;
   revisionRequiresPmFeedback?: boolean;
@@ -244,6 +266,16 @@ export async function sendAndObserve(
     );
   }
 
+  const runAcknowledgedAt = new Date().toISOString();
+  if (options.onRunAcknowledged) {
+    await options.onRunAcknowledged({
+      agentId,
+      runId: run.id,
+      acknowledgedAt: runAcknowledgedAt,
+      providerRunCreatedAt: null,
+    });
+  }
+
   await events.log("cursor_agent_created", "info", { agentId, runId: run.id });
   if (options.onAgentCreated) {
     await options.onAgentCreated({ agentId, runId: run.id });
@@ -331,6 +363,18 @@ export async function sendAndObserve(
     throw error;
   } finally {
     detachAbort?.();
+  }
+
+  const terminalAt = new Date().toISOString();
+  if (options.onRunTerminal && isTerminalRunStatus(result.status)) {
+    await options.onRunTerminal({
+      agentId,
+      runId: result.id,
+      terminalStatus: result.status,
+      terminalAt,
+      providerTerminalAt: null,
+      hasAuthoritativeTerminalResult: true,
+    });
   }
 
   if (options.abortSignal?.aborted) {

@@ -14,6 +14,7 @@ const REQUIRED_PATHS = [
   ".github",
   ".harness/config.example.json",
   ".env.example",
+  ".gitignore",
   ".npmrc",
   ".nvmrc",
   "AGENTS.md",
@@ -24,6 +25,7 @@ const REQUIRED_PATHS = [
   "ROADMAP.md",
   "api",
   "apps",
+  "bin",
   "docs",
   "evals",
   "examples",
@@ -35,6 +37,7 @@ const REQUIRED_PATHS = [
   "src",
   "templates",
   "tests",
+  "config/observability.public.json",
   "harness.config.json",
   "harness.config.schema.json",
   "package.json",
@@ -50,6 +53,7 @@ const INCLUDE_PREFIXES = [
   ".harness/",
   "api/",
   "apps/",
+  "bin/",
   "docs/",
   "evals/",
   "examples/",
@@ -65,6 +69,7 @@ const INCLUDE_PREFIXES = [
 
 const INCLUDE_FILES = [
   ".env.example",
+  ".gitignore",
   ".npmrc",
   ".nvmrc",
   "AGENTS.md",
@@ -73,6 +78,7 @@ const INCLUDE_FILES = [
   "LICENSE",
   "README.md",
   "ROADMAP.md",
+  "config/observability.public.json",
   "harness.config.json",
   "harness.config.schema.json",
   "package.json",
@@ -189,12 +195,13 @@ export function assertNoForbiddenSnapshotPaths(selectedPaths: string[]): void {
 }
 
 /**
- * npm pack always omits files named `.npmrc` (any depth). Store that logical
- * snapshot path under a pack-safe alias; provisioning still writes `.npmrc`
- * into managed workspaces via the manifest path.
+ * npm pack always omits files named `.npmrc` / `.gitignore` (any depth).
+ * Store those logical snapshot paths under pack-safe aliases; provisioning
+ * still writes the logical names into managed workspaces via the manifest path.
  */
 const SNAPSHOT_PACK_SAFE_STORAGE_ALIASES: Readonly<Record<string, string>> = {
   ".npmrc": "npmrc.snapshot",
+  ".gitignore": "gitignore.snapshot",
 };
 
 export function toSnapshotStoragePath(snapshotPath: string): string {

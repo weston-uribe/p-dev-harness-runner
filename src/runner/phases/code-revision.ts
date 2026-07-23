@@ -32,7 +32,8 @@ import {
   createCodeRevisionAgent,
   disposeAgent,
   sendAndObserve,
-} from "../../agents/index.js";
+} from "../../agents/production.js";
+import { buildPhaseLaunchContext } from "../provenance-launch-context.js";
 import { manifestModelEvidence } from "../../cursor/model.js";
 import { buildCodeRevisionPrompt } from "../../prompts/builder.js";
 import { CodeRevisionError } from "../errors.js";
@@ -586,12 +587,31 @@ export async function executeCodeRevisionPhase(
       onTelemetry,
     );
 
+    const codeRevisionBranch =
+      branchName || `pr-${latestImplementation.prNumber}`;
+    const codeRevisionLaunchContext = buildPhaseLaunchContext({
+      config,
+      linearIssueId: issue.id,
+      linearIssueKey: issue.identifier,
+      phase: "code_revision",
+      phaseExecutionId: runId,
+      harnessRunId: runId,
+      agentRole: "code_reviser",
+      action: "create",
+      generation: 1,
+      targetRepository: resolved.targetRepo,
+      startingRef: codeRevisionBranch,
+      prUrl: latestImplementation.prUrl,
+      prNumber: latestImplementation.prNumber,
+      launchSurface: "code_revision.create",
+    });
     const agent = await createCodeRevisionAgent({
       apiKey: cursorApiKey,
       config,
       targetRepo: resolved.targetRepo,
-      branch: branchName || `pr-${latestImplementation.prNumber}`,
+      branch: codeRevisionBranch,
       prUrl: latestImplementation.prUrl,
+      launchContext: codeRevisionLaunchContext,
     });
 
     try {
@@ -611,6 +631,9 @@ export async function executeCodeRevisionPhase(
         sendAndObserve(agent, prompt, runDirectory, events, {
           apiKey: cursorApiKey,
           phase: "code_revision",
+          launchContext: codeRevisionLaunchContext,
+          sendSurface: "code_revision.send",
+          sendOrdinal: 1,
           telemetryCorrelation,
           onTelemetryEvent: onTelemetry,
           targetRepo: resolved.targetRepo,

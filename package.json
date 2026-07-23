@@ -42,6 +42,7 @@
     "evaluation:inspect-langfuse": "tsx src/index.ts eval inspect-langfuse",
     "evaluation:reproject-langfuse": "tsx src/index.ts eval reproject-langfuse",
     "evaluation:canary-langfuse-projection": "tsx src/index.ts eval canary-langfuse-projection",
+    "evaluation:canary-cursor-usage-import": "tsx src/index.ts eval canary-cursor-usage-import",
     "evaluation:canary-native-skill": "tsx src/index.ts eval canary-native-skill",
     "evaluation:probe-cursor-sdk-usage": "tsx src/index.ts eval probe-cursor-sdk-usage",
     "evaluation:import-cursor-usage": "tsx src/index.ts eval import-cursor-usage",
@@ -81,7 +82,8 @@
     "package:p-dev:inspect": "sh -c 'cd packages/p-dev && npm pack --dry-run --json'",
     "test:workflow:browser": "playwright test --config scripts/workflow-browser-matrix.config.ts",
     "test:configure:browser": "playwright test --config scripts/configure-browser-matrix.config.ts",
-    "test:operator:browser": "playwright test --config scripts/operator-gui-smoke.config.ts"
+    "test:operator:browser": "playwright test --config scripts/operator-gui-smoke.config.ts",
+    "test:cursor-usage:browser": "playwright test --config scripts/cursor-usage-import-browser.config.ts"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.23",

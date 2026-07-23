@@ -1,11 +1,20 @@
 import type { LangfuseInspectReport } from "../langfuse-inspect/types.js";
+import {
+  isEvaluationPhase,
+  phaseInvokesAgent,
+  type EvaluationPhase,
+} from "../phases.js";
 import type { PricingVariant } from "../telemetry/pricing-registry.js";
 import { hashCloudAgentId } from "./parse.js";
-import type { AgentAggregate, PhaseJoinTarget } from "./types.js";
+import type {
+  AgentAggregate,
+  AllowedImportPhase,
+  PhaseJoinTarget,
+} from "./types.js";
 
 const INGESTION_SLACK_MS = 6 * 60 * 60 * 1000;
 
-export type AllowedImportPhase = "planning" | "plan_review";
+export type { AllowedImportPhase };
 
 function parseIso(s: string): number | null {
   const t = Date.parse(s);
@@ -40,6 +49,19 @@ function agentIdFromObs(
   return null;
 }
 
+function resolveObsPhase(
+  obs: LangfuseInspectReport["traces"][number]["observations"][number],
+  tracePhase: string | null,
+): AllowedImportPhase | null {
+  const raw =
+    obs.phase ||
+    (typeof obs.metadata.phase === "string" ? obs.metadata.phase : null) ||
+    tracePhase;
+  if (!raw || !isEvaluationPhase(raw)) return null;
+  if (!phaseInvokesAgent(raw)) return null;
+  return raw;
+}
+
 function traceEndTimestamp(
   trace: LangfuseInspectReport["traces"][number],
 ): string {
@@ -66,13 +88,43 @@ function timestampsFitWindow(
   return min >= start - INGESTION_SLACK_MS && max <= end + INGESTION_SLACK_MS;
 }
 
+export function parseAllowedImportPhases(
+  phases: string[] | undefined,
+): AllowedImportPhase[] {
+  if (!phases?.length) {
+    return [];
+  }
+  const out: AllowedImportPhase[] = [];
+  for (const p of phases) {
+    const trimmed = p.trim();
+    if (!isEvaluationPhase(trimmed)) continue;
+    if (!phaseInvokesAgent(trimmed)) continue;
+    if (!out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
+}
+
+export function defaultAllowedImportPhases(): AllowedImportPhase[] {
+  return (
+    [
+      "planning",
+      "plan_review",
+      "code_review",
+      "code_revision",
+      "implementation",
+      "revision",
+      "integration_repair",
+    ] as EvaluationPhase[]
+  ).filter(phaseInvokesAgent);
+}
+
 export interface JoinResult {
   joins: Array<{ join: PhaseJoinTarget; aggregate: AgentAggregate }>;
   skipped: Array<{ reason: string; cloudAgentIdHash?: string; phase?: string }>;
 }
 
 /**
- * Join agent aggregates to exactly one allowed phase trace each.
+ * Join agent aggregates to exactly one allowed agent-invoking phase trace each.
  */
 export function joinAggregatesToPhaseTraces(params: {
   report: LangfuseInspectReport;
@@ -99,7 +151,6 @@ export function joinAggregatesToPhaseTraces(params: {
   const byAgent = new Map<string, Candidate[]>();
 
   for (const trace of report.traces) {
-    // Phase may live on observations when trace.phase is null (common in inspect reports).
     type AgentWin = {
       phases: Set<AllowedImportPhase>;
       windowStart: string | null;
@@ -112,17 +163,9 @@ export function joinAggregatesToPhaseTraces(params: {
     let fast: boolean | null = null;
 
     for (const obs of trace.observations) {
-      const obsPhase = (obs.phase ||
-        (typeof obs.metadata.phase === "string"
-          ? obs.metadata.phase
-          : null) ||
-        trace.phase) as string | null;
+      const obsPhase = resolveObsPhase(obs, trace.phase);
       const aid = agentIdFromObs(obs);
-      if (
-        aid &&
-        (obsPhase === "planning" || obsPhase === "plan_review") &&
-        allowedPhases.includes(obsPhase)
-      ) {
+      if (aid && obsPhase && allowedPhases.includes(obsPhase)) {
         const cur = agentsOnTrace.get(aid) ?? {
           phases: new Set<AllowedImportPhase>(),
           windowStart: null,
@@ -244,6 +287,8 @@ export function joinAggregatesToPhaseTraces(params: {
         cursorAgentIdHash: hashCloudAgentId(cand.cursorAgentId),
         effectiveVariant: cand.effectiveVariant,
         sdkFast: cand.sdkFast,
+        windowStart: cand.windowStart,
+        windowEnd: cand.windowEnd,
       },
     });
   }
@@ -252,22 +297,29 @@ export function joinAggregatesToPhaseTraces(params: {
 }
 
 /**
- * After agent→trace joins, require exactly one canonical score-target trace
- * per expected CSV phase (planning / plan_review).
+ * Validate that each phase present in joins has exactly one canonical
+ * score-target trace. Does not require every allowed phase to appear
+ * (source-scope completeness ≠ universal workflow phase coverage).
  */
 export function validateCanonicalCsvPhaseTraces(params: {
   joins: JoinResult["joins"];
   allowedPhases: AllowedImportPhase[];
+  /** When true, also require every allowed phase to have a join (legacy). */
+  requireAllAllowedPhases?: boolean;
 }): {
   ok: boolean;
   skipped: JoinResult["skipped"];
-  /** Phase → canonical traceId when unambiguous */
   canonicalTraceByPhase: Map<AllowedImportPhase, string>;
 } {
   const skipped: JoinResult["skipped"] = [];
   const canonicalTraceByPhase = new Map<AllowedImportPhase, string>();
+  const phasesToCheck = params.requireAllAllowedPhases
+    ? params.allowedPhases
+    : ([
+        ...new Set(params.joins.map((j) => j.join.phase)),
+      ] as AllowedImportPhase[]);
 
-  for (const phase of params.allowedPhases) {
+  for (const phase of phasesToCheck) {
     const phaseJoins = params.joins.filter((j) => j.join.phase === phase);
     if (phaseJoins.length === 0) {
       skipped.push({ reason: `missing_csv_score_trace:${phase}`, phase });
@@ -279,7 +331,6 @@ export function validateCanonicalCsvPhaseTraces(params: {
         reason: `ambiguous_csv_score_trace:${phase}`,
         phase,
       });
-      // Also record split when multiple joins attach scores across traces
       if (phaseJoins.length > 1) {
         skipped.push({
           reason: `csv_scores_split_across_traces:${phase}`,

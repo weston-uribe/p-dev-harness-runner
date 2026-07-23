@@ -73,11 +73,6 @@ export function buildMinimalHarnessComment(
   return lines.join("\n");
 }
 
-/** Strips HTML comments so tests can assert visible markdown only. */
-export function getVisibleCommentBody(body: string): string {
-  return body.replace(/<!--[\s\S]*?-->/g, "").trim();
-}
-
 export function formatBulletList(items: string[]): string[] {
   return items.map((item) => `- ${item}`);
 }

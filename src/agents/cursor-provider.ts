@@ -48,6 +48,11 @@ function unwrapCursorAgent(handle: AgentHandle): CursorCloudAgent {
   return agent;
 }
 
+/** Provenance-only: resolve agentId from an opaque handle without send. */
+export function peekCursorAgentId(handle: AgentHandle): string {
+  return unwrapCursorAgent(handle).agentId;
+}
+
 function mapObservedRun(
   observed: Awaited<ReturnType<typeof cursorSendAndObserve>>,
 ): ObservedAgentRun {

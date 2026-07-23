@@ -40,12 +40,36 @@ export interface AcquireBuilderAgentContext {
   previousRevisionRunId?: string;
 }
 
+/**
+ * Optional for tests/nonproduction. Production LinearHarnessAgentProvider
+ * always supplies a mandatory provenance adapter — never rely on no-op absence.
+ */
+export interface BuilderProvenanceMutationHooks {
+  beforeMutation(info: {
+    action: "create" | "resume" | "replacement";
+    generation: number;
+    priorAgentId?: string;
+  }): Promise<void>;
+  afterAgent(info: {
+    action: "create" | "resume" | "replacement";
+    agentId: string;
+    generation: number;
+    priorAgentId?: string;
+  }): Promise<void>;
+  onMutationFailed?(info: {
+    action: "create" | "resume" | "replacement";
+    error: unknown;
+  }): Promise<void>;
+}
+
 export interface AcquireBuilderAgentParams {
   apiKey: string;
   config: HarnessConfig;
   phase: BuilderThreadSourcePhase;
   context: AcquireBuilderAgentContext;
   events: EventLogger;
+  /** Generic optional extension; production path supplies a mandatory adapter. */
+  provenanceHooks?: BuilderProvenanceMutationHooks;
 }
 
 export interface AcquiredBuilderAgent {
@@ -75,32 +99,44 @@ async function createInitialBuilder(
   params: AcquireBuilderAgentParams,
 ): Promise<AcquiredBuilderAgent> {
   const { apiKey, config, context } = params;
-  const agent = await createImplementationCloudAgent({
-    apiKey,
-    config,
-    targetRepo: context.targetRepo,
-    baseBranch: context.baseBranch,
-  });
-  const reference: BuilderThreadReference = {
-    agentId: agent.agentId,
-    generation: 1,
-    originHarnessRunId: context.harnessRunId,
-    latestHarnessRunId: context.harnessRunId,
-    sourcePhase: params.phase,
-    targetRepo: context.targetRepo,
-    branch: context.branch,
-    prUrl: context.prUrl,
-    idempotencyKey: context.idempotencyKey,
-  };
-  await params.events.log("builder_thread_created", "info", {
-    agentId: agent.agentId,
-    generation: 1,
-    phase: params.phase,
-  });
-  return {
-    agent,
-    continuity: wrapReference(reference, "created"),
-  };
+  const hooks = params.provenanceHooks;
+  try {
+    await hooks?.beforeMutation({ action: "create", generation: 1 });
+    const agent = await createImplementationCloudAgent({
+      apiKey,
+      config,
+      targetRepo: context.targetRepo,
+      baseBranch: context.baseBranch,
+    });
+    await hooks?.afterAgent({
+      action: "create",
+      agentId: agent.agentId,
+      generation: 1,
+    });
+    const reference: BuilderThreadReference = {
+      agentId: agent.agentId,
+      generation: 1,
+      originHarnessRunId: context.harnessRunId,
+      latestHarnessRunId: context.harnessRunId,
+      sourcePhase: params.phase,
+      targetRepo: context.targetRepo,
+      branch: context.branch,
+      prUrl: context.prUrl,
+      idempotencyKey: context.idempotencyKey,
+    };
+    await params.events.log("builder_thread_created", "info", {
+      agentId: agent.agentId,
+      generation: 1,
+      phase: params.phase,
+    });
+    return {
+      agent,
+      continuity: wrapReference(reference, "created"),
+    };
+  } catch (error) {
+    await hooks?.onMutationFailed?.({ action: "create", error });
+    throw error;
+  }
 }
 
 async function resumeExistingBuilder(
@@ -112,11 +148,23 @@ async function resumeExistingBuilder(
     generation: prior.generation,
     phase: params.phase,
   });
+  const hooks = params.provenanceHooks;
   try {
+    await hooks?.beforeMutation({
+      action: "resume",
+      generation: prior.generation,
+      priorAgentId: prior.agentId,
+    });
     const agent = await resumeBuilderCloudAgent({
       apiKey: params.apiKey,
       agentId: prior.agentId,
       events: params.events,
+    });
+    await hooks?.afterAgent({
+      action: "resume",
+      agentId: agent.agentId,
+      generation: prior.generation,
+      priorAgentId: prior.agentId,
     });
     const reference: BuilderThreadReference = {
       ...prior,
@@ -136,6 +184,7 @@ async function resumeExistingBuilder(
       continuity: wrapReference(reference, "resumed"),
     };
   } catch (error) {
+    await hooks?.onMutationFailed?.({ action: "resume", error });
     await params.events.log("builder_thread_resume_failed", "warn", {
       agentId: prior.agentId,
       classification: classifyBuilderResumeError(error),
@@ -250,45 +299,63 @@ export async function createReplacementBuilderAgent(
   assertReplacementPrLineage(params, context);
 
   const priorGeneration = context.priorGeneration ?? 0;
-  const agent =
-    params.phase === "implementation"
-      ? await createImplementationCloudAgent({
-          apiKey,
-          config,
-          targetRepo: context.targetRepo,
-          baseBranch: context.baseBranch,
-        })
-      : await createReplacementBuilderCloudAgent({
-          apiKey,
-          config,
-          targetRepo: context.targetRepo,
-          branch: context.branch,
-          prUrl: context.prUrl,
-        });
-  const reference: BuilderThreadReference = {
-    agentId: agent.agentId,
-    generation: Math.max(1, priorGeneration + 1),
-    originHarnessRunId: context.harnessRunId,
-    latestHarnessRunId: context.harnessRunId,
-    sourcePhase: params.phase,
-    targetRepo: context.targetRepo,
-    branch: context.branch,
-    prUrl: context.prUrl,
-    idempotencyKey: context.idempotencyKey,
-  };
-  await params.events.log("builder_thread_replacement_created", "info", {
-    agentId: agent.agentId,
-    generation: reference.generation,
-    replacementReason: context.replacementReason,
-    previousAgentId: context.previousAgentId,
-  });
-  return {
-    agent,
-    continuity: wrapReference(reference, "replaced", {
-      previousAgentId: context.previousAgentId,
+  const generation = Math.max(1, priorGeneration + 1);
+  const hooks = params.provenanceHooks;
+  try {
+    await hooks?.beforeMutation({
+      action: "replacement",
+      generation,
+      priorAgentId: context.previousAgentId,
+    });
+    const agent =
+      params.phase === "implementation"
+        ? await createImplementationCloudAgent({
+            apiKey,
+            config,
+            targetRepo: context.targetRepo,
+            baseBranch: context.baseBranch,
+          })
+        : await createReplacementBuilderCloudAgent({
+            apiKey,
+            config,
+            targetRepo: context.targetRepo,
+            branch: context.branch,
+            prUrl: context.prUrl,
+          });
+    await hooks?.afterAgent({
+      action: "replacement",
+      agentId: agent.agentId,
+      generation,
+      priorAgentId: context.previousAgentId,
+    });
+    const reference: BuilderThreadReference = {
+      agentId: agent.agentId,
+      generation,
+      originHarnessRunId: context.harnessRunId,
+      latestHarnessRunId: context.harnessRunId,
+      sourcePhase: params.phase,
+      targetRepo: context.targetRepo,
+      branch: context.branch,
+      prUrl: context.prUrl,
+      idempotencyKey: context.idempotencyKey,
+    };
+    await params.events.log("builder_thread_replacement_created", "info", {
+      agentId: agent.agentId,
+      generation: reference.generation,
       replacementReason: context.replacementReason,
-    }),
-  };
+      previousAgentId: context.previousAgentId,
+    });
+    return {
+      agent,
+      continuity: wrapReference(reference, "replaced", {
+        previousAgentId: context.previousAgentId,
+        replacementReason: context.replacementReason,
+      }),
+    };
+  } catch (error) {
+    await hooks?.onMutationFailed?.({ action: "replacement", error });
+    throw error;
+  }
 }
 
 export function isTransientBuilderResumeError(error: unknown): boolean {

@@ -4,6 +4,7 @@ export const SETTINGS_NAV_ITEMS = [
   { href: "/settings/repositories", label: "Target repositories" },
   { href: "/settings/deployments", label: "Deployments" },
   { href: "/settings/models", label: "Models" },
+  { href: "/settings/cursor-usage", label: "Cursor usage" },
   { href: "/settings/data-sharing", label: "Data and privacy" },
 ] as const;
 

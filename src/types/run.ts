@@ -230,6 +230,8 @@ export type RunEventName =
   | "project_metadata_sync"
   | "plan_review_setup_required"
   | "plan_review_not_effective"
+  | "cursor_provenance_gap"
+  | "cursor_provenance_event_persisted"
   | "run_finished";
 
 export interface RunEvent {

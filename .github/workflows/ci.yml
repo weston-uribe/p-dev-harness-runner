@@ -52,6 +52,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Prepare embedded workspace snapshot
+        run: npm run package:p-dev:prepare
+
       - name: Test
         run: npm test -- --reporter=default --reporter=json --outputFile=vitest-results.json
 

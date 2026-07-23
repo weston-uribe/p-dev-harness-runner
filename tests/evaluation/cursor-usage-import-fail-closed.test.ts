@@ -208,6 +208,12 @@ function buildAttachments(): PhaseImportAttachment[] {
         tokens: aggregate.tokens,
         knownNoncacheCostUsd: proxies.knownNoncacheCostUsd,
         allInputAtListRateUsd: proxies.allInputAtListRateUsd,
+        tokenUsageComplete: true,
+        sourceScopeComplete: true,
+        listPriceEquivalentComplete: false,
+        providerActualCostComplete: false,
+        costProxyAvailable: true,
+        sourceDigestPrefix: "a".repeat(64),
       }),
     };
   });
@@ -236,8 +242,8 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
       fetchedScores: duplicated,
       retrievalCompletenessProven: true,
     });
-    expect(verify.uniqueMatchingDeterministicIds).toBe(22);
-    expect(verify.physicalMatchingScoreCount).toBe(44);
+    expect(verify.uniqueMatchingDeterministicIds).toBe(28);
+    expect(verify.physicalMatchingScoreCount).toBe(56);
     expect(verify.logicalScoreCount).toBe(0);
     expect(verify.verified).toBe(false);
     expect(verify.mismatches.some((m) => m.startsWith("duplicate_"))).toBe(
@@ -256,7 +262,7 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
       retrievalCompletenessProven: true,
     });
     expect(verify.verified).toBe(false);
-    expect(verify.logicalScoreCount).toBeLessThan(22);
+    expect(verify.logicalScoreCount).toBeLessThan(28);
     expect(
       verify.mismatches.some((m) =>
         m.startsWith("expected_score_id_missing_but_name_match_present:"),
@@ -351,7 +357,7 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
       retrievalCompletenessProven: true,
     });
     expect(verify.verified).toBe(true);
-    expect(verify.physicalMatchingScoreCount).toBe(22);
+    expect(verify.physicalMatchingScoreCount).toBe(28);
   });
 
   it("fails closed when retrieval completeness is unproven", () => {
@@ -442,6 +448,7 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
     const canonical = validateCanonicalCsvPhaseTraces({
       joins,
       allowedPhases: ["planning", "plan_review"],
+      requireAllAllowedPhases: true,
     });
     // Same agent may map ambiguously, or two planning traces → fail
     expect(canonical.ok).toBe(false);
@@ -468,6 +475,13 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
       csvPath,
       inspectReportPath: inspectPath,
       issueKey: "TT-FIXTURE",
+      exportWindow: {
+        startIso: "2026-07-19T00:00:00.000Z",
+        endIso: "2026-07-20T00:00:00.000Z",
+        timezone: "UTC",
+        precision: "millisecond",
+        boundsSource: "cli_flags",
+      },
       phases: ["planning", "plan_review"],
       dryRun: true,
       deps: { sleep: async () => {} },
@@ -498,6 +512,13 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
       csvPath,
       inspectReportPath: inspectPath,
       issueKey: "TT-FIXTURE",
+      exportWindow: {
+        startIso: "2026-07-19T00:00:00.000Z",
+        endIso: "2026-07-20T00:00:00.000Z",
+        timezone: "UTC",
+        precision: "millisecond",
+        boundsSource: "cli_flags",
+      },
       phases: ["planning", "plan_review"],
       dryRun: false,
       deps: {
@@ -546,8 +567,8 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
 
     expect(exitCode).toBe(2);
     expect(report.readAfterWrite?.verified).toBe(false);
-    expect(report.readAfterWrite?.logicalScoreCountFirst).toBe(22);
-    expect(report.readAfterWrite?.physicalMatchingScoreCountSecond).toBe(44);
+    expect(report.readAfterWrite?.logicalScoreCountFirst).toBe(28);
+    expect(report.readAfterWrite?.physicalMatchingScoreCountSecond).toBe(56);
     expect(report.verdicts.tokenAcceptance).toBe(false);
     expect(report.verdicts.exactMonetaryCostAcceptance).toBe(false);
   });
@@ -567,6 +588,13 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
       csvPath,
       inspectReportPath: inspectPath,
       issueKey: "TT-FIXTURE",
+      exportWindow: {
+        startIso: "2026-07-19T00:00:00.000Z",
+        endIso: "2026-07-20T00:00:00.000Z",
+        timezone: "UTC",
+        precision: "millisecond",
+        boundsSource: "cli_flags",
+      },
       phases: ["planning", "plan_review"],
       deps: {
         sleep: async () => {},
@@ -600,8 +628,8 @@ describe("cursor-usage-import fail-closed (8F.1)", () => {
       },
     });
 
-    expect(report.readAfterWrite?.logicalScoreCountFirst).toBe(22);
-    expect(report.readAfterWrite?.logicalScoreCountSecond).toBe(22);
+    expect(report.readAfterWrite?.logicalScoreCountFirst).toBe(28);
+    expect(report.readAfterWrite?.logicalScoreCountSecond).toBe(28);
     expect(report.readAfterWrite?.verified).toBe(false);
     expect(
       report.readAfterWrite?.mismatches.some(
@@ -657,6 +685,12 @@ describe("inspect CSV acceptance per phase", () => {
         value: true,
       },
       {
+        id: `${traceId}-ss`,
+        name: "cursor_source_scope_complete",
+        traceId,
+        value: true,
+      },
+      {
         id: `${traceId}-kn`,
         name: "cursor_known_noncache_cost_usd",
         traceId,
@@ -673,6 +707,18 @@ describe("inspect CSV acceptance per phase", () => {
         name: "cursor_cost_proxy_available",
         traceId,
         value: true,
+      },
+      {
+        id: `${traceId}-lpc`,
+        name: "cursor_list_price_equivalent_complete",
+        traceId,
+        value: false,
+      },
+      {
+        id: `${traceId}-pac`,
+        name: "cursor_provider_actual_cost_complete",
+        traceId,
+        value: false,
       },
       {
         id: `${traceId}-ex`,

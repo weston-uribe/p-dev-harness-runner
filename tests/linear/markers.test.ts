@@ -4,8 +4,10 @@ import {
   formatHarnessCommentFooter,
   formatPlanningComment,
 } from "../../src/linear/comments.js";
-import { getVisibleCommentBody } from "../../src/linear/comment-card.js";
-import { hasVisibleMachineMetadata } from "./comment-assertions.js";
+import {
+  getVisibleCommentBody,
+  hasVisibleMachineMetadata,
+} from "./comment-assertions.js";
 
 describe("parseHarnessMarkers", () => {
   it("parses legacy visible harness marker footer", () => {

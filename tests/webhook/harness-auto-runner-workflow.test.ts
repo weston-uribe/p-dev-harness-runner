@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -9,6 +10,58 @@ const fixtureWorkflowPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "../fixtures/workflows/harness-auto-runner-with-production-sync.yml",
 );
+const workflowsDir = path.join(repoRoot, ".github/workflows");
+
+const MODE_ENV = "P_DEV_CURSOR_PROVENANCE_MODE";
+const KEY_ENV = "P_DEV_PROVENANCE_KEY_V1";
+const OBSOLETE_MODE_ENV = "P_DEV_PROVENANCE_MODE";
+const MODE_FROM_VARS = `\${{ vars.${MODE_ENV} }}`;
+const KEY_FROM_SECRETS = `\${{ secrets.${KEY_ENV} }}`;
+
+type WorkflowStep = {
+  name?: string;
+  id?: string;
+  run?: string;
+  uses?: string;
+  env?: Record<string, string>;
+};
+
+type WorkflowJob = {
+  env?: Record<string, string>;
+  steps?: WorkflowStep[];
+};
+
+type WorkflowDoc = {
+  jobs?: Record<string, WorkflowJob>;
+};
+
+/** Quote unquoted single-line GitHub Actions `${{ }}` expressions for yaml@2. */
+function quoteActionsExpressions(raw: string): string {
+  return raw.replace(
+    /^([ \t]*[A-Za-z0-9_.-]+:[ \t]*)(\$\{\{[^\n]+?\}\})[ \t]*$/gm,
+    '$1"$2"',
+  );
+}
+
+function loadWorkflowDoc(filePath: string): WorkflowDoc {
+  return parseYaml(quoteActionsExpressions(readFileSync(filePath, "utf8"))) as WorkflowDoc;
+}
+
+function stepByName(job: WorkflowJob, name: string): WorkflowStep {
+  const step = (job.steps ?? []).find((s) => s.name === name);
+  if (!step) {
+    throw new Error(`Step ${name} not found`);
+  }
+  return step;
+}
+
+function assertCursorProvenanceStepEnv(step: WorkflowStep, label: string): void {
+  expect(step.env, `${label} must have step env`).toBeDefined();
+  expect(step.env?.[MODE_ENV], `${label} mode`).toBe(MODE_FROM_VARS);
+  expect(step.env?.[KEY_ENV], `${label} key`).toBe(KEY_FROM_SECRETS);
+  expect(step.env?.[MODE_ENV]).not.toMatch(/shadow|required/i);
+  expect(step.env?.[KEY_ENV]).not.toMatch(/^[0-9a-fA-F]{64}$/);
+}
 
 function extractJobSection(workflow: string, jobName: string): string {
   const marker = `${jobName}:`;
@@ -341,5 +394,141 @@ describe("harness-auto-runner concurrency behavior contracts", () => {
 
   it("different issues targeting same repo/base branch share merge queue group output", () => {
     expect(runMerge).toContain("needs.gate.outputs.merge_concurrency_group");
+  });
+});
+
+describe("harness-auto-runner cursor provenance step wiring", () => {
+  const cursorCapableJobs = ["run-harness", "run-merge"] as const;
+
+  function assertProvenanceWiring(doc: WorkflowDoc, label: string): void {
+    expect(doc.jobs, `${label} jobs`).toBeDefined();
+    const jobs = doc.jobs!;
+
+    for (const jobName of cursorCapableJobs) {
+      const job = jobs[jobName];
+      expect(job, `${label} ${jobName}`).toBeDefined();
+      expect(job.env?.[MODE_ENV], `${label} ${jobName} job-level mode`).toBeUndefined();
+      expect(job.env?.[KEY_ENV], `${label} ${jobName} job-level key`).toBeUndefined();
+    }
+
+    const runHarness = jobs["run-harness"]!;
+    assertCursorProvenanceStepEnv(stepByName(runHarness, "Doctor"), `${label} run-harness Doctor`);
+    assertCursorProvenanceStepEnv(
+      stepByName(runHarness, "Run harness"),
+      `${label} run-harness Run harness`,
+    );
+
+    const runMerge = jobs["run-merge"]!;
+    assertCursorProvenanceStepEnv(stepByName(runMerge, "Doctor"), `${label} run-merge Doctor`);
+    assertCursorProvenanceStepEnv(
+      stepByName(runMerge, "Run merge"),
+      `${label} run-merge Run merge`,
+    );
+
+    for (const jobName of cursorCapableJobs) {
+      const job = jobs[jobName]!;
+      for (const step of job.steps ?? []) {
+        const run = step.run ?? "";
+        const isCursorCapable =
+          /harness:doctor\b/.test(run) || /harness:run\b/.test(run);
+        if (!isCursorCapable) continue;
+        assertCursorProvenanceStepEnv(step, `${label} ${jobName}/${step.name ?? "?"}`);
+      }
+    }
+
+    for (const stepName of [
+      "Checkout harness repo",
+      "Setup Node.js",
+      "Install dependencies",
+      "Build",
+    ]) {
+      for (const jobName of cursorCapableJobs) {
+        const step = (jobs[jobName]!.steps ?? []).find((s) => s.name === stepName);
+        if (!step) continue;
+        expect(step.env?.[KEY_ENV], `${label} ${jobName}/${stepName} key`).toBeUndefined();
+        expect(step.env?.[MODE_ENV], `${label} ${jobName}/${stepName} mode`).toBeUndefined();
+      }
+    }
+
+    for (const jobName of ["gate", "sync-production"] as const) {
+      const job = jobs[jobName];
+      expect(job, `${label} ${jobName}`).toBeDefined();
+      expect(job!.env?.[KEY_ENV], `${label} ${jobName} job key`).toBeUndefined();
+      expect(job!.env?.[MODE_ENV], `${label} ${jobName} job mode`).toBeUndefined();
+      for (const step of job!.steps ?? []) {
+        expect(step.env?.[KEY_ENV], `${label} ${jobName}/${step.name} key`).toBeUndefined();
+        expect(step.env?.[MODE_ENV], `${label} ${jobName}/${step.name} mode`).toBeUndefined();
+      }
+    }
+  }
+
+  it("wires provenance mode and key at step scope on live and fixture workflows", () => {
+    const live = loadWorkflowDoc(liveWorkflowPath);
+    const fixture = loadWorkflowDoc(fixtureWorkflowPath);
+    assertProvenanceWiring(live, "live");
+    assertProvenanceWiring(fixture, "fixture");
+  });
+
+  it("keeps live and fixture provenance wiring in lockstep", () => {
+    const live = loadWorkflowDoc(liveWorkflowPath);
+    const fixture = loadWorkflowDoc(fixtureWorkflowPath);
+    const extract = (doc: WorkflowDoc) => {
+      const rh = doc.jobs!["run-harness"]!;
+      const rm = doc.jobs!["run-merge"]!;
+      return {
+        runHarnessDoctor: stepByName(rh, "Doctor").env,
+        runHarnessExec: stepByName(rh, "Run harness").env,
+        runMergeDoctor: stepByName(rm, "Doctor").env,
+        runMergeExec: stepByName(rm, "Run merge").env,
+      };
+    };
+    expect(extract(live)).toEqual(extract(fixture));
+  });
+
+  it("never uses the obsolete P_DEV_PROVENANCE_MODE name", () => {
+    for (const filePath of [liveWorkflowPath, fixtureWorkflowPath]) {
+      const text = readFileSync(filePath, "utf8");
+      expect(text).not.toContain(OBSOLETE_MODE_ENV);
+      const doc = loadWorkflowDoc(filePath);
+      for (const job of Object.values(doc.jobs ?? {})) {
+        expect(job.env?.[OBSOLETE_MODE_ENV]).toBeUndefined();
+        for (const step of job.steps ?? []) {
+          expect(step.env?.[OBSOLETE_MODE_ENV]).toBeUndefined();
+        }
+      }
+    }
+  });
+});
+
+describe("cursor provenance key excluded from non-cursor workflows", () => {
+  const nonCursorWorkflows = [
+    "harness-reconcile-production.yml",
+    "harness-reconcile-revisions.yml",
+    "evaluation-canary-native-skill.yml",
+    "evaluation-canary-langfuse-projection.yml",
+    "evaluation-inspect-langfuse.yml",
+    "p-dev-runner-config-canary.yml",
+    "private-state-canary.yml",
+    "public-runner-smoke.yml",
+    "ci.yml",
+    "codeql.yml",
+  ] as const;
+
+  it("does not expose P_DEV_PROVENANCE_KEY_V1 outside harness-auto-runner", () => {
+    for (const name of nonCursorWorkflows) {
+      const filePath = path.join(workflowsDir, name);
+      const text = readFileSync(filePath, "utf8");
+      expect(text, name).not.toContain(KEY_ENV);
+      expect(text, name).not.toContain(MODE_ENV);
+      expect(text, name).not.toContain(OBSOLETE_MODE_ENV);
+    }
+  });
+
+  it("lists every workflow file so new probe workflows are scanned", () => {
+    const onDisk = readdirSync(workflowsDir)
+      .filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"))
+      .sort();
+    const expected = [...nonCursorWorkflows, "harness-auto-runner.yml"].sort();
+    expect(onDisk).toEqual(expected);
   });
 });

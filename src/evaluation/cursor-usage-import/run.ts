@@ -12,15 +12,22 @@ import { deriveSessionId } from "../identifiers.js";
 import type { EvaluationRuntimeConfig, EvaluationScoreInput } from "../types.js";
 import { aggregateByCloudAgentId } from "./aggregate.js";
 import {
+  defaultAllowedImportPhases,
   joinAggregatesToPhaseTraces,
+  parseAllowedImportPhases,
   validateCanonicalCsvPhaseTraces,
-  type AllowedImportPhase,
 } from "./join.js";
+import { resolveCanonicalModelId } from "./model-aliases.js";
 import { digestCsvBytes, parseCursorUsageCsv, tokensSumValid } from "./parse.js";
 import { computeCostProxies } from "./proxy-cost.js";
 import { projectUsageScoresOnly } from "./project.js";
 import { createScoreOnlyClient } from "./score-client.js";
 import { attachmentFromJoin } from "./scores.js";
+import {
+  evaluateSourceScope,
+  validateExportWindow,
+} from "./source-scope.js";
+import type { ExportWindow } from "./canonical.js";
 import {
   evaluateVerdicts,
   verifyImportedScores,
@@ -30,7 +37,6 @@ import {
 import {
   CURSOR_USAGE_CSV_SCHEMA_VERSION,
   CURSOR_USAGE_IMPORTER_VERSION,
-  CURSOR_USAGE_SCORE_NAMES,
   type CursorUsageImportPrivateReport,
   type CursorUsageImportPublicSummary,
   type CursorUsageImportReadAfterWrite,
@@ -56,6 +62,10 @@ export function mapFetchedScores(
             : subjectKind === "trace"
               ? subjectId
               : null;
+    const metadata =
+      s.metadata && typeof s.metadata === "object" && !Array.isArray(s.metadata)
+        ? (s.metadata as Record<string, unknown>)
+        : undefined;
     return {
       id: typeof s.id === "string" ? s.id : "",
       name: typeof s.name === "string" ? s.name : "",
@@ -69,6 +79,7 @@ export function mapFetchedScores(
             ? s.createdAt
             : null,
       ...(typeof s.comment === "string" ? { comment: s.comment } : {}),
+      ...(metadata !== undefined ? { metadata } : {}),
     };
   });
 }
@@ -184,6 +195,8 @@ export async function runCursorUsageImport(options: {
   out?: string;
   publicOut?: string;
   skipSecondImportVerify?: boolean;
+  /** Cursor export window — required for source-scope-complete score writes. */
+  exportWindow?: ExportWindow | null;
   deps?: CursorUsageImportDeps;
 }): Promise<{
   report: CursorUsageImportPrivateReport;
@@ -195,11 +208,12 @@ export async function runCursorUsageImport(options: {
   const resolveConfig = deps.resolveConfig ?? resolveEvaluationConfig;
 
   const issueKey = options.issueKey.trim();
-  const allowedPhases = (options.phases?.length
-    ? options.phases
-    : ["planning", "plan_review"]) as AllowedImportPhase[];
+  const allowedPhases = options.phases?.length
+    ? parseAllowedImportPhases(options.phases)
+    : defaultAllowedImportPhases();
   const dryRun = options.dryRun === true;
   const skipSecond = options.skipSecondImportVerify === true;
+  const exportWindow = options.exportWindow ?? null;
 
   const csvRaw = await readFile(options.csvPath, "utf8");
   const csvDigestSha256 = digestCsvBytes(csvRaw);
@@ -224,6 +238,7 @@ export async function runCursorUsageImport(options: {
   const canonical = validateCanonicalCsvPhaseTraces({
     joins: rawJoins,
     allowedPhases,
+    requireAllAllowedPhases: false,
   });
 
   const skipped = [
@@ -234,6 +249,12 @@ export async function runCursorUsageImport(options: {
     ...joinSkipped,
     ...canonical.skipped,
   ];
+
+  const exportWindowValidation = validateExportWindow(exportWindow);
+  let sourceScopeComplete = false;
+  let sourceScopeIncompleteReason: string | null = exportWindowValidation.ok
+    ? null
+    : exportWindowValidation.reason;
 
   const attachments: PhaseImportAttachment[] = [];
   if (canonical.ok) {
@@ -246,8 +267,11 @@ export async function runCursorUsageImport(options: {
         });
         continue;
       }
+      const modelRaw = aggregate.models[0] ?? "";
+      const modelId =
+        resolveCanonicalModelId(modelRaw) ?? modelRaw.trim().toLowerCase();
       const proxies = computeCostProxies({
-        modelId: "composer-2.5",
+        modelId,
         effectiveVariant: join.effectiveVariant,
         tokens: aggregate.tokens,
       });
@@ -259,27 +283,82 @@ export async function runCursorUsageImport(options: {
         });
         continue;
       }
+
+      const scope = evaluateSourceScope({
+        exportWindow,
+        executionWindowStartIso: join.windowStart,
+        executionWindowEndIso: join.windowEnd,
+        agentSegments: [
+          {
+            cloudAgentId: aggregate.cloudAgentId,
+            cloudAgentIdHash: aggregate.cloudAgentIdHash,
+            modelRaw,
+            modelIdCanonical: resolveCanonicalModelId(modelRaw),
+            billingSemantic: "included_like",
+            tokens: aggregate.tokens,
+            rowCount: aggregate.rowCount,
+            fingerprints: aggregate.fingerprints,
+            timestampMin: aggregate.timestampMin,
+            timestampMax: aggregate.timestampMax,
+            providerActualUsdMicros: null,
+            providerActualAggregationComplete: false,
+            providerActualAggregationFailureReason: "included_plan_amount",
+            sourceMaxMode: null,
+          },
+        ],
+        accountedSegmentFingerprints: new Set(aggregate.fingerprints),
+        hasRejectedOrAmbiguousForAgent: skipped.some(
+          (s) =>
+            s.cloudAgentIdHash === aggregate.cloudAgentIdHash &&
+            (s.reason.includes("ambiguous") || s.reason.includes("rejected")),
+        ),
+        langfuseRetrievalComplete: true,
+        tokenArithmeticComplete: parsed.arithmetic.identityHolds,
+      });
+
+      if (!scope.sourceScopeComplete) {
+        sourceScopeIncompleteReason =
+          sourceScopeIncompleteReason ?? scope.sourceScopeIncompleteReason;
+      }
+
       attachments.push(
         attachmentFromJoin({
           namespace,
           join,
           aggregate,
           proxies,
+          sourceScopeComplete: scope.sourceScopeComplete,
+          sourceDigestPrefix: csvDigestSha256,
         }),
       );
     }
+    sourceScopeComplete =
+      attachments.length > 0 &&
+      attachments.every((a) =>
+        a.scores.some(
+          (s) =>
+            s.name === "cursor_source_scope_complete" && s.value === true,
+        ),
+      );
   }
 
   const localArithmeticValid = parsed.arithmetic.identityHolds;
   const localAttributionValid =
     canonical.ok &&
-    attachments.length === allowedPhases.length &&
-    allowedPhases.every((p) => attachments.some((a) => a.join.phase === p));
+    attachments.length > 0 &&
+    aggregates.every(
+      (agg) =>
+        attachments.some(
+          (a) => a.aggregate.cloudAgentId === agg.cloudAgentId,
+        ) ||
+        skipped.some((s) => s.cloudAgentIdHash === agg.cloudAgentIdHash),
+    );
 
   let readAfterWrite: CursorUsageImportReadAfterWrite | undefined;
   let verifyResult: VerifyResult | null = null;
 
-  if (!dryRun && attachments.length > 0) {
+  // Refuse source-incomplete writes that would collide with a later complete import.
+  if (!dryRun && attachments.length > 0 && sourceScopeComplete) {
     const config = resolveConfig(process.env);
     if (!config.ok) {
       skipped.push({ reason: "langfuse_runtime_unavailable" });
@@ -424,12 +503,15 @@ export async function runCursorUsageImport(options: {
     localAttributionValid,
   });
 
+  const wouldWriteScoreCount = sourceScopeComplete
+    ? attachments.reduce((n, a) => n + a.scores.length, 0)
+    : 0;
+
   const preview = dryRun
     ? ({
         previewOnly: true as const,
         wouldAttachPhaseCount: attachments.length,
-        wouldWriteScoreCount:
-          attachments.length * CURSOR_USAGE_SCORE_NAMES.length,
+        wouldWriteScoreCount,
         localArithmeticValid,
         localAttributionValid,
         readAfterWriteVerified: false as const,
@@ -447,8 +529,7 @@ export async function runCursorUsageImport(options: {
           localArithmeticValid,
           localAttributionValid,
           wouldAttachPhaseCount: attachments.length,
-          wouldWriteScoreCount:
-            attachments.length * CURSOR_USAGE_SCORE_NAMES.length,
+          wouldWriteScoreCount,
           readAfterWriteVerified: false,
         }
       : {
@@ -473,6 +554,9 @@ export async function runCursorUsageImport(options: {
     issueKey,
     namespace,
     csvDigestSha256,
+    exportWindow,
+    sourceScopeComplete,
+    sourceScopeIncompleteReason,
     dryRun,
     arithmeticValid: localArithmeticValid,
     rowsParsed: parsed.rows.length,

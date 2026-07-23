@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildHarnessComment,
   buildMinimalHarnessComment,
-  getVisibleCommentBody,
 } from "../../src/linear/comment-card.js";
 import { formatHarnessCommentFooter } from "../../src/linear/comments.js";
-import { hasVisibleMachineMetadata } from "./comment-assertions.js";
+import {
+  getVisibleCommentBody,
+  hasVisibleMachineMetadata,
+} from "./comment-assertions.js";
 
 describe("buildHarnessComment", () => {
   it("renders PM-first sections with global harness header", () => {
@@ -71,3 +73,22 @@ describe("buildMinimalHarnessComment", () => {
     expect(getVisibleCommentBody(body)).toContain("[GitHub Actions run]");
   });
 });
+
+describe("getVisibleCommentBody multi-pass removal", () => {
+  it("removes nested comment sequences that a single replace would leave behind", () => {
+    const input = "visible<!<!-- hidden -->--x-->done";
+    // One bounded removal (first <!-- … -->), equivalent to a single non-global pass.
+    const start = input.indexOf("<!--");
+    const end = input.indexOf("-->", start + 4);
+    const onePass = input.slice(0, start) + input.slice(end + 3);
+    expect(onePass).toBe("visible<!--x-->done");
+    expect(onePass).toContain("<!--");
+    expect(onePass).toContain("-->");
+
+    const visible = getVisibleCommentBody(input);
+    expect(visible).toBe("visibledone");
+    expect(visible).not.toContain("<!--");
+    expect(visible).not.toContain("-->");
+  });
+});
+

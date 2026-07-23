@@ -2,6 +2,7 @@ import path from "node:path";
 import { EXIT_CONFIG, EXIT_SUCCESS } from "../exit-codes.js";
 import { loadHarnessDotenv } from "../../config/load-dotenv.js";
 import { runCursorUsageImport } from "../../evaluation/cursor-usage-import/run.js";
+import type { ExportWindow } from "../../evaluation/cursor-usage-import/canonical.js";
 import { resolveLogDirectory } from "./eval-shared.js";
 
 export async function runEvaluationImportCursorUsage(options: {
@@ -10,6 +11,9 @@ export async function runEvaluationImportCursorUsage(options: {
   issueKey?: string;
   namespace?: string;
   phases?: string;
+  exportStart?: string;
+  exportEnd?: string;
+  exportTimezone?: string;
   dryRun?: boolean;
   out?: string;
   publicOut?: string;
@@ -56,6 +60,25 @@ export async function runEvaluationImportCursorUsage(options: {
       .map((p) => p.trim())
       .filter(Boolean);
 
+    let exportWindow: ExportWindow | null = null;
+    const exportStart = options.exportStart?.trim();
+    const exportEnd = options.exportEnd?.trim();
+    if (exportStart || exportEnd) {
+      if (!exportStart || !exportEnd) {
+        process.stderr.write(
+          "evaluation:import-cursor-usage requires both --export-start and --export-end when either is set.\n",
+        );
+        return EXIT_CONFIG;
+      }
+      exportWindow = {
+        startIso: exportStart,
+        endIso: exportEnd,
+        timezone: options.exportTimezone?.trim() || "UTC",
+        precision: "second",
+        boundsSource: "cli_flags",
+      };
+    }
+
     const out =
       options.out ??
       path.join(
@@ -77,6 +100,7 @@ export async function runEvaluationImportCursorUsage(options: {
       issueKey,
       namespace,
       phases,
+      exportWindow,
       dryRun: options.dryRun === true,
       out,
       publicOut,

@@ -25,6 +25,37 @@ function mapScoreValue(
   return value;
 }
 
+/** Shared score-create body mapping (ingestion batch + runtime parity). */
+export function buildScoreOnlyIngestionBody(
+  input: EvaluationScoreInput,
+): Record<string, unknown> {
+  const scoreClass = input.scoreClass ?? "operational";
+  const defaultComment =
+    scoreClass === "cursor_usage_import"
+      ? "cursor_usage_import scoreClass=cursor_usage_import"
+      : "operational scoreClass=operational";
+  const body: Record<string, unknown> = {
+    id: input.id,
+    name: input.name,
+    dataType: input.dataType,
+    value: mapScoreValue(input.dataType, input.value),
+    comment: input.comment ?? defaultComment,
+  };
+  if (input.target === "trace" && input.traceId) {
+    body.traceId = input.traceId;
+  }
+  if (input.target === "session" && input.sessionId) {
+    body.sessionId = input.sessionId;
+  }
+  if (input.metadata && typeof input.metadata === "object") {
+    body.metadata = input.metadata;
+  }
+  if (typeof input.environment === "string" && input.environment.trim()) {
+    body.environment = input.environment.trim();
+  }
+  return body;
+}
+
 /**
  * Score-only Langfuse client for CSV import.
  *
@@ -39,6 +70,8 @@ export async function createScoreOnlyClient(config: {
 }): Promise<{
   recordScore: (input: EvaluationScoreInput) => void;
   flush: () => Promise<void>;
+  /** Test hook: pending score-create events */
+  _pendingForTests?: () => Array<Record<string, unknown>>;
 } | null> {
   try {
     const mod = await import("@langfuse/client");
@@ -57,37 +90,17 @@ export async function createScoreOnlyClient(config: {
 
     return {
       recordScore(input: EvaluationScoreInput): void {
-        const scoreClass = input.scoreClass ?? "operational";
-        const defaultComment =
-          scoreClass === "cursor_usage_import"
-            ? "cursor_usage_import scoreClass=cursor_usage_import"
-            : "operational scoreClass=operational";
-        const body: Record<string, unknown> = {
-          id: input.id,
-          name: input.name,
-          dataType: input.dataType,
-          value: mapScoreValue(input.dataType, input.value),
-          comment: input.comment ?? defaultComment,
-        };
-        if (input.target === "trace" && input.traceId) {
-          body.traceId = input.traceId;
-        }
-        if (input.target === "session" && input.sessionId) {
-          body.sessionId = input.sessionId;
-        }
-        // Event timestamp = durable phase-end (not import wall clock).
         pending.push({
           id: randomUUID(),
           type: "score-create",
           timestamp: input.timestamp,
-          body,
+          body: buildScoreOnlyIngestionBody(input),
         });
       },
       async flush(): Promise<void> {
         if (pending.length === 0) return;
         const batch = pending.splice(0, pending.length);
         await withFlushTimeout(async () => {
-          // Chunk to keep payloads bounded
           const chunkSize = 50;
           for (let i = 0; i < batch.length; i += chunkSize) {
             await client.api.ingestion.batch({
@@ -96,6 +109,7 @@ export async function createScoreOnlyClient(config: {
           }
         });
       },
+      _pendingForTests: () => pending,
     };
   } catch (error) {
     warnOnce(

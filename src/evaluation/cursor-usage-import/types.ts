@@ -1,9 +1,23 @@
 import type { EvaluationScoreInput } from "../types.js";
+import type { EvaluationPhase } from "../phases.js";
 import type { PricingVariant } from "../telemetry/pricing-registry.js";
 import type { TraceScoreFetchEvidence } from "../langfuse-inspect/client.js";
+import type { ExportWindow } from "./canonical.js";
 
 export const CURSOR_USAGE_CSV_SCHEMA_VERSION = 1 as const;
-export const CURSOR_USAGE_IMPORTER_VERSION = "8f.1.1" as const;
+export const CURSOR_USAGE_IMPORTER_VERSION = "13.0.1" as const;
+
+/** Reserved durable producer field on agent observation metadata (contract B). */
+export const MULTI_MODEL_EXECUTION_PROVEN_FIELD =
+  "multiModelExecutionProven" as const;
+
+export interface ObservedModelEvidence {
+  rawModel: string;
+  normalizedRawModel: string;
+  canonicalModelId: string | null;
+  variant: PricingVariant | "unknown";
+  observationIds: string[];
+}
 
 export const ALL_INPUT_AT_LIST_RATE_COMMENT =
   "comparison proxy; all input categories valued at published non-cache input list rate" as const;
@@ -15,9 +29,14 @@ export const CURSOR_USAGE_SCORE_NAMES = [
   "cursor_output_tokens",
   "cursor_total_tokens",
   "cursor_token_usage_complete",
+  "cursor_source_scope_complete",
   "cursor_known_noncache_cost_usd",
   "cursor_all_input_at_list_rate_usd",
   "cursor_cost_proxy_available",
+  "cursor_list_price_equivalent_usd",
+  "cursor_list_price_equivalent_complete",
+  "cursor_provider_actual_usd",
+  "cursor_provider_actual_cost_complete",
   "cursor_exact_cost_complete",
   "cursor_generation_native_usage_complete",
 ] as const;
@@ -32,15 +51,23 @@ export interface TokenBuckets {
   totalTokens: number;
 }
 
+export type CsvCostCategory =
+  | "included_like"
+  | "provider_cost_numeric_untyped"
+  | "empty"
+  | "other";
+
 export interface CsvRowNormalized {
   fingerprint: string;
   timestampIso: string;
   cloudAgentId: string;
   automationId: string;
+  kind: string;
   model: string;
   maxMode: string;
   tokens: TokenBuckets;
-  costCategory: "included_like" | "numeric" | "empty" | "other";
+  /** Legacy alias mapping: numeric Cost cells are untyped until USD is proven. */
+  costCategory: CsvCostCategory;
 }
 
 export interface AgentAggregate {
@@ -55,8 +82,10 @@ export interface AgentAggregate {
   timestampMax: string | null;
 }
 
+export type AllowedImportPhase = EvaluationPhase;
+
 export interface PhaseJoinTarget {
-  phase: "planning" | "plan_review";
+  phase: AllowedImportPhase;
   traceId: string;
   traceEndTimestamp: string;
   harnessRunId: string | null;
@@ -65,6 +94,8 @@ export interface PhaseJoinTarget {
   cursorAgentIdHash: string;
   effectiveVariant: PricingVariant;
   sdkFast: boolean;
+  windowStart: string | null;
+  windowEnd: string | null;
 }
 
 export interface PhaseImportAttachment {
@@ -128,6 +159,9 @@ export interface CursorUsageImportPrivateReport {
   issueKey: string;
   namespace: string;
   csvDigestSha256: string;
+  exportWindow?: ExportWindow | null;
+  sourceScopeComplete?: boolean;
+  sourceScopeIncompleteReason?: string | null;
   dryRun: boolean;
   arithmeticValid: boolean;
   rowsParsed: number;

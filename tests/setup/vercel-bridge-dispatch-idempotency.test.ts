@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -23,6 +23,18 @@ function buildIssuePayload(issueKey: string, statusName: string): string {
   });
 }
 
+function resolveFetchUrl(input: RequestInfo | URL): URL | null {
+  const raw =
+    typeof Request !== "undefined" && input instanceof Request
+      ? input.url
+      : String(input);
+  try {
+    return new URL(raw);
+  } catch {
+    return null;
+  }
+}
+
 describe("vercel bridge dispatch-before-ack contract", () => {
   const secret = "test-webhook-secret";
   let handlerPath = "";
@@ -31,6 +43,10 @@ describe("vercel bridge dispatch-before-ack contract", () => {
   let dispatchCalls: Array<{ requestId: string }>;
   let linearCalls: number;
   let fetchMock: ReturnType<typeof vi.fn>;
+  let routeGitHubApiMock: (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Response | null;
 
   beforeEach(() => {
     stored = new Map();
@@ -45,10 +61,14 @@ describe("vercel bridge dispatch-before-ack contract", () => {
     expect(js!.data).toContain("ensureOpaqueDispatch");
     expect(js!.data).toContain("resolveLinearIssueIdByIdentifier");
     expect(js!.data).toContain("team: { key: { eq: $teamKey } }");
-    expect(js!.data).not.toContain('issue(id: $id)');
+    expect(js!.data).not.toContain("issue(id: $id)");
     // Handler call order: ensureOpaqueDispatch then attemptAck (definitions may appear earlier).
-    const handlerCallSlice = js!.data.slice(js!.data.indexOf("module.exports = async function handler"));
-    const dispatchIdx = handlerCallSlice.indexOf("await ensureOpaqueDispatch(envelope)");
+    const handlerCallSlice = js!.data.slice(
+      js!.data.indexOf("module.exports = async function handler"),
+    );
+    const dispatchIdx = handlerCallSlice.indexOf(
+      "await ensureOpaqueDispatch(envelope)",
+    );
     const ackIdx = handlerCallSlice.indexOf("await attemptAck(envelope)");
     expect(dispatchIdx).toBeGreaterThan(-1);
     expect(ackIdx).toBeGreaterThan(dispatchIdx);
@@ -63,24 +83,34 @@ describe("vercel bridge dispatch-before-ack contract", () => {
       "utf8",
     );
 
-    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("api.github.com") && url.includes("/dispatches")) {
+    routeGitHubApiMock = (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Response | null => {
+      const url = resolveFetchUrl(input);
+      if (!url || url.origin !== "https://api.github.com") {
+        return null;
+      }
+      const { pathname } = url;
+      if (pathname.includes("/dispatches")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           client_payload?: { requestId?: string };
         };
         dispatchCalls.push({ requestId: body.client_payload?.requestId ?? "" });
         return new Response(null, { status: 204 });
       }
-      if (url.includes("api.github.com") && url.includes("/git/ref/heads/")) {
+      if (pathname.includes("/git/ref/heads/")) {
         return new Response(JSON.stringify({ object: { sha: "abc" } }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       }
-      if (url.includes("api.github.com") && url.includes("/contents/")) {
-        const pathMatch = url.match(/\.p-dev%2Fjob-requests%2F([^?]+)/) ||
-          url.match(/\.p-dev\/job-requests\/([^?]+)/);
+      if (pathname.includes("/contents/")) {
+        const pathMatch =
+          pathname.match(/\.p-dev%2Fjob-requests%2F([^/]+)/) ||
+          pathname.match(/\.p-dev\/job-requests\/([^/]+)/) ||
+          String(url).match(/\.p-dev%2Fjob-requests%2F([^?]+)/) ||
+          String(url).match(/\.p-dev\/job-requests\/([^?]+)/);
         const decoded = pathMatch
           ? decodeURIComponent(pathMatch[1]!).replace(/\.json$/, "")
           : "";
@@ -91,9 +121,9 @@ describe("vercel bridge dispatch-before-ack contract", () => {
           }
           return new Response(
             JSON.stringify({
-              content: Buffer.from(JSON.stringify(hit.record, null, 2)).toString(
-                "base64",
-              ),
+              content: Buffer.from(
+                JSON.stringify(hit.record, null, 2),
+              ).toString("base64"),
               sha: hit.sha,
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
@@ -111,12 +141,24 @@ describe("vercel bridge dispatch-before-ack contract", () => {
             record,
             sha: `sha-${stored.size + 1}`,
           });
-          return new Response(JSON.stringify({ content: { sha: `sha-${stored.size}` } }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ content: { sha: `sha-${stored.size}` } }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
       }
+      return null;
+    };
+
+    fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const github = routeGitHubApiMock(input, init);
+      if (github) {
+        return github;
+      }
+      const url = String(input);
       if (url.includes("api.linear.app/graphql")) {
         linearCalls += 1;
         const body = JSON.parse(String(init?.body ?? "{}")) as {
@@ -125,7 +167,11 @@ describe("vercel bridge dispatch-before-ack contract", () => {
         if (body.query?.includes("issues(filter")) {
           return new Response(
             JSON.stringify({
-              data: { issues: { nodes: [{ id: "issue-uuid", identifier: "FRE-5" }] } },
+              data: {
+                issues: {
+                  nodes: [{ id: "issue-uuid", identifier: "FRE-5" }],
+                },
+              },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
@@ -168,71 +214,37 @@ describe("vercel bridge dispatch-before-ack contract", () => {
 
   async function invoke(deliveryId: string, options?: { hangAck?: boolean }) {
     if (options?.hangAck) {
-      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.includes("api.linear.app/graphql")) {
-          linearCalls += 1;
-          const body = JSON.parse(String(init?.body ?? "{}")) as { query?: string };
-          if (body.query?.includes("commentCreate")) {
-            await new Promise(() => {
-              /* never resolves — simulates ack timeout after dispatch */
-            });
-          }
-          return new Response(
-            JSON.stringify({
-              data: { issues: { nodes: [{ id: "issue-uuid", identifier: "FRE-5" }] } },
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        // Fall through to default mock for GitHub by re-invoking first impl — simplified:
-        if (url.includes("/dispatches")) {
-          const body = JSON.parse(String(init?.body ?? "{}")) as {
-            client_payload?: { requestId?: string };
-          };
-          dispatchCalls.push({ requestId: body.client_payload?.requestId ?? "" });
-          return new Response(null, { status: 204 });
-        }
-        if (url.includes("/git/ref/heads/")) {
-          return new Response(JSON.stringify({ object: { sha: "abc" } }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        if (url.includes("/contents/")) {
-          const pathMatch =
-            url.match(/\.p-dev%2Fjob-requests%2F([^?]+)/) ||
-            url.match(/\.p-dev\/job-requests\/([^?]+)/);
-          const decoded = pathMatch
-            ? decodeURIComponent(pathMatch[1]!).replace(/\.json$/, "")
-            : "";
-          if ((init?.method || "GET") === "GET") {
-            const hit = stored.get(decoded);
-            if (!hit) return new Response("{}", { status: 404 });
+      fetchMock.mockImplementation(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (url.includes("api.linear.app/graphql")) {
+            linearCalls += 1;
+            const body = JSON.parse(String(init?.body ?? "{}")) as {
+              query?: string;
+            };
+            if (body.query?.includes("commentCreate")) {
+              await new Promise(() => {
+                /* never resolves — simulates ack timeout after dispatch */
+              });
+            }
             return new Response(
               JSON.stringify({
-                content: Buffer.from(JSON.stringify(hit.record, null, 2)).toString(
-                  "base64",
-                ),
-                sha: hit.sha,
+                data: {
+                  issues: {
+                    nodes: [{ id: "issue-uuid", identifier: "FRE-5" }],
+                  },
+                },
               }),
               { status: 200, headers: { "Content-Type": "application/json" } },
             );
           }
-          if (init?.method === "PUT") {
-            const putBody = JSON.parse(String(init.body ?? "{}")) as {
-              content: string;
-            };
-            const record = JSON.parse(
-              Buffer.from(putBody.content, "base64").toString("utf8"),
-            ) as Record<string, unknown>;
-            const requestId = String(record.requestId);
-            stored.set(requestId, { record, sha: `sha-${stored.size + 1}` });
-            return new Response("{}", { status: 200 });
+          const github = routeGitHubApiMock(input, init);
+          if (github) {
+            return github;
           }
-        }
-        return new Response("{}", { status: 200 });
-      });
+          return new Response("{}", { status: 200 });
+        },
+      );
     }
 
     delete requireFromDir.cache[handlerPath];
@@ -323,5 +335,57 @@ describe("vercel bridge dispatch-before-ack contract", () => {
     };
     expect(record?.dispatch?.attemptedAt || record?.dispatch?.confirmedAt).toBeTruthy();
     void result;
+  });
+
+  describe("GitHub API mock origin matching", () => {
+    it("routes exact https://api.github.com dispatch/ref/contents paths", () => {
+      const dispatch = routeGitHubApiMock(
+        "https://api.github.com/repos/o/r/dispatches",
+        {
+          method: "POST",
+          body: JSON.stringify({ client_payload: { requestId: "req-1" } }),
+        },
+      );
+      expect(dispatch?.status).toBe(204);
+      expect(dispatchCalls).toEqual([{ requestId: "req-1" }]);
+
+      const ref = routeGitHubApiMock(
+        "https://api.github.com/repos/o/r/git/ref/heads/main",
+      );
+      expect(ref?.status).toBe(200);
+
+      stored.set("job-1", { record: { requestId: "job-1" }, sha: "sha-1" });
+      const contents = routeGitHubApiMock(
+        "https://api.github.com/repos/o/r/contents/.p-dev/job-requests/job-1.json",
+        { method: "GET" },
+      );
+      expect(contents?.status).toBe(200);
+    });
+
+    it("does not route host spoofs or nonstandard ports as GitHub API", () => {
+      const before = dispatchCalls.length;
+      expect(
+        routeGitHubApiMock(
+          "https://api.github.com.example.com/repos/o/r/dispatches",
+          {
+            method: "POST",
+            body: JSON.stringify({ client_payload: { requestId: "spoof-1" } }),
+          },
+        ),
+      ).toBeNull();
+      expect(
+        routeGitHubApiMock("https://example.com/api.github.com/repos/o/r/dispatches", {
+          method: "POST",
+          body: JSON.stringify({ client_payload: { requestId: "spoof-2" } }),
+        }),
+      ).toBeNull();
+      expect(
+        routeGitHubApiMock("https://api.github.com:444/repos/o/r/dispatches", {
+          method: "POST",
+          body: JSON.stringify({ client_payload: { requestId: "spoof-3" } }),
+        }),
+      ).toBeNull();
+      expect(dispatchCalls).toHaveLength(before);
+    });
   });
 });

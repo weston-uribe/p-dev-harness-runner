@@ -12,7 +12,9 @@ import {
   acquireBuilderAgent,
   disposeAgent,
   sendAndObserve,
-} from "../../agents/index.js";
+} from "../../agents/production.js";
+import { buildPhaseLaunchContext } from "../provenance-launch-context.js";
+import type { LinearHarnessLaunchContext } from "../../provenance/launch-context.js";
 import { evaluateChecksForMerge } from "../../github/check-policy.js";
 import type { GitHubClient } from "../../github/client.js";
 import { GitHubApiError } from "../../github/client.js";
@@ -562,12 +564,53 @@ async function attemptAgentRepair(
       comments,
       orchestratorMarker: options.config.orchestratorMarker,
     },
+    buildLaunchContext: (info) =>
+      buildPhaseLaunchContext({
+        config: options.config,
+        linearIssueId: options.issue.id,
+        linearIssueKey: options.issue.identifier,
+        phase: "integration_repair",
+        phaseExecutionId: options.runId,
+        harnessRunId: options.runId,
+        agentRole: "builder",
+        action: info.action,
+        generation: info.generation,
+        priorAgentId: info.priorAgentId,
+        targetRepository: options.markerTargetRepo,
+        startingRef: inspectionBeforeAgent.branch,
+        prUrl: inspectionBeforeAgent.url,
+        launchSurface: info.launchSurface,
+      }),
   });
   const builderEvidence = builderMarkerEvidenceFromResolution(
     acquired.continuity,
     repairIdempotencyKey,
   );
   const agent = acquired.agent;
+  const repairAction =
+    acquired.continuity.action === "resumed"
+      ? ("resume" as const)
+      : ("replacement" as const);
+  const repairLaunchContext: LinearHarnessLaunchContext =
+    buildPhaseLaunchContext({
+      config: options.config,
+      linearIssueId: options.issue.id,
+      linearIssueKey: options.issue.identifier,
+      phase: "integration_repair",
+      phaseExecutionId: options.runId,
+      harnessRunId: options.runId,
+      agentRole: "builder",
+      action: repairAction,
+      generation: acquired.continuity.reference.generation,
+      priorAgentId: acquired.continuity.previousAgentId,
+      targetRepository: options.markerTargetRepo,
+      startingRef: inspectionBeforeAgent.branch,
+      prUrl: inspectionBeforeAgent.url,
+      launchSurface:
+        repairAction === "resume"
+          ? "integration_repair.resume"
+          : "integration_repair.replacement",
+    });
 
   try {
     let observed;
@@ -587,6 +630,9 @@ async function attemptAgentRepair(
         options.events,
         {
           phase: "integration_repair",
+          launchContext: repairLaunchContext,
+          sendSurface: "integration_repair.send",
+          sendOrdinal: 1,
           targetRepo: options.markerTargetRepo,
           expectedBranch: inspectionBeforeAgent.branch,
           expectedPrUrl: inspectionBeforeAgent.url,

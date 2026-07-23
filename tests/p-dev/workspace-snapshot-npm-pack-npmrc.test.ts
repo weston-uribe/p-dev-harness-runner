@@ -61,4 +61,48 @@ describe("workspace snapshot npm pack .npmrc alias", () => {
     expect(extracted).toBe("legacy-peer-deps=true\n");
     expect(readFileSync(aliased, "utf8")).toBe("legacy-peer-deps=true\n");
   });
+
+  it("keeps gitignore.snapshot inside npm pack while raw .gitignore is stripped", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "p-dev-gitignore-pack-"));
+    tempDirs.push(root);
+    const pkgDir = path.join(root, "pkg");
+    mkdirSync(pkgDir, { recursive: true });
+
+    const snapshotRoot = path.join(pkgDir, "workspace-snapshot");
+    const aliased = resolveSnapshotOutputPath(snapshotRoot, ".gitignore");
+    mkdirSync(path.dirname(aliased), { recursive: true });
+    writeFileSync(aliased, "node_modules/\n", "utf8");
+    writeFileSync(
+      path.join(snapshotRoot, "files", ".gitignore"),
+      "node_modules/\n",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify(
+        {
+          name: "gitignore-alias-pack-check",
+          version: "1.0.0",
+          files: ["workspace-snapshot"],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    execFileSync("npm", ["pack", "--pack-destination", root], {
+      cwd: pkgDir,
+      stdio: "pipe",
+    });
+    const tarball = path.join(root, "gitignore-alias-pack-check-1.0.0.tgz");
+    const listing = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" });
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/gitignore.snapshot",
+    );
+    expect(listing).not.toContain(
+      "package/workspace-snapshot/files/.gitignore",
+    );
+  });
 });
+

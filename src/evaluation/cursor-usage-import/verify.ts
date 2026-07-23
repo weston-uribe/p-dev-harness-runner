@@ -1,4 +1,4 @@
-import { CURSOR_USAGE_SCORE_NAMES, type PhaseImportAttachment } from "./types.js";
+import type { PhaseImportAttachment } from "./types.js";
 
 export interface FetchedScore {
   id: string;
@@ -9,6 +9,11 @@ export interface FetchedScore {
   timestamp: string | null;
   /** Optional; used to distinguish import scores from unrelated pre-existing scores. */
   comment?: string | null;
+  /**
+   * Present only when the provider score-list response exposes metadata.
+   * Absence means metadata was not live-retrievable — do not claim verification.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 function normalizeBool(value: unknown): boolean | null {
@@ -291,7 +296,10 @@ export function evaluateVerdicts(params: {
         a.aggregate.tokens.cacheReadTokens +
         a.aggregate.tokens.outputTokens,
   );
-  const expectedScoreCount = attachments.length * CURSOR_USAGE_SCORE_NAMES.length;
+  const expectedScoreCount = attachments.reduce(
+    (n, a) => n + a.scores.length,
+    0,
+  );
   const verifyOk =
     verify != null &&
     verify.verified &&

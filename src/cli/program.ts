@@ -43,6 +43,7 @@ import {
   runEvalSubjectsList,
 } from "./commands/eval.js";
 import { runEvaluationCanaryLangfuseProjection } from "./commands/evaluation-canary-langfuse-projection.js";
+import { runEvaluationCanaryCursorUsageImport } from "./commands/evaluation-canary-cursor-usage-import.js";
 import { runEvaluationInspectLangfuse } from "./commands/evaluation-inspect-langfuse.js";
 import { runEvaluationReprojectLangfuse } from "./commands/evaluation-reproject-langfuse.js";
 import { runPromptsValidate } from "./commands/prompts-validate.js";
@@ -1118,6 +1119,43 @@ export function createProgram(): Command {
     );
 
   evalCmd
+    .command("canary-cursor-usage-import")
+    .description(
+      "Cursor usage CSV→Langfuse score-import canary. Dry = staged only; --apply self-seeds disposable traces (requires Langfuse credentials; no operator-created traces).",
+    )
+    .option("--issue <key>", "Synthetic issue key (default: auto-generated SYN-CUR-*)")
+    .option("--namespace <namespace>", "Evaluation namespace")
+    .option("--log-directory <path>", "Override harness logDirectory")
+    .option(
+      "--apply",
+      "Live apply: create disposable traces, then import/verify scores (requires Langfuse credentials)",
+      false,
+    )
+    .option("--out <path>", "Write canary report JSON")
+    .option("--json", "Print report JSON to stdout", false)
+    .action(
+      async (opts: {
+        issue?: string;
+        namespace?: string;
+        logDirectory?: string;
+        apply?: boolean;
+        out?: string;
+        json?: boolean;
+      }) => {
+        const configPath = program.opts<{ config: string }>().config;
+        process.exitCode = await runEvaluationCanaryCursorUsageImport({
+          issueKey: opts.issue,
+          configPath,
+          namespace: opts.namespace,
+          logDirectory: opts.logDirectory,
+          apply: opts.apply === true,
+          out: opts.out,
+          json: opts.json === true,
+        });
+      },
+    );
+
+  evalCmd
     .command("canary-langfuse-projection")
     .description(
       "Maintainer-only: emit a disposable synthetic Langfuse Complete Session projection",
@@ -1192,9 +1230,12 @@ export function createProgram(): Command {
     .option("--namespace <ns>", "Langfuse namespace")
     .option(
       "--phases <list>",
-      "Comma-separated phases to attach (default: planning,plan_review)",
+      "Comma-separated agent-invoking phases (planning, plan_review, initial_build, revision, integration_repair, ...)",
       "planning,plan_review",
     )
+    .option("--export-start <iso>", "Cursor export window start (ISO-8601)")
+    .option("--export-end <iso>", "Cursor export window end (ISO-8601)")
+    .option("--export-timezone <tz>", "Cursor export window timezone", "UTC")
     .option("--dry-run", "Compute join/proxies without Langfuse writes", false)
     .option("--out <path>", "Write private import report JSON")
     .option("--public-out <path>", "Write public-safe summary JSON")
@@ -1211,6 +1252,9 @@ export function createProgram(): Command {
         issue: string;
         namespace?: string;
         phases?: string;
+        exportStart?: string;
+        exportEnd?: string;
+        exportTimezone?: string;
         dryRun?: boolean;
         out?: string;
         publicOut?: string;
@@ -1223,6 +1267,9 @@ export function createProgram(): Command {
           issueKey: opts.issue,
           namespace: opts.namespace,
           phases: opts.phases,
+          exportStart: opts.exportStart,
+          exportEnd: opts.exportEnd,
+          exportTimezone: opts.exportTimezone,
           dryRun: opts.dryRun === true,
           out: opts.out,
           publicOut: opts.publicOut,

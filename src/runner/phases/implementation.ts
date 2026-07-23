@@ -45,7 +45,9 @@ import {
   disposeAgent,
   sendAndObserve,
   type CursorCancelOutcome,
-} from "../../agents/index.js";
+} from "../../agents/production.js";
+import { buildPhaseLaunchContext } from "../provenance-launch-context.js";
+import type { LinearHarnessLaunchContext } from "../../provenance/launch-context.js";
 import { manifestModelEvidence, resolveBuilderModel } from "../../cursor/model.js";
 import { assertPrBaseBranchMatches } from "../../github/base-branch.js";
 import { GitHubClient } from "../../github/client.js";
@@ -882,6 +884,22 @@ export async function executeImplementationPhase(
         comments,
         orchestratorMarker: config.orchestratorMarker,
       },
+      buildLaunchContext: (info) =>
+        buildPhaseLaunchContext({
+          config,
+          linearIssueId: issue.id,
+          linearIssueKey: issue.identifier,
+          phase: "implementation",
+          phaseExecutionId: runId,
+          harnessRunId: runId,
+          agentRole: "builder",
+          action: info.action,
+          generation: info.generation,
+          priorAgentId: info.priorAgentId,
+          targetRepository: resolved.targetRepo,
+          startingRef: branchName || resolved.baseBranch,
+          launchSurface: info.launchSurface,
+        }),
     });
     builderContinuity = acquired.continuity;
     const builderEvidence = builderMarkerEvidenceFromResolution(
@@ -890,6 +908,33 @@ export async function executeImplementationPhase(
     );
     const agent = acquired.agent;
     cursorAgentId = acquired.continuity.reference.agentId;
+    const implementationAction =
+      acquired.continuity.action === "created"
+        ? ("create" as const)
+        : acquired.continuity.action === "resumed"
+          ? ("resume" as const)
+          : ("replacement" as const);
+    const implementationLaunchContext: LinearHarnessLaunchContext =
+      buildPhaseLaunchContext({
+        config,
+        linearIssueId: issue.id,
+        linearIssueKey: issue.identifier,
+        phase: "implementation",
+        phaseExecutionId: runId,
+        harnessRunId: runId,
+        agentRole: "builder",
+        action: implementationAction,
+        generation: acquired.continuity.reference.generation,
+        priorAgentId: acquired.continuity.previousAgentId,
+        targetRepository: resolved.targetRepo,
+        startingRef: branchName || resolved.baseBranch,
+        launchSurface:
+          implementationAction === "create"
+            ? "implementation.initial_create"
+            : implementationAction === "resume"
+              ? "implementation.resume"
+              : "implementation.replacement",
+      });
 
     // Persist builder identity so racing gates no-op before a second agent starts.
     if (implementationSubjectIdentity && acquired.continuity.reference.agentId) {
@@ -977,6 +1022,9 @@ export async function executeImplementationPhase(
     try {
       observed = await sendAndObserve(agent, prompt, runDirectory, events, {
         phase: "implementation",
+        launchContext: implementationLaunchContext,
+        sendSurface: "implementation.send",
+        sendOrdinal: 1,
         targetRepo: resolved.targetRepo,
         abortSignal: abortController.signal,
         apiKey: cursorApiKey,

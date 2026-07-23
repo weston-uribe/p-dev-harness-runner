@@ -28,6 +28,7 @@ Details: [`docs/p-dev.md`](docs/p-dev.md)
 V0.3 is **Cursor-first**. Key assumptions:
 
 - **Runner phases import `src/agents/` for agent lifecycle operations.** The internal provider seam exists (`src/agents/cursor-provider.ts`); Cursor SDK calls remain in `src/cursor/`. No second adapter is implemented.
+- **Production Linear-harness launches use `src/agents/production.ts` → `LinearHarnessAgentProvider`** for Cursor Cloud Agent provenance capture (`src/provenance/`). Generic factory/canary paths remain provenance-free. See [`docs/decisions/0008-cursor-cloud-agent-provenance-registry.md`](docs/decisions/0008-cursor-cloud-agent-provenance-registry.md). Default writer mode is `disabled`; live `shadow`/`required` require a separate operator rollout.
 - **`agentProvider` config makes Cursor explicit** (`id: "cursor"` only today). Model resolution prefers `agentProvider.model.id` and falls back to `defaultModel.id`.
 - **GitHub and Linear are explicit V0.3 assumptions** — GitHub is the SCM/PR provider and cloud runner (GitHub Actions), and Linear is the product/control system.
 - **Vercel is the only implemented preview provider** when preview capture is enabled; other repos use `previewProvider: "none"`.
