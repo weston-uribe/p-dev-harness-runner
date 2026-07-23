@@ -9,8 +9,8 @@
 - Public identity contract version: `p-dev.public-provider-identity.v1`
 - Execution policy version: `p-dev.execution-policy.v1`
 - Writer: `cursor-provenance-writer-v1`
-- Launch-surface manifest digest: 
-- Send-surface manifest digest: 
+- Launch-surface manifest digest: `6a47fd44da287f47b1178f6468342dc985f4f0993a2724900a57435317ad7906`
+- Send-surface manifest digest: `920f8e542c88daf6e2b6719542aafb94a8ba5d81715107853efb2432c25f0ec0`
 
 Default provenance mode: **disabled**
 Shadow: **not configured**
