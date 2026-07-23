@@ -106,11 +106,43 @@ export interface SendAndObserveOptions {
   idempotencyKey?: string;
   onAgentCreated?: (details: { agentId: string; runId: string }) => Promise<void>;
   onBeforeSend?: (details: { agentId: string }) => Promise<void>;
+  onRunAcknowledged?: (details: {
+    agentId: string;
+    runId: string;
+    acknowledgedAt: string;
+    providerRunCreatedAt?: string | null;
+  }) => Promise<void>;
+  onRunTerminal?: (details: {
+    agentId: string;
+    runId: string;
+    terminalStatus: string;
+    terminalAt: string;
+    providerTerminalAt?: string | null;
+    hasAuthoritativeTerminalResult: true;
+  }) => Promise<void>;
   /** Provider-neutral streaming telemetry callback (local JSONL + Langfuse). */
   onTelemetryEvent?: OnTelemetryEvent;
   /** Correlation context for canonical telemetry (required for JSONL capture). */
   telemetryCorrelation?: TelemetryCorrelationContext;
   revisionRequiresPmFeedback?: boolean;
+}
+
+export interface BuilderProvenanceMutationHooks {
+  beforeMutation(info: {
+    action: "create" | "resume" | "replacement";
+    generation: number;
+    priorAgentId?: string;
+  }): Promise<void>;
+  afterAgent(info: {
+    action: "create" | "resume" | "replacement";
+    agentId: string;
+    generation: number;
+    priorAgentId?: string;
+  }): Promise<void>;
+  onMutationFailed?(info: {
+    action: "create" | "resume" | "replacement";
+    error: unknown;
+  }): Promise<void>;
 }
 
 export interface AcquireBuilderAgentParams {
@@ -131,6 +163,8 @@ export interface AcquireBuilderAgentParams {
     previousRevisionRunId?: string;
   };
   events: EventLogger;
+  /** Optional for tests/nonproduction; production wrapper always supplies one. */
+  provenanceHooks?: BuilderProvenanceMutationHooks;
 }
 
 export interface AcquiredBuilderAgent {

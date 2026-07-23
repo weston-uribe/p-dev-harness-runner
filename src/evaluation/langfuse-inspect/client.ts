@@ -1,23 +1,49 @@
 import { createHash } from "node:crypto";
 import type { EvaluationRuntimeConfig } from "../types.js";
 
+/** SDK-aligned request options (Fern-generated AbortSignal support). */
+export interface LangfuseRequestOptions {
+  abortSignal?: AbortSignal;
+  timeoutInSeconds?: number;
+  maxRetries?: number;
+  headers?: Record<string, string>;
+}
+
 export interface LangfuseApiClient {
   api: {
     sessions: {
-      get: (sessionId: string) => Promise<unknown>;
+      get: (
+        sessionId: string,
+        requestOptions?: LangfuseRequestOptions,
+      ) => Promise<unknown>;
     };
     trace: {
-      list: (params?: Record<string, unknown>) => Promise<unknown>;
-      get: (traceId: string) => Promise<unknown>;
+      list: (
+        params?: Record<string, unknown>,
+        requestOptions?: LangfuseRequestOptions,
+      ) => Promise<unknown>;
+      get: (
+        traceId: string,
+        requestOptions?: LangfuseRequestOptions,
+      ) => Promise<unknown>;
     };
     observations: {
-      getMany: (params?: Record<string, unknown>) => Promise<unknown>;
+      getMany: (
+        params?: Record<string, unknown>,
+        requestOptions?: LangfuseRequestOptions,
+      ) => Promise<unknown>;
     };
     scoresV3?: {
-      getManyV3: (params?: Record<string, unknown>) => Promise<unknown>;
+      getManyV3: (
+        params?: Record<string, unknown>,
+        requestOptions?: LangfuseRequestOptions,
+      ) => Promise<unknown>;
     };
     scores?: {
-      getMany: (params?: Record<string, unknown>) => Promise<unknown>;
+      getMany: (
+        params?: Record<string, unknown>,
+        requestOptions?: LangfuseRequestOptions,
+      ) => Promise<unknown>;
     };
   };
 }

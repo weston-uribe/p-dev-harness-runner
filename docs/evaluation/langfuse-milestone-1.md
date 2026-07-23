@@ -43,6 +43,8 @@ Wired into the `run-harness` job only (not gate, merge, or production-sync).
 
 Absent provider → silent no-op. Unknown provider/profile or missing keys → one concise warning + no-op. Misconfiguration does not fail `doctor` or block phases.
 
+**Cursor usage discovery** (Settings → Cursor usage) uses a stricter dedicated contract: `P_DEV_EVALUATION_PROVIDER` and `P_DEV_EVALUATION_NAMESPACE` are required with no `"default"` namespace fallback; `LANGFUSE_TRACING_ENVIRONMENT` is an optional explicit filter (unset means all environments, not `"default"`). See [`cursor-usage-import-operator.md`](./cursor-usage-import-operator.md).
+
 ## Data allowlist (`metadata-v1`)
 
 Bounded structured fields only (IDs, roles, booleans, counts, categories, allowlisted numeric usage). See `src/evaluation/capture-policy.ts`.

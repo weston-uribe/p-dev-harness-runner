@@ -8,6 +8,11 @@ import {
   sessionDisplayName,
 } from "../naming.js";
 import {
+  isEvaluationPhase,
+  phaseInvokesAgent,
+  type EvaluationPhase,
+} from "../phases.js";
+import {
   estimateCostUsd,
   PRICING_REGISTRY_VERSION,
   resolvePricingVariant,
@@ -564,9 +569,12 @@ const CSV_SCORE_NAMES = [
   "cursor_output_tokens",
   "cursor_total_tokens",
   "cursor_token_usage_complete",
+  "cursor_source_scope_complete",
   "cursor_known_noncache_cost_usd",
   "cursor_all_input_at_list_rate_usd",
   "cursor_cost_proxy_available",
+  "cursor_list_price_equivalent_complete",
+  "cursor_provider_actual_cost_complete",
   "cursor_exact_cost_complete",
   "cursor_generation_native_usage_complete",
 ] as const;
@@ -592,7 +600,7 @@ function numericScoreValue(score: LangfuseInspectScore | undefined): number | nu
 
 function resolveCanonicalCsvPhaseTrace(
   traces: LangfuseInspectTrace[],
-  phase: "planning" | "plan_review",
+  phase: EvaluationPhase,
 ): { trace: LangfuseInspectTrace | null; reason: string | null } {
   const candidates = traces.filter((t) => t.phase === phase);
   if (candidates.length === 0) {
@@ -606,6 +614,8 @@ function resolveCanonicalCsvPhaseTrace(
 
 /**
  * Per-required-phase CSV score acceptance. One complete phase cannot hide another.
+ * Expected phases may be any agent-invoking phase; completeness is from the
+ * selected source scope (not a universal workflow phase list).
  */
 export function evaluateCursorCsvScoreAcceptance(params: {
   traces: LangfuseInspectTrace[];
@@ -618,8 +628,8 @@ export function evaluateCursorCsvScoreAcceptance(params: {
   nativeUsageComplete: boolean;
 } {
   const requiredPhases = params.expectedPhases.filter(
-    (p): p is "planning" | "plan_review" =>
-      p === "planning" || p === "plan_review",
+    (p): p is EvaluationPhase =>
+      isEvaluationPhase(p) && phaseInvokesAgent(p),
   );
   if (requiredPhases.length === 0) {
     return {
@@ -717,11 +727,14 @@ export function evaluateCursorCsvScoreAcceptance(params: {
     }
 
     const tokenComplete = exactlyOne("cursor_token_usage_complete");
+    const sourceScope = exactlyOne("cursor_source_scope_complete");
     const exactCost = exactlyOne("cursor_exact_cost_complete");
     const nativeUsage = exactlyOne("cursor_generation_native_usage_complete");
     if (
       !tokenComplete ||
       !scoreValueEquals(tokenComplete, true) ||
+      !sourceScope ||
+      !scoreValueEquals(sourceScope, true) ||
       !exactCost ||
       !scoreValueEquals(exactCost, false) ||
       !nativeUsage ||

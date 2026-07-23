@@ -7,8 +7,10 @@ import {
   hasPlanningCompletionMarker,
   hasPhaseStartMarker,
 } from "../../src/linear/comments.js";
-import { getVisibleCommentBody } from "../../src/linear/comment-card.js";
-import { hasVisibleMachineMetadata } from "./comment-assertions.js";
+import {
+  getVisibleCommentBody,
+  hasVisibleMachineMetadata,
+} from "./comment-assertions.js";
 
 describe("linear comments", () => {
   it("formats harness hidden metadata with required marker fields", () => {

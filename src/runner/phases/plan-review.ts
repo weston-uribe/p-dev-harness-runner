@@ -32,7 +32,9 @@ import {
   downloadAgentReviewArtifacts,
   resumePlanReviewAgent,
   sendAndObserve,
-} from "../../agents/index.js";
+} from "../../agents/production.js";
+import { buildPhaseLaunchContext } from "../provenance-launch-context.js";
+import type { LinearHarnessLaunchContext } from "../../provenance/launch-context.js";
 import { selectPrimaryReviewArtifact } from "../../cursor/review-artifacts.js";
 import { manifestModelEvidence } from "../../cursor/model.js";
 import { buildPlanReviewPrompt } from "../../prompts/builder.js";
@@ -470,12 +472,28 @@ export async function executePlanReviewPhase(
     // full Plan Review prompt unless the agent cannot be resumed.
     let agent;
     let reusedExistingReviewer = false;
+    let planReviewLaunchContext: LinearHarnessLaunchContext;
     if (state.planReviewerAgentId) {
       try {
+        planReviewLaunchContext = buildPhaseLaunchContext({
+          config,
+          linearIssueId: issue.id,
+          linearIssueKey: issue.identifier,
+          phase: "plan_review",
+          phaseExecutionId: runId,
+          harnessRunId: runId,
+          agentRole: "plan_reviewer",
+          action: "resume",
+          generation: 1,
+          priorAgentId: state.planReviewerAgentId,
+          targetRepository: resolved.targetRepo,
+          startingRef: resolved.baseBranch,
+          launchSurface: "plan_review.resume",
+        });
         agent = await resumePlanReviewAgent({
           apiKey: cursorApiKey,
           agentId: state.planReviewerAgentId,
-          config,
+          launchContext: planReviewLaunchContext,
         });
         reusedExistingReviewer = true;
         await events.log("plan_review_agent_reused", "info", {
@@ -490,19 +508,51 @@ export async function executePlanReviewPhase(
               ? resumeError.message
               : String(resumeError),
         });
+        planReviewLaunchContext = buildPhaseLaunchContext({
+          config,
+          linearIssueId: issue.id,
+          linearIssueKey: issue.identifier,
+          phase: "plan_review",
+          phaseExecutionId: runId,
+          harnessRunId: runId,
+          agentRole: "plan_reviewer",
+          action: "create",
+          generation: 1,
+          priorAgentId: state.planReviewerAgentId,
+          targetRepository: resolved.targetRepo,
+          startingRef: resolved.baseBranch,
+          launchSurface: "plan_review.create",
+          operationOrdinal: 2,
+        });
         agent = await createPlanReviewAgent({
           apiKey: cursorApiKey,
           config,
           targetRepo: resolved.targetRepo,
           baseBranch: resolved.baseBranch,
+          launchContext: planReviewLaunchContext,
         });
       }
     } else {
+      planReviewLaunchContext = buildPhaseLaunchContext({
+        config,
+        linearIssueId: issue.id,
+        linearIssueKey: issue.identifier,
+        phase: "plan_review",
+        phaseExecutionId: runId,
+        harnessRunId: runId,
+        agentRole: "plan_reviewer",
+        action: "create",
+        generation: 1,
+        targetRepository: resolved.targetRepo,
+        startingRef: resolved.baseBranch,
+        launchSurface: "plan_review.create",
+      });
       agent = await createPlanReviewAgent({
         apiKey: cursorApiKey,
         config,
         targetRepo: resolved.targetRepo,
         baseBranch: resolved.baseBranch,
+        launchContext: planReviewLaunchContext,
       });
     }
 
@@ -524,6 +574,7 @@ export async function executePlanReviewPhase(
           sendAndObserve(agent, message, runDirectory, events, {
             apiKey: cursorApiKey,
             phase: "plan_review",
+            launchContext: planReviewLaunchContext,
             telemetryCorrelation,
             onTelemetryEvent: onTelemetry,
           }),

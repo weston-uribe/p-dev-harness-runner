@@ -39,7 +39,7 @@ vi.mock("../../src/linear/writer.js", () => ({
   createLinearClient: mocks.createLinearClient,
 }));
 
-vi.mock("../../src/agents/index.js", () => ({
+vi.mock("../../src/agents/production.js", () => ({
   createPlanningAgent: mocks.createPlanningAgent,
   createImplementationAgent: mocks.createImplementationAgent,
   disposeAgent: mocks.disposeAgent,

@@ -33,15 +33,34 @@ export type EvaluationScoreName =
   | "cursor_output_tokens"
   | "cursor_total_tokens"
   | "cursor_token_usage_complete"
+  | "cursor_source_scope_complete"
   | "cursor_known_noncache_cost_usd"
   | "cursor_all_input_at_list_rate_usd"
   | "cursor_cost_proxy_available"
+  | "cursor_list_price_equivalent_usd"
+  | "cursor_list_price_equivalent_complete"
+  | "cursor_provider_actual_usd"
+  | "cursor_provider_actual_cost_complete"
   | "cursor_exact_cost_complete"
   | "cursor_generation_native_usage_complete";
 
 export type EvaluationScoreDataType = "BOOLEAN" | "NUMERIC" | "CATEGORICAL";
 
 export type EvaluationScoreClass = "operational" | "cursor_usage_import";
+
+/**
+ * Optional public-safe structured score metadata.
+ *
+ * Privacy contract:
+ * - No full Cloud Agent IDs, emails, secrets, raw CSV paths, or API keys.
+ * - Prefer hashed agent IDs (≤12 hex) and digest prefixes.
+ * - Values should be strings/numbers/booleans; keep object shallow (≤2 levels)
+ *   and total serialized size modest (callers enforce ≤2 KiB).
+ * - Authoritative provenance remains in the private import ledger; metadata is
+ *   a compact public-safe projection. Do not assume Langfuse indexes metadata
+ *   for search unless separately proven.
+ */
+export type EvaluationScoreMetadata = Record<string, unknown>;
 
 export interface EvaluationScoreInput {
   id: string;
@@ -56,9 +75,14 @@ export interface EvaluationScoreInput {
    * Optional bounded privacy-safe comment. Must not contain issue keys, agent IDs,
    * CSV paths, repos, or private correlation values. When omitted, runtime uses
    * the default operational classification comment.
+   * Cursor usage import comments are capped at 480 characters.
    */
   comment?: string;
   scoreClass?: EvaluationScoreClass;
+  /** Optional public-safe structured provenance (see EvaluationScoreMetadata). */
+  metadata?: EvaluationScoreMetadata;
+  /** Optional Langfuse environment when supported by the score-create body. */
+  environment?: string;
 }
 
 export interface EvaluationCorrelation {

@@ -62,6 +62,12 @@ These still delegate to the **operator** launcher but print a deprecation notice
 
 Prefer `p-dev` or `npm start` for operators.
 
+## Cursor usage import
+
+Operator bulk CSV → Langfuse score enrichment lives at **Settings → Cursor usage**.
+See [`docs/evaluation/cursor-usage-import-operator.md`](evaluation/cursor-usage-import-operator.md).
+Browser E2E: `npm run test:cursor-usage:browser` (not covered by `npm test`).
+
 ## Troubleshooting
 
 If the GUI is unstyled, Settings navigation is broken, or connection verification returns HTML/`500`, treat it as a **local runtime** problem first — not invalid Linear/Vercel credentials.

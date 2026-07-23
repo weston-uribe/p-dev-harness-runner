@@ -158,7 +158,20 @@ function buildLangfuseScorePayload(
   if (input.target === "session" && input.sessionId) {
     payload.sessionId = input.sessionId;
   }
+  if (input.metadata && typeof input.metadata === "object") {
+    payload.metadata = input.metadata;
+  }
+  if (typeof input.environment === "string" && input.environment.trim()) {
+    payload.environment = input.environment.trim();
+  }
   return payload;
+}
+
+/** Exported for contract tests — operational scores must remain unchanged. */
+export function buildLangfuseScorePayloadForTests(
+  input: EvaluationScoreInput,
+): Record<string, unknown> {
+  return buildLangfuseScorePayload(input);
 }
 
 async function loadLangfuseModules(): Promise<LangfuseModules> {

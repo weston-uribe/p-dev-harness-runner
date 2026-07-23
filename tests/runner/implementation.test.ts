@@ -25,7 +25,7 @@ vi.mock("../../src/linear/writer.js", () => ({
   createLinearClient: mocks.createLinearClient,
 }));
 
-vi.mock("../../src/agents/index.js", () => ({
+vi.mock("../../src/agents/production.js", () => ({
   acquireBuilderAgent: mocks.acquireBuilderAgent,
   disposeAgent: mocks.disposeAgent,
   sendAndObserve: mocks.sendAndObserve,

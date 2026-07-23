@@ -70,6 +70,45 @@ describe.skipIf(!isCleanEnoughForPackagePack())("p-dev packed artifact", () => {
     expect(listing).toContain(
       "package/workspace-snapshot/files/apps/gui/components/workflow/workflow-page-client.tsx",
     );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/apps/gui/app/settings/(console)/cursor-usage/page.tsx",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/apps/gui/app/api/settings/cursor-usage/preflight/route.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/apps/gui/app/api/settings/cursor-usage/apply/route.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/apps/gui/app/api/settings/cursor-usage/analytics/route.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/apps/gui/app/api/settings/cursor-usage/status/route.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/apps/gui/app/api/settings/cursor-usage/config/route.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/evaluation/cursor-usage-import/service.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/evaluation/cursor-usage-import/sources/csv.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/evaluation/cursor-usage-import/sources/admin-api.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/evaluation/cursor-usage-import/staging.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/evaluation/cursor-usage-import/import-lock.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/evaluation/cursor-usage-import-canary/run.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/cli/commands/evaluation-canary-cursor-usage-import.ts",
+    );
     expect(listing).not.toContain("operations-canvas.tsx");
     expect(listing).not.toMatch(/@xyflow\/react/);
     expect(listing).not.toMatch(/\.env\.local/);

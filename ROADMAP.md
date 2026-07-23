@@ -12,6 +12,7 @@ For shipped history, see [CHANGELOG.md](CHANGELOG.md).
 - Improve cross-platform packaged launch policy beyond macOS browser auto-open
 - Continue validating the Linear → GitHub → Cursor workflow on real but private target repos
 - Operator-initiated **Update PDev runner** from Settings → Deployments (implemented on debug branch; not yet a published release milestone)
+- Capture-only Linear-harness Cursor Cloud Agent provenance registry (`src/provenance/`, ADR 0008) — default mode `disabled`; no live epoch; historical CSV import remains preflight-only
 
 ## Next
 
@@ -20,6 +21,7 @@ For shipped history, see [CHANGELOG.md](CHANGELOG.md).
 - `performance-cost-audit` skill
 - Automated eval/check runners where manual rubrics are currently used
 - Stronger CI/security defaults for target repos
+- Operator-authorized Cursor provenance `shadow` → `required` rollout, then closed coverage epoch + importer registry consumption (capture foundation implemented; Apply remains blocked)
 
 ## Later
 

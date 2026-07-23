@@ -53,7 +53,9 @@ import {
   disposeAgent,
   sendAndObserve,
   type CursorCancelOutcome,
-} from "../../agents/index.js";
+} from "../../agents/production.js";
+import { buildPhaseLaunchContext } from "../provenance-launch-context.js";
+import type { LinearHarnessLaunchContext } from "../../provenance/launch-context.js";
 import { manifestModelEvidence, resolveBuilderModel } from "../../cursor/model.js";
 import { normalizeRepoUrl } from "../../resolver/normalize-repo.js";
 import { buildRevisionPrompt } from "../../prompts/revision-builder.js";
@@ -736,6 +738,23 @@ export async function executeRevisionPhase(
         orchestratorMarker: config.orchestratorMarker,
         previousImplementationRunId: previousImplementationRunId ?? undefined,
       },
+      buildLaunchContext: (info) =>
+        buildPhaseLaunchContext({
+          config,
+          linearIssueId: issue.id,
+          linearIssueKey: issue.identifier,
+          phase: "revision",
+          phaseExecutionId: runId,
+          harnessRunId: runId,
+          agentRole: "builder",
+          action: info.action,
+          generation: info.generation,
+          priorAgentId: info.priorAgentId,
+          targetRepository: markerTargetRepo,
+          startingRef: branch || resolved.baseBranch,
+          prUrl: prUrl ?? null,
+          launchSurface: info.launchSurface,
+        }),
     });
     builderContinuity = acquired.continuity;
     const builderEvidence = builderMarkerEvidenceFromResolution(
@@ -743,6 +762,30 @@ export async function executeRevisionPhase(
       revisionIdempotencyKey,
     );
     const agent = acquired.agent;
+    const revisionAction =
+      acquired.continuity.action === "resumed"
+        ? ("resume" as const)
+        : ("replacement" as const);
+    const revisionLaunchContext: LinearHarnessLaunchContext =
+      buildPhaseLaunchContext({
+        config,
+        linearIssueId: issue.id,
+        linearIssueKey: issue.identifier,
+        phase: "revision",
+        phaseExecutionId: runId,
+        harnessRunId: runId,
+        agentRole: "builder",
+        action: revisionAction,
+        generation: acquired.continuity.reference.generation,
+        priorAgentId: acquired.continuity.previousAgentId,
+        targetRepository: markerTargetRepo,
+        startingRef: branch || resolved.baseBranch,
+        prUrl: prUrl ?? null,
+        launchSurface:
+          revisionAction === "resume"
+            ? "revision.resume"
+            : "revision.replacement",
+      });
 
     const revisingStatus = resolveNextStatusName({
       config,
@@ -890,6 +933,7 @@ export async function executeRevisionPhase(
       }
       observed = await sendAndObserve(agent, prompt, runDirectory, events, {
         phase: "revision",
+        launchContext: revisionLaunchContext,
         targetRepo: markerTargetRepo,
         expectedBranch: branch,
         expectedPrUrl: prUrl,

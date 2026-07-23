@@ -1,4 +1,14 @@
-import { getVisibleCommentBody } from "../../src/linear/comment-card.js";
+/** Strips HTML comments so tests can assert visible markdown only. */
+export function getVisibleCommentBody(body: string): string {
+  let current = body;
+  while (true) {
+    const next = current.replace(/<!--[\s\S]*?-->/g, "");
+    if (next === current) {
+      return next.trim();
+    }
+    current = next;
+  }
+}
 
 const VISIBLE_METADATA_PATTERNS: Array<string | RegExp> = [
   "harness-orchestrator-v1",

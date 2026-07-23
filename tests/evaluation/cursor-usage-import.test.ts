@@ -261,6 +261,8 @@ describe("cursor-usage-import", () => {
         cursorAgentIdHash: "abc",
         effectiveVariant: "standard",
         sdkFast: false,
+        windowStart: "2026-07-19T11:59:00.000Z",
+        windowEnd: "2026-07-19T12:05:00.000Z",
       },
       tokens: {
         inputTokens: 10,
@@ -271,8 +273,13 @@ describe("cursor-usage-import", () => {
       },
       knownNoncacheCostUsd: 0.01,
       allInputAtListRateUsd: 0.02,
+      tokenUsageComplete: true,
+      sourceScopeComplete: true,
+      listPriceEquivalentComplete: false,
+      providerActualCostComplete: false,
+      costProxyAvailable: true,
     });
-    expect(scores).toHaveLength(11);
+    expect(scores).toHaveLength(14);
     expect(scores.every((s) => s.timestamp === "2026-07-19T12:05:00.000Z")).toBe(
       true,
     );
@@ -288,6 +295,8 @@ describe("cursor-usage-import", () => {
         cursorAgentIdHash: "abc",
         effectiveVariant: "standard",
         sdkFast: false,
+        windowStart: "2026-07-19T11:59:00.000Z",
+        windowEnd: "2026-07-19T12:05:00.000Z",
       },
       tokens: {
         inputTokens: 10,
@@ -298,6 +307,11 @@ describe("cursor-usage-import", () => {
       },
       knownNoncacheCostUsd: 0.01,
       allInputAtListRateUsd: 0.02,
+      tokenUsageComplete: true,
+      sourceScopeComplete: true,
+      listPriceEquivalentComplete: false,
+      providerActualCostComplete: false,
+      costProxyAvailable: true,
     });
     expect(scores.map((s) => s.id)).toEqual(again.map((s) => s.id));
     const proxy = scores.find((s) => s.name === "cursor_all_input_at_list_rate_usd");
@@ -331,6 +345,8 @@ describe("cursor-usage-import", () => {
         cursorAgentIdHash: "x",
         effectiveVariant: "standard",
         sdkFast: false,
+        windowStart: "2026-07-19T11:59:00.000Z",
+        windowEnd: "2026-07-19T12:05:00.000Z",
       },
       tokens: {
         inputTokens: 1,
@@ -341,10 +357,15 @@ describe("cursor-usage-import", () => {
       },
       knownNoncacheCostUsd: 0,
       allInputAtListRateUsd: 0,
+      tokenUsageComplete: true,
+      sourceScopeComplete: true,
+      listPriceEquivalentComplete: false,
+      providerActualCostComplete: false,
+      costProxyAvailable: true,
     });
     const result = projectUsageScoresOnly({ recorder, scores });
     expect(result.observationMutationAttempted).toBe(false);
-    expect(recorded).toHaveLength(11);
+    expect(recorded).toHaveLength(14);
   });
 
   it("verifies scores and keeps exact-cost acceptance false", () => {
@@ -367,6 +388,11 @@ describe("cursor-usage-import", () => {
         tokens: aggregate.tokens,
         knownNoncacheCostUsd: proxies.knownNoncacheCostUsd,
         allInputAtListRateUsd: proxies.allInputAtListRateUsd,
+        tokenUsageComplete: true,
+        sourceScopeComplete: true,
+        listPriceEquivalentComplete: false,
+        providerActualCostComplete: false,
+        costProxyAvailable: true,
       });
       return { join, aggregate, proxies, scores };
     });
@@ -387,8 +413,8 @@ describe("cursor-usage-import", () => {
       retrievalCompletenessProven: true,
     });
     expect(verify.verified).toBe(true);
-    expect(verify.logicalScoreCount).toBe(22);
-    expect(verify.physicalMatchingScoreCount).toBe(22);
+    expect(verify.logicalScoreCount).toBe(28);
+    expect(verify.physicalMatchingScoreCount).toBe(28);
 
     // second pass same ids → same logical and physical counts
     const verify2 = verifyImportedScores({
@@ -423,7 +449,16 @@ describe("cursor-usage-import", () => {
       cursorAgentIdHash: "h",
       effectiveVariant: "standard" as const,
       sdkFast: false,
+      windowStart: "2026-07-19T11:59:00.000Z",
+      windowEnd: "2026-07-19T12:05:00.000Z",
     };
+    const scoreExtras = {
+      tokenUsageComplete: true,
+      sourceScopeComplete: true,
+      listPriceEquivalentComplete: false,
+      providerActualCostComplete: false,
+      costProxyAvailable: true,
+    } as const;
     const s1 = buildPhaseUsageScores({
       namespace: "default",
       join,
@@ -436,6 +471,7 @@ describe("cursor-usage-import", () => {
       },
       knownNoncacheCostUsd: 0.001,
       allInputAtListRateUsd: 0.001,
+      ...scoreExtras,
     });
     const s2 = buildPhaseUsageScores({
       namespace: "default",
@@ -449,6 +485,7 @@ describe("cursor-usage-import", () => {
       },
       knownNoncacheCostUsd: 0.003,
       allInputAtListRateUsd: 0.003,
+      ...scoreExtras,
     });
     expect(s1.map((s) => s.id)).toEqual(s2.map((s) => s.id));
     expect(s1[0]!.timestamp).toBe(s2[0]!.timestamp);

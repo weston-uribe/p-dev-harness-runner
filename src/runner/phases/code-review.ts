@@ -39,7 +39,8 @@ import {
   disposeAgent,
   downloadAgentReviewArtifacts,
   sendAndObserve,
-} from "../../agents/index.js";
+} from "../../agents/production.js";
+import { buildPhaseLaunchContext } from "../provenance-launch-context.js";
 import { selectPrimaryReviewArtifact } from "../../cursor/review-artifacts.js";
 import { buildCodeReviewSubjectIdentity } from "../../workflow/subject-identities.js";
 import {
@@ -810,12 +811,30 @@ export async function executeCodeReviewPhase(
       }),
     );
 
+    const codeReviewBranch = branchName || `pr-${latestImplementation.prNumber}`;
+    const codeReviewLaunchContext = buildPhaseLaunchContext({
+      config,
+      linearIssueId: issue.id,
+      linearIssueKey: issue.identifier,
+      phase: "code_review",
+      phaseExecutionId: runId,
+      harnessRunId: runId,
+      agentRole: "code_reviewer",
+      action: "create",
+      generation: 1,
+      targetRepository: resolved.targetRepo,
+      startingRef: codeReviewBranch,
+      prUrl: latestImplementation.prUrl,
+      prNumber: latestImplementation.prNumber,
+      launchSurface: "code_review.create",
+    });
     const agent = await createCodeReviewAgent({
       apiKey: cursorApiKey,
       config,
       targetRepo: resolved.targetRepo,
-      branch: branchName || `pr-${latestImplementation.prNumber}`,
+      branch: codeReviewBranch,
       prUrl: latestImplementation.prUrl,
+      launchContext: codeReviewLaunchContext,
     });
 
     try {
@@ -836,6 +855,7 @@ export async function executeCodeReviewPhase(
           sendAndObserve(agent, message, runDirectory, events, {
             apiKey: cursorApiKey,
             phase: "code_review",
+            launchContext: codeReviewLaunchContext,
             telemetryCorrelation,
             onTelemetryEvent: onTelemetry,
             targetRepo: resolved.targetRepo,
