@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   attemptOverlapsInterval,
-  buildCoverageSnapshot,
+  buildCoverageSnapshotFromLegacy,
   projectAttempts,
   runOperationOverlapsInterval,
   type AttemptProjection,
@@ -215,6 +215,12 @@ describe("coverage overlap projection", () => {
         launchContext: {} as never,
       }),
       base({
+        eventType: "provider_call_started",
+        launchAttemptId: id,
+        transitionId: "provider_call_started",
+        recordedAt: "2026-07-01T00:01:00.000Z",
+      }),
+      base({
         eventType: "reconciliation_resolution",
         launchAttemptId: id,
         transitionId: "reconciliation_resolution:res1",
@@ -222,9 +228,9 @@ describe("coverage overlap projection", () => {
         affectedOperationId: id,
         affectedOperationKind: "launch_attempt",
         authoritativeResolutionInstant: "2026-07-12T00:00:00.000Z",
-        resolutionKind: "no_provider_mutation",
-        evidenceSource: "operator",
-        evidenceDigest: "ev".padEnd(64, "0"),
+        resolutionKind: "provider_agent_ack_recovered",
+        evidenceSource: "operator_attestation",
+        evidenceDigest: "e".repeat(64),
         producerSchemaVersion: "1",
         recordedAt: "2026-07-25T00:00:00.000Z",
       }),
@@ -290,7 +296,7 @@ describe("coverage overlap projection", () => {
   });
 
   it("empty interval without activation is incomplete", () => {
-    const snap = buildCoverageSnapshot({
+    const snap = buildCoverageSnapshotFromLegacy({
       interval: INTERVAL,
       events: [],
       eventPaths: [],
@@ -312,7 +318,7 @@ describe("coverage overlap projection", () => {
         launchAttemptId: id,
         transitionId: `provider_run_intent:${op1}`,
         providerRunOperationId: op1,
-        sendPurpose: "initial",
+        sendSurface: "initial",
         sendOrdinal: 1,
         recordedAt: "2026-07-11T00:00:00.000Z",
       }),
@@ -321,7 +327,7 @@ describe("coverage overlap projection", () => {
         launchAttemptId: id,
         transitionId: `provider_run_call_started:${op1}`,
         providerRunOperationId: op1,
-        sendPurpose: "initial",
+        sendSurface: "initial",
         sendOrdinal: 1,
         recordedAt: "2026-07-11T00:00:01.000Z",
       }),
@@ -347,7 +353,7 @@ describe("coverage overlap projection", () => {
         launchAttemptId: id,
         transitionId: `provider_run_intent:${op2}`,
         providerRunOperationId: op2,
-        sendPurpose: "repair",
+        sendSurface: "repair",
         sendOrdinal: 2,
         recordedAt: "2026-07-12T00:00:00.000Z",
       }),
@@ -356,7 +362,7 @@ describe("coverage overlap projection", () => {
         launchAttemptId: id,
         transitionId: `provider_run_call_started:${op2}`,
         providerRunOperationId: op2,
-        sendPurpose: "repair",
+        sendSurface: "repair",
         sendOrdinal: 2,
         recordedAt: "2026-07-12T00:00:01.000Z",
       }),

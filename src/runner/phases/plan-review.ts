@@ -575,6 +575,8 @@ export async function executePlanReviewPhase(
             apiKey: cursorApiKey,
             phase: "plan_review",
             launchContext: planReviewLaunchContext,
+            sendSurface: "plan_review.send",
+            sendOrdinal: 1,
             telemetryCorrelation,
             onTelemetryEvent: onTelemetry,
           }),

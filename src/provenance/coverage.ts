@@ -1,21 +1,34 @@
 import { createHash } from "node:crypto";
 import {
   activationAttestationDigest,
+  validateActivationAttestationCompleteness,
+  type ActivationSourceIdentity,
   type CoverageActivationAttestation,
 } from "./activation-attestation.js";
 import type { ProvenanceEvent } from "./events.js";
 import {
   assertEventSnapshotOrThrow,
+  eventRecordsFromParallelArrays,
+  type ActivationSourceIdentityInput,
   type CoverageIncompleteReason,
+  type EventSnapshotSourceIdentity,
+  type ProvenanceEventRecord,
 } from "./event-integrity.js";
 import {
   launchSurfacesManifestDigest,
   PROVENANCE_WRITER_VERSION,
   LAUNCH_SURFACES_SCHEMA_KIND,
+  SEND_SURFACES_SCHEMA_KIND,
+  sendSurfacesManifestDigest,
 } from "./launch-surfaces.js";
 import { LAUNCH_CONTEXT_SCHEMA_KIND } from "./launch-context.js";
 import { PROVENANCE_EVENT_SCHEMA_KIND } from "./events.js";
 import { CursorProvenanceError } from "./errors.js";
+import {
+  reconciliationClosesActivity,
+  validateReconciliationStructural,
+  type ReconciliationResolutionKind,
+} from "./reconciliation.js";
 
 export const COVERAGE_SCHEMA_KIND =
   "p-dev.cursor-cloud-agent-registry-coverage.v1" as const;
@@ -41,10 +54,14 @@ export interface CoverageSnapshot {
   launchSurfacesSchemaKind: string;
   launchSurfacesManifestVersion: string;
   launchSurfacesManifestDigest: string;
+  sendSurfacesSchemaKind: string;
+  sendSurfacesManifestVersion: string;
+  sendSurfacesManifestDigest: string;
   activationAttestationDigest: string | null;
+  activationSource: ActivationSourceIdentity | null;
+  eventSnapshotSource: EventSnapshotSourceIdentity;
   sourceRepositoryVersions: string[];
   runnerSnapshotVersions: string[];
-  immutableEventSetCommitSha: string;
   eventPathSet: string[];
   eventSetDigest: string;
   launchAttemptCount: number;
@@ -57,7 +74,6 @@ export interface CoverageSnapshot {
   incompleteExecutionCount: number;
   runIntentWithoutCallStartCount: number;
   runCallWithoutAcknowledgmentCount: number;
-  runAcknowledgmentWithoutBindingCount: number;
   runWithoutTerminalCompletionCount: number;
   writerDeploymentGaps: string[];
   mixedUnsupportedRunnerVersions: string[];
@@ -71,7 +87,6 @@ export interface RunOperationProjection {
   providerRunOperationId: string;
   hasRunIntent: boolean;
   hasRunCallStarted: boolean;
-  hasRunAck: boolean;
   hasRunBound: boolean;
   completed: boolean;
   runHash: string | null;
@@ -79,6 +94,7 @@ export interface RunOperationProjection {
   activityEnd: string | null;
   unresolved: boolean;
   resolvedByReconciliation: boolean;
+  permanentlyUnresolvable: boolean;
 }
 
 export interface AttemptProjection {
@@ -103,6 +119,7 @@ export interface AttemptProjection {
   activityEnd: string | null;
   unresolved: boolean;
   resolvedByReconciliation: boolean;
+  permanentlyUnresolvable: boolean;
 }
 
 function parseIso(value: string): number {
@@ -146,6 +163,7 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
         activityEnd: null,
         unresolved: true,
         resolvedByReconciliation: false,
+        permanentlyUnresolvable: false,
       };
       byAttempt.set(id, row);
     }
@@ -162,7 +180,6 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
         providerRunOperationId: runOpId,
         hasRunIntent: false,
         hasRunCallStarted: false,
-        hasRunAck: false,
         hasRunBound: false,
         completed: false,
         runHash: null,
@@ -170,6 +187,7 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
         activityEnd: null,
         unresolved: true,
         resolvedByReconciliation: false,
+        permanentlyUnresolvable: false,
       };
       row.runOperations.push(op);
     }
@@ -181,7 +199,6 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
     if (!row.activityStart || parseIso(start) < parseIso(row.activityStart)) {
       row.activityStart = start;
     }
-    // Unresolved activity stays open-ended — do not close via recordedAt.
     row.activityEnd = null;
   };
 
@@ -238,14 +255,12 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
       case "provider_run_call_started": {
         const op = ensureRunOp(row, event.providerRunOperationId);
         op.hasRunCallStarted = true;
-        // Call-start without ack remains open-ended.
         bumpRunOpen(op, event.recordedAt);
         bumpOpen(row, event.recordedAt);
         break;
       }
       case "provider_run_bound": {
         const op = ensureRunOp(row, event.providerRunOperationId);
-        op.hasRunAck = true;
         op.hasRunBound = true;
         op.runHash = event.runHash;
         const existing = row.runBindings.find((r) => r.runHash === event.runHash);
@@ -295,22 +310,82 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
         bumpOpen(row, event.recordedAt);
         break;
       case "reconciliation_resolution": {
-        if (
-          !event.authoritativeResolutionInstant ||
-          !event.evidenceDigest ||
-          !event.evidenceSource
-        ) {
+        if (validateReconciliationStructural(event)) {
           break;
         }
-        const instant = event.authoritativeResolutionInstant;
+        const kind = event.resolutionKind as ReconciliationResolutionKind;
+        if (kind === "operation_permanently_unresolvable") {
+          if (event.affectedOperationKind === "run_operation") {
+            const op = ensureRunOp(row, event.affectedOperationId);
+            op.permanentlyUnresolvable = true;
+          } else if (event.affectedOperationId === row.launchAttemptId) {
+            row.permanentlyUnresolvable = true;
+          }
+          break;
+        }
+
+        const launchCtx = {
+          hasCallStarted: row.hasCallStarted,
+          hasAgentAck: row.hasAgentAck,
+          hasRunIntent: row.runOperations.some((op) => op.hasRunIntent),
+          hasRunBound: row.runBindings.length > 0,
+          hasRunComplete: row.runOperations.some((op) => op.completed),
+        };
+
         if (event.affectedOperationKind === "run_operation") {
           const op = ensureRunOp(row, event.affectedOperationId);
-          op.resolvedByReconciliation = true;
-          op.unresolved = false;
-          op.activityEnd = instant;
+          const runCtx = {
+            hasRunIntent: op.hasRunIntent,
+            hasRunCallStarted: op.hasRunCallStarted,
+            hasRunBound: op.hasRunBound,
+            hasRunComplete: op.completed,
+            activityStart: op.activityStart,
+          };
+          if (
+            reconciliationClosesActivity({
+              resolutionKind: kind,
+              affectedOperationKind: "run_operation",
+              launch: launchCtx,
+              run: runCtx,
+              authoritativeResolutionInstant:
+                event.authoritativeResolutionInstant,
+            })
+          ) {
+            if (kind === "provider_run_binding_recovered") {
+              op.hasRunBound = true;
+            }
+            if (kind === "provider_terminal_window_recovered") {
+              op.hasRunBound = true;
+              op.completed = true;
+              op.activityEnd = event.authoritativeResolutionInstant;
+            }
+            if (kind === "provider_mutation_proven_not_started") {
+              op.unresolved = false;
+              op.activityEnd = event.authoritativeResolutionInstant;
+            }
+            op.resolvedByReconciliation = true;
+          }
         } else if (event.affectedOperationId === row.launchAttemptId) {
-          row.resolvedByReconciliation = true;
-          bumpClosed(row, row.activityStart, instant);
+          if (
+            reconciliationClosesActivity({
+              resolutionKind: kind,
+              affectedOperationKind: "launch_attempt",
+              launch: launchCtx,
+              run: null,
+              authoritativeResolutionInstant:
+                event.authoritativeResolutionInstant,
+            })
+          ) {
+            if (kind === "provider_agent_ack_recovered") {
+              row.hasAgentAck = true;
+            }
+            row.resolvedByReconciliation = true;
+            bumpClosed(
+              row,
+              row.activityStart,
+              event.authoritativeResolutionInstant,
+            );
+          }
         }
         break;
       }
@@ -321,28 +396,58 @@ export function projectAttempts(events: ProvenanceEvent[]): AttemptProjection[] 
 
   for (const row of byAttempt.values()) {
     for (const op of row.runOperations) {
-      if (op.resolvedByReconciliation) {
+      if (op.permanentlyUnresolvable) {
+        op.unresolved = true;
+        op.activityEnd = null;
+        continue;
+      }
+      if (op.resolvedByReconciliation && op.completed) {
         op.unresolved = false;
         continue;
       }
+      if (op.resolvedByReconciliation && op.hasRunBound && !op.completed) {
+        op.unresolved = true;
+        op.activityEnd = null;
+        continue;
+      }
+      if (op.resolvedByReconciliation && !op.hasRunBound) {
+        op.unresolved = false;
+        continue;
+      }
+
       const missingCall = op.hasRunIntent && !op.hasRunCallStarted;
-      const missingAck = op.hasRunCallStarted && !op.hasRunAck;
-      const missingBind = op.hasRunAck && !op.hasRunBound;
+      const missingBind = op.hasRunCallStarted && !op.hasRunBound;
       const incomplete = op.hasRunBound && !op.completed;
-      op.unresolved = missingCall || missingAck || missingBind || incomplete ||
-        (op.hasRunIntent && !op.completed && !op.resolvedByReconciliation);
+      op.unresolved =
+        missingCall ||
+        missingBind ||
+        incomplete ||
+        (op.hasRunIntent && !op.completed);
       if (op.unresolved) {
         op.activityEnd = null;
       }
     }
 
+    if (row.permanentlyUnresolvable) {
+      row.unresolved = true;
+      row.activityEnd = null;
+      continue;
+    }
+
     if (row.resolvedByReconciliation) {
-      row.unresolved = false;
+      const unresolvedRunOp = row.runOperations.some((r) => r.unresolved);
+      row.unresolved = unresolvedRunOp;
+      if (!row.unresolved && row.activityEnd === null && row.runBindings.length === 0) {
+        // launch-level reconciliation closed without run activity.
+        row.unresolved = false;
+      }
       continue;
     }
 
     const missingAck = row.hasCallStarted && !row.hasAgentAck;
-    const missingBind = row.hasAgentAck && row.runBindings.length === 0 &&
+    const missingBind =
+      row.hasAgentAck &&
+      row.runBindings.length === 0 &&
       row.runOperations.length === 0;
     const incompleteRun = row.runBindings.some((r) => !r.completed);
     const missingCall = row.hasIntent && !row.hasCallStarted;
@@ -405,13 +510,12 @@ export function runOperationOverlapsInterval(
 
 export function buildCoverageSnapshot(input: {
   interval: CoverageInterval;
-  events: ProvenanceEvent[];
-  eventPaths: string[];
-  immutableEventSetCommitSha: string;
-  reconciliationTimestamp?: string | null;
-  supportedSourceVersions?: string[];
-  supportedRunnerVersions?: string[];
+  records: ProvenanceEventRecord[];
+  eventSnapshotSource: EventSnapshotSourceIdentity;
+  activationSource?: ActivationSourceIdentityInput | null;
   activationAttestation?: CoverageActivationAttestation | null;
+  reconciliationTimestamp?: string | null;
+  eventCommitDescendedFromActivation?: boolean;
 }): CoverageSnapshot {
   const startMs = parseIso(input.interval.coverageStart);
   const endMs = parseIso(input.interval.coverageEnd);
@@ -422,18 +526,58 @@ export function buildCoverageSnapshot(input: {
     );
   }
 
+  const events = input.records.map((record) => record.event);
+  const eventPaths = input.records.map((record) => record.path);
+
   const integrity = assertEventSnapshotOrThrow({
-    events: input.events,
-    eventPaths: input.eventPaths,
-    immutableEventSetCommitSha: input.immutableEventSetCommitSha,
+    records: input.records,
+    eventSnapshotSource: input.eventSnapshotSource,
     activationAttestation: input.activationAttestation,
+    activationSource: input.activationSource,
   });
 
   const incompleteReasons = new Set<CoverageIncompleteReason>(
     integrity.incompleteReasons,
   );
 
-  const attempts = projectAttempts(input.events);
+  const att = input.activationAttestation ?? null;
+  if (!att) {
+    incompleteReasons.add("coverage_activation_attestation_missing");
+  } else {
+    for (const reason of validateActivationAttestationCompleteness(
+      att,
+      input.interval,
+    )) {
+      incompleteReasons.add(reason);
+    }
+
+    if (input.activationSource) {
+      const pinned = att.activationSource;
+      const provided = input.activationSource;
+      if (
+        provided.stateRepository !== pinned.stateRepository ||
+        provided.stateBranch !== pinned.stateBranch ||
+        provided.activationRecordPath !== pinned.activationRecordPath ||
+        provided.activationCommitSha !== pinned.activationCommitSha ||
+        provided.attestationDigest !== pinned.attestationDigest
+      ) {
+        incompleteReasons.add("coverage_activation_source_mismatch");
+      }
+    }
+
+    if (
+      att.stateRepository !== input.eventSnapshotSource.stateRepository ||
+      att.stateBranch !== input.eventSnapshotSource.stateBranch
+    ) {
+      incompleteReasons.add("coverage_event_snapshot_source_mismatch");
+    }
+  }
+
+  if (input.eventCommitDescendedFromActivation === false) {
+    incompleteReasons.add("coverage_activation_event_history_invalid");
+  }
+
+  const attempts = projectAttempts(events);
   const overlapping = attempts.filter((a) =>
     attemptOverlapsInterval(a, input.interval),
   );
@@ -445,41 +589,41 @@ export function buildCoverageSnapshot(input: {
   );
 
   const unresolvedIntentCount = overlapping.filter(
-    (a) => a.hasIntent && !a.hasCallStarted && !a.resolvedByReconciliation,
+    (a) => a.hasIntent && !a.hasCallStarted && !a.resolvedByReconciliation && !a.permanentlyUnresolvable,
   ).length;
   const providerCallWithoutAckCount = overlapping.filter(
-    (a) => a.hasCallStarted && !a.hasAgentAck && !a.resolvedByReconciliation,
+    (a) => a.hasCallStarted && !a.hasAgentAck && !a.resolvedByReconciliation && !a.permanentlyUnresolvable,
   ).length;
   const ackWithoutRunBindCount = overlapping.filter(
     (a) =>
       a.hasAgentAck &&
       a.runBindings.length === 0 &&
       a.runOperations.length === 0 &&
-      !a.resolvedByReconciliation,
+      !a.resolvedByReconciliation &&
+      !a.permanentlyUnresolvable,
   ).length;
   const incompleteExecutionCount = overlapping.filter((a) =>
     a.runBindings.some((r) => !r.completed),
   ).length;
 
   const runIntentWithoutCallStartCount = overlappingRunOps.filter(
-    (op) => op.hasRunIntent && !op.hasRunCallStarted && !op.resolvedByReconciliation,
+    (op) => op.hasRunIntent && !op.hasRunCallStarted && !op.resolvedByReconciliation && !op.permanentlyUnresolvable,
   ).length;
   const runCallWithoutAcknowledgmentCount = overlappingRunOps.filter(
-    (op) => op.hasRunCallStarted && !op.hasRunAck && !op.resolvedByReconciliation,
-  ).length;
-  const runAcknowledgmentWithoutBindingCount = overlappingRunOps.filter(
-    (op) => op.hasRunAck && !op.hasRunBound && !op.resolvedByReconciliation,
+    (op) => op.hasRunCallStarted && !op.hasRunBound && !op.resolvedByReconciliation && !op.permanentlyUnresolvable,
   ).length;
   const runWithoutTerminalCompletionCount = overlappingRunOps.filter(
-    (op) => op.hasRunBound && !op.completed && !op.resolvedByReconciliation,
+    (op) => op.hasRunBound && !op.completed && !op.resolvedByReconciliation && !op.permanentlyUnresolvable,
   ).length;
 
-  const stillOpenOverlaps = overlapping.some(
-    (a) =>
-      a.unresolved ||
-      a.runOperations.some((r) => r.unresolved) ||
-      a.runBindings.some((r) => r.endExclusive === null),
-  );
+  const stillOpenOverlaps =
+    overlapping.some(
+      (a) =>
+        a.unresolved ||
+        a.permanentlyUnresolvable ||
+        a.runOperations.some((r) => r.unresolved || r.permanentlyUnresolvable) ||
+        a.runBindings.some((r) => r.endExclusive === null),
+    );
 
   const sourceVersions = [
     ...new Set(
@@ -496,16 +640,8 @@ export function buildCoverageSnapshot(input: {
     ),
   ].sort();
 
-  const att = input.activationAttestation ?? null;
-  // Never default observed versions to supported.
-  const supportedSource = new Set(
-    att?.sourceShaAllowlist ?? input.supportedSourceVersions ?? [],
-  );
-  const supportedRunner = new Set(
-    att?.runnerSnapshotVersionAllowlist ??
-      input.supportedRunnerVersions ??
-      [],
-  );
+  const supportedSource = new Set(att?.sourceShaAllowlist ?? []);
+  const supportedRunner = new Set(att?.runnerSnapshotVersionAllowlist ?? []);
   const mixedUnsupportedSourceVersions = sourceVersions.filter(
     (v) => supportedSource.size > 0 && !supportedSource.has(v),
   );
@@ -534,62 +670,11 @@ export function buildCoverageSnapshot(input: {
     }
   }
 
-  if (!att) {
-    incompleteReasons.add("coverage_activation_attestation_missing");
-  } else {
-    if (
-      att.interval.coverageStart !== input.interval.coverageStart ||
-      att.interval.coverageEnd !== input.interval.coverageEnd
-    ) {
-      incompleteReasons.add("coverage_attestation_interval_mismatch");
-    }
-    if (att.requiredWriterMode !== "required") {
-      incompleteReasons.add("coverage_attestation_mode_not_required");
-    }
-    const expectedSurfaces = new Set(att.expectedProductionLaunchSurfaces);
-    for (const surface of expectedSurfaces) {
-      const install = att.surfaceInstallAttestations.find(
-        (s) => s.surface === surface,
-      );
-      if (
-        !install ||
-        !intervalsOverlap(
-          install.installedFrom,
-          install.installedUntil,
-          input.interval.coverageStart,
-          input.interval.coverageEnd,
-        ) ||
-        (install.installedUntil !== null &&
-          parseIso(install.installedUntil) <
-            parseIso(input.interval.coverageEnd))
-      ) {
-        // Require install covering the full closed interval.
-        const coversFull =
-          install &&
-          parseIso(install.installedFrom) <=
-            parseIso(input.interval.coverageStart) &&
-          (install.installedUntil === null ||
-            parseIso(install.installedUntil) >=
-              parseIso(input.interval.coverageEnd));
-        if (!coversFull) {
-          incompleteReasons.add(
-            "coverage_launch_surface_installation_incomplete",
-          );
-        }
-      }
-    }
-    if (mixedUnsupportedSourceVersions.length > 0) {
-      incompleteReasons.add("coverage_source_version_unsupported");
-    }
-    if (mixedUnsupportedRunnerVersions.length > 0) {
-      incompleteReasons.add("coverage_runner_version_unsupported");
-    }
-    if (supportedSource.size === 0 && sourceVersions.length > 0) {
-      incompleteReasons.add("coverage_source_version_unsupported");
-    }
-    if (supportedRunner.size === 0 && runnerVersions.length > 0) {
-      incompleteReasons.add("coverage_runner_version_unsupported");
-    }
+  if (mixedUnsupportedSourceVersions.length > 0) {
+    incompleteReasons.add("coverage_source_version_unsupported");
+  }
+  if (mixedUnsupportedRunnerVersions.length > 0) {
+    incompleteReasons.add("coverage_runner_version_unsupported");
   }
 
   if (unresolvedIntentCount > 0 || providerCallWithoutAckCount > 0) {
@@ -598,7 +683,6 @@ export function buildCoverageSnapshot(input: {
   if (
     runIntentWithoutCallStartCount > 0 ||
     runCallWithoutAcknowledgmentCount > 0 ||
-    runAcknowledgmentWithoutBindingCount > 0 ||
     runWithoutTerminalCompletionCount > 0 ||
     incompleteExecutionCount > 0 ||
     stillOpenOverlaps
@@ -613,12 +697,9 @@ export function buildCoverageSnapshot(input: {
   const status: CoverageStatus =
     reasons.length === 0 && att ? "complete" : "incomplete";
 
-  // Empty event set without attestation is never complete.
-  if (!att) {
-    // already incomplete
-  }
+  const eventPathSet = [...eventPaths].sort();
+  const activationSourcePinned = att?.activationSource ?? input.activationSource ?? null;
 
-  const eventPathSet = [...input.eventPaths].sort();
   const partial: Omit<CoverageSnapshot, "coverageDigest"> = {
     kind: COVERAGE_SCHEMA_KIND,
     version: "1",
@@ -631,10 +712,14 @@ export function buildCoverageSnapshot(input: {
     launchSurfacesSchemaKind: LAUNCH_SURFACES_SCHEMA_KIND,
     launchSurfacesManifestVersion: "1",
     launchSurfacesManifestDigest: launchSurfacesManifestDigest(),
+    sendSurfacesSchemaKind: SEND_SURFACES_SCHEMA_KIND,
+    sendSurfacesManifestVersion: "1",
+    sendSurfacesManifestDigest: sendSurfacesManifestDigest(),
     activationAttestationDigest: att ? activationAttestationDigest(att) : null,
+    activationSource: activationSourcePinned,
+    eventSnapshotSource: input.eventSnapshotSource,
     sourceRepositoryVersions: sourceVersions,
     runnerSnapshotVersions: runnerVersions,
-    immutableEventSetCommitSha: input.immutableEventSetCommitSha,
     eventPathSet,
     eventSetDigest: integrity.recomputedEventSetDigest,
     launchAttemptCount: overlapping.length,
@@ -650,7 +735,6 @@ export function buildCoverageSnapshot(input: {
     incompleteExecutionCount,
     runIntentWithoutCallStartCount,
     runCallWithoutAcknowledgmentCount,
-    runAcknowledgmentWithoutBindingCount,
     runWithoutTerminalCompletionCount,
     writerDeploymentGaps: [...writerDeploymentGaps].sort(),
     mixedUnsupportedRunnerVersions,
@@ -664,6 +748,37 @@ export function buildCoverageSnapshot(input: {
     .digest("hex");
 
   return { ...partial, coverageDigest };
+}
+
+/** Migration helper for callers still using parallel arrays. */
+export function buildCoverageSnapshotFromLegacy(input: {
+  interval: CoverageInterval;
+  events: ProvenanceEvent[];
+  eventPaths: string[];
+  immutableEventSetCommitSha: string;
+  stateRepository?: string;
+  stateBranch?: string;
+  reconciliationTimestamp?: string | null;
+  activationAttestation?: CoverageActivationAttestation | null;
+  activationSource?: ActivationSourceIdentityInput | null;
+  eventCommitDescendedFromActivation?: boolean;
+}): CoverageSnapshot {
+  return buildCoverageSnapshot({
+    interval: input.interval,
+    records: eventRecordsFromParallelArrays({
+      events: input.events,
+      eventPaths: input.eventPaths,
+    }),
+    eventSnapshotSource: {
+      stateRepository: input.stateRepository ?? "",
+      stateBranch: input.stateBranch ?? "",
+      immutableCommitSha: input.immutableEventSetCommitSha,
+    },
+    activationAttestation: input.activationAttestation,
+    activationSource: input.activationSource,
+    reconciliationTimestamp: input.reconciliationTimestamp,
+    eventCommitDescendedFromActivation: input.eventCommitDescendedFromActivation,
+  });
 }
 
 export interface CoverageEpochRecord {

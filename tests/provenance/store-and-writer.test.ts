@@ -9,7 +9,7 @@ import { ProvenanceWriter } from "../../src/provenance/writer.js";
 import { parseProvenanceKey } from "../../src/provenance/encryption.js";
 import { CursorProvenanceError } from "../../src/provenance/errors.js";
 import {
-  buildCoverageSnapshot,
+  buildCoverageSnapshotFromLegacy,
   projectAttempts,
 } from "../../src/provenance/coverage.js";
 import { provenanceEventRemotePath } from "../../src/provenance/paths.js";
@@ -177,12 +177,12 @@ describe("provenance store and writer", () => {
     await writer.writeAgentAcknowledged(ctx, "bc-secret-agent");
     await writer.writeProviderRunIntent(ctx, {
       providerRunOperationId: "d".repeat(64),
-      sendPurpose: "default",
+      sendSurface: "default",
       sendOrdinal: 1,
     });
     await writer.writeProviderRunCallStarted(ctx, {
       providerRunOperationId: "d".repeat(64),
-      sendPurpose: "default",
+      sendSurface: "default",
       sendOrdinal: 1,
     });
     await writer.writeRunBound(ctx, {
@@ -235,7 +235,7 @@ describe("provenance store and writer", () => {
     const events = store.listEvents();
     const attempts = projectAttempts(events);
     expect(attempts[0]?.unresolved).toBe(true);
-    const snap = buildCoverageSnapshot({
+    const snap = buildCoverageSnapshotFromLegacy({
       interval: {
         coverageStart: "2026-07-01T00:00:00.000Z",
         coverageEnd: "2026-08-01T00:00:00.000Z",
@@ -251,7 +251,7 @@ describe("provenance store and writer", () => {
 
   it("rejects open-ended coverage intervals", () => {
     expect(() =>
-      buildCoverageSnapshot({
+      buildCoverageSnapshotFromLegacy({
         interval: {
           coverageStart: "2026-07-01T00:00:00.000Z",
           coverageEnd: "2026-07-01T00:00:00.000Z",

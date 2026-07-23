@@ -91,22 +91,28 @@ export const PRODUCTION_SEND_SURFACES = [
 
 export type ProductionSendSurface = (typeof PRODUCTION_SEND_SURFACES)[number];
 
-export function getSendSurfacesManifest(): {
-  kind: "p-dev.cursor-cloud-agent-send-surfaces.v1";
+export const SEND_SURFACES_SCHEMA_KIND =
+  "p-dev.cursor-cloud-agent-send-surfaces.v1" as const;
+
+export interface SendSurfacesManifest {
+  kind: typeof SEND_SURFACES_SCHEMA_KIND;
   version: "1";
   surfaces: readonly ProductionSendSurface[];
   writerVersion: typeof PROVENANCE_WRITER_VERSION;
-} {
+}
+
+export function getSendSurfacesManifest(): SendSurfacesManifest {
   return {
-    kind: "p-dev.cursor-cloud-agent-send-surfaces.v1",
+    kind: SEND_SURFACES_SCHEMA_KIND,
     version: "1",
     surfaces: PRODUCTION_SEND_SURFACES,
     writerVersion: PROVENANCE_WRITER_VERSION,
   };
 }
 
-export function sendSurfacesManifestDigest(): string {
-  const manifest = getSendSurfacesManifest();
+export function sendSurfacesManifestDigest(
+  manifest: SendSurfacesManifest = getSendSurfacesManifest(),
+): string {
   const canonical = JSON.stringify({
     kind: manifest.kind,
     version: manifest.version,
@@ -114,4 +120,14 @@ export function sendSurfacesManifestDigest(): string {
     writerVersion: manifest.writerVersion,
   });
   return createHash("sha256").update(canonical).digest("hex");
+}
+
+export function assertKnownSendSurface(
+  surface: string,
+): asserts surface is ProductionSendSurface {
+  if (!(PRODUCTION_SEND_SURFACES as readonly string[]).includes(surface)) {
+    throw new Error(
+      `Unknown production send surface: ${surface.slice(0, 64)}`,
+    );
+  }
 }

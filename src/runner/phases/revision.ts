@@ -934,6 +934,8 @@ export async function executeRevisionPhase(
       observed = await sendAndObserve(agent, prompt, runDirectory, events, {
         phase: "revision",
         launchContext: revisionLaunchContext,
+        sendSurface: "revision.send",
+        sendOrdinal: 1,
         targetRepo: markerTargetRepo,
         expectedBranch: branch,
         expectedPrUrl: prUrl,

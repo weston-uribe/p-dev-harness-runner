@@ -631,6 +631,8 @@ async function attemptAgentRepair(
         {
           phase: "integration_repair",
           launchContext: repairLaunchContext,
+          sendSurface: "integration_repair.send",
+          sendOrdinal: 1,
           targetRepo: options.markerTargetRepo,
           expectedBranch: inspectionBeforeAgent.branch,
           expectedPrUrl: inspectionBeforeAgent.url,

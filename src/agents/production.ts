@@ -19,6 +19,7 @@ import type {
 } from "./types.js";
 import type { EventLogger } from "../artifacts/events.js";
 import type { LinearHarnessLaunchContext } from "../provenance/launch-context.js";
+import type { ProductionSendSurface } from "../provenance/launch-surfaces.js";
 
 export {
   buildLinearHarnessLaunchContext,
@@ -29,10 +30,12 @@ export {
 
 export type ProductionSendAndObserveOptions = SendAndObserveOptions & {
   launchContext: LinearHarnessLaunchContext;
-  /** Durable per-send identity operands (restart-stable). */
+  /** Canonical production send surface — required, no default. */
+  sendSurface: ProductionSendSurface;
+  /** Positive integer ordinal — required, no default. */
+  sendOrdinal: number;
+  /** Optional previously persisted ID; must match canonical allocation. */
   providerRunOperationId?: string;
-  sendPurpose?: string;
-  sendOrdinal?: number;
 };
 
 export async function createPlanningAgent(
@@ -81,7 +84,7 @@ export async function sendAndObserve(
   const {
     launchContext,
     providerRunOperationId,
-    sendPurpose,
+    sendSurface,
     sendOrdinal,
     ...rest
   } = options;
@@ -92,7 +95,7 @@ export async function sendAndObserve(
     events,
     launchContext,
     providerRunOperationId,
-    sendPurpose,
+    sendSurface,
     sendOrdinal,
     options: rest,
   });

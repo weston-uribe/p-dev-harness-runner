@@ -1023,6 +1023,8 @@ export async function executeImplementationPhase(
       observed = await sendAndObserve(agent, prompt, runDirectory, events, {
         phase: "implementation",
         launchContext: implementationLaunchContext,
+        sendSurface: "implementation.send",
+        sendOrdinal: 1,
         targetRepo: resolved.targetRepo,
         abortSignal: abortController.signal,
         apiKey: cursorApiKey,

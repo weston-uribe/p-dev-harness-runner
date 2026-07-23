@@ -11,7 +11,7 @@ import { parseProvenanceKey } from "../../src/provenance/encryption.js";
 import { computeLaunchAttemptId } from "../../src/provenance/launch-attempt-id.js";
 import type { AgentHandle, AgentProvider, ObservedAgentRun } from "../../src/agents/types.js";
 import type { EventLogger } from "../../src/artifacts/events.js";
-import { buildCoverageSnapshot, projectAttempts } from "../../src/provenance/coverage.js";
+import { buildCoverageSnapshotFromLegacy, projectAttempts } from "../../src/provenance/coverage.js";
 import { provenanceEventRemotePath } from "../../src/provenance/paths.js";
 
 const KEY = parseProvenanceKey("a".repeat(64));
@@ -140,7 +140,7 @@ describe("pre-send run operation provenance", () => {
       runDirectory: "/tmp",
       events,
       launchContext,
-      sendPurpose: "planning.initial",
+      sendSurface: "planning.send",
       sendOrdinal: 1,
     });
     expect(order).toEqual(["run_intent", "run_call_start", "send"]);
@@ -152,19 +152,19 @@ describe("pre-send run operation provenance", () => {
       runDirectory: "/tmp",
       events,
       launchContext,
-      sendPurpose: "planning.quality_repair",
+      sendSurface: "planning.send.quality_repair",
       sendOrdinal: 2,
     });
 
     const launchAttemptId = computeLaunchAttemptId(launchContext);
     const op1 = allocateProviderRunOperationId({
       launchAttemptId,
-      sendPurpose: "planning.initial",
+      sendSurface: "planning.send",
       sendOrdinal: 1,
     });
     const op2 = allocateProviderRunOperationId({
       launchAttemptId,
-      sendPurpose: "planning.quality_repair",
+      sendSurface: "planning.send.quality_repair",
       sendOrdinal: 2,
     });
     expect(op1).not.toBe(op2);
@@ -182,7 +182,7 @@ describe("pre-send run operation provenance", () => {
       launchContext,
       {
         providerRunOperationId: op2,
-        sendPurpose: "planning.quality_repair",
+        sendSurface: "planning.send.quality_repair",
         sendOrdinal: 2,
       },
     );
@@ -284,7 +284,7 @@ describe("pre-send run operation provenance", () => {
         runDirectory: "/tmp",
         events: { log: vi.fn() } as unknown as EventLogger,
         launchContext,
-        sendPurpose: "planning.initial",
+        sendSurface: "planning.send",
         sendOrdinal: 1,
       }),
     ).rejects.toThrow(/crash/);
@@ -308,7 +308,7 @@ describe("pre-send run operation provenance", () => {
                 : undefined,
       }),
     );
-    const snap = buildCoverageSnapshot({
+    const snap = buildCoverageSnapshotFromLegacy({
       interval: {
         coverageStart: "2026-07-01T00:00:00.000Z",
         coverageEnd: "2026-08-01T00:00:00.000Z",

@@ -856,6 +856,8 @@ export async function executeCodeReviewPhase(
             apiKey: cursorApiKey,
             phase: "code_review",
             launchContext: codeReviewLaunchContext,
+            sendSurface: "code_review.send",
+            sendOrdinal: 1,
             telemetryCorrelation,
             onTelemetryEvent: onTelemetry,
             targetRepo: resolved.targetRepo,

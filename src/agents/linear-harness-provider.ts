@@ -84,10 +84,12 @@ export interface LinearHarnessSendParams {
   events: EventLogger;
   launchContext: LinearHarnessLaunchContext;
   options?: SendAndObserveOptions;
-  /** Durable per-send identity; resolved/allocated before agent.send. */
+  /** Canonical production send surface — required, no default. */
+  sendSurface: import("../provenance/launch-surfaces.js").ProductionSendSurface;
+  /** Positive integer ordinal — required, no default. */
+  sendOrdinal: number;
+  /** Optional previously persisted ID; must match canonical allocation. */
   providerRunOperationId?: string;
-  sendPurpose?: string;
-  sendOrdinal?: number;
 }
 
 export interface LinearHarnessAgentProviderOptions {
@@ -398,13 +400,18 @@ export class LinearHarnessAgentProvider {
     await this.awaitBootstrapGate();
 
     const launchAttemptId = computeLaunchAttemptId(launchContext);
-    const sendPurpose = params.sendPurpose?.trim() || "default";
-    const sendOrdinal = params.sendOrdinal ?? 1;
+    const { sendSurface, sendOrdinal } = params;
+    if (!Number.isInteger(sendOrdinal) || sendOrdinal < 1) {
+      throw new CursorProvenanceError(
+        "cursor_provenance_invalid_context",
+        "sendOrdinal must be a positive integer.",
+      );
+    }
     const providerRunOperationId = resolveProviderRunOperationId({
       existingRunOperationId: params.providerRunOperationId,
       allocate: {
         launchAttemptId,
-        sendPurpose,
+        sendSurface,
         sendOrdinal,
       },
     });
@@ -421,7 +428,7 @@ export class LinearHarnessAgentProvider {
 
     const runIntent = await this.writer.writeProviderRunIntent(launchContext, {
       providerRunOperationId,
-      sendPurpose,
+      sendSurface,
       sendOrdinal,
     });
     assertWriteOk(runIntent, "provider_run_intent");
@@ -429,7 +436,7 @@ export class LinearHarnessAgentProvider {
       launchContext,
       {
         providerRunOperationId,
-        sendPurpose,
+        sendSurface,
         sendOrdinal,
       },
     );
@@ -450,6 +457,8 @@ export class LinearHarnessAgentProvider {
           agentId: details.agentId,
           runId: details.runId,
           providerRunOperationId,
+          sendSurface,
+          sendOrdinal,
           runStartIso,
           startEvidenceSource: startEvidence,
         });
@@ -471,6 +480,8 @@ export class LinearHarnessAgentProvider {
             agentId: details.agentId,
             runId: details.runId,
             providerRunOperationId,
+            sendSurface,
+            sendOrdinal,
             terminalStatus: details.terminalStatus,
             windowStartIso: windowStart,
             windowEndIso: details.providerTerminalAt ?? details.terminalAt,

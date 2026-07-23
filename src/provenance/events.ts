@@ -4,6 +4,10 @@ import { envelopeMetadataForDigest } from "./encryption.js";
 import type { LinearHarnessLaunchContext } from "./launch-context.js";
 import { canonicalLaunchContextDigest } from "./launch-context.js";
 import { PROVENANCE_WRITER_VERSION } from "./launch-surfaces.js";
+import type {
+  ReconciliationEvidenceSource,
+  ReconciliationResolutionKind,
+} from "./reconciliation.js";
 
 export const PROVENANCE_EVENT_SCHEMA_KIND =
   "p-dev.cursor-cloud-agent-provenance.v1" as const;
@@ -70,20 +74,22 @@ export interface ProviderAgentAcknowledgedEvent extends ProvenanceEventBase {
 export interface ProviderRunIntentEvent extends ProvenanceEventBase {
   eventType: "provider_run_intent";
   providerRunOperationId: string;
-  sendPurpose: string;
+  sendSurface: string;
   sendOrdinal: number;
 }
 
 export interface ProviderRunCallStartedEvent extends ProvenanceEventBase {
   eventType: "provider_run_call_started";
   providerRunOperationId: string;
-  sendPurpose: string;
+  sendSurface: string;
   sendOrdinal: number;
 }
 
 export interface ProviderRunBoundEvent extends ProvenanceEventBase {
   eventType: "provider_run_bound";
   providerRunOperationId: string;
+  sendSurface: string;
+  sendOrdinal: number;
   agentHash: string;
   agentIdEnvelope: EncryptionEnvelope;
   runHash: string;
@@ -102,6 +108,8 @@ export interface ProviderRunBoundEvent extends ProvenanceEventBase {
 export interface ExecutionCompletedEvent extends ProvenanceEventBase {
   eventType: "execution_completed";
   providerRunOperationId: string;
+  sendSurface: string;
+  sendOrdinal: number;
   agentHash: string;
   runHash: string;
   terminalStatus: string;
@@ -124,8 +132,8 @@ export interface ReconciliationResolutionEvent extends ProvenanceEventBase {
   affectedOperationKind: "launch_attempt" | "run_operation";
   /** Authoritative instant that closes possible activity (required to close). */
   authoritativeResolutionInstant: string;
-  resolutionKind: string;
-  evidenceSource: string;
+  resolutionKind: ReconciliationResolutionKind;
+  evidenceSource: ReconciliationEvidenceSource;
   evidenceDigest: string;
   producerSchemaVersion: string;
 }
@@ -366,7 +374,7 @@ export function buildProviderRunIntentEvent(input: {
   launchContext: LinearHarnessLaunchContext;
   recordedAt: string;
   providerRunOperationId: string;
-  sendPurpose: string;
+  sendSurface: string;
   sendOrdinal: number;
 }): ProviderRunIntentEvent {
   const launchContextDigest = canonicalLaunchContextDigest(input.launchContext);
@@ -374,7 +382,7 @@ export function buildProviderRunIntentEvent(input: {
   const eventType = "provider_run_intent" as const;
   const semanticPayload = {
     providerRunOperationId: input.providerRunOperationId,
-    sendPurpose: input.sendPurpose,
+    sendSurface: input.sendSurface,
     sendOrdinal: input.sendOrdinal,
   };
   return {
@@ -403,7 +411,7 @@ export function buildProviderRunIntentEvent(input: {
       semanticPayload,
     }),
     providerRunOperationId: input.providerRunOperationId,
-    sendPurpose: input.sendPurpose,
+    sendSurface: input.sendSurface,
     sendOrdinal: input.sendOrdinal,
   };
 }
@@ -413,7 +421,7 @@ export function buildProviderRunCallStartedEvent(input: {
   launchContext: LinearHarnessLaunchContext;
   recordedAt: string;
   providerRunOperationId: string;
-  sendPurpose: string;
+  sendSurface: string;
   sendOrdinal: number;
 }): ProviderRunCallStartedEvent {
   const launchContextDigest = canonicalLaunchContextDigest(input.launchContext);
@@ -421,7 +429,7 @@ export function buildProviderRunCallStartedEvent(input: {
   const eventType = "provider_run_call_started" as const;
   const semanticPayload = {
     providerRunOperationId: input.providerRunOperationId,
-    sendPurpose: input.sendPurpose,
+    sendSurface: input.sendSurface,
     sendOrdinal: input.sendOrdinal,
   };
   return {
@@ -450,7 +458,7 @@ export function buildProviderRunCallStartedEvent(input: {
       semanticPayload,
     }),
     providerRunOperationId: input.providerRunOperationId,
-    sendPurpose: input.sendPurpose,
+    sendSurface: input.sendSurface,
     sendOrdinal: input.sendOrdinal,
   };
 }
@@ -463,8 +471,8 @@ export function buildReconciliationResolutionEvent(input: {
   affectedOperationId: string;
   affectedOperationKind: "launch_attempt" | "run_operation";
   authoritativeResolutionInstant: string;
-  resolutionKind: string;
-  evidenceSource: string;
+  resolutionKind: ReconciliationResolutionKind;
+  evidenceSource: ReconciliationEvidenceSource;
   evidenceDigest: string;
   producerSchemaVersion?: string;
 }): ReconciliationResolutionEvent {

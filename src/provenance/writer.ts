@@ -28,6 +28,10 @@ import {
 } from "./events.js";
 import { CursorProvenanceError, type CursorProvenanceErrorCode } from "./errors.js";
 import type { LinearHarnessLaunchContext } from "./launch-context.js";
+import type {
+  ReconciliationEvidenceSource,
+  ReconciliationResolutionKind,
+} from "./reconciliation.js";
 import { canonicalLaunchContextDigest } from "./launch-context.js";
 import { computeLaunchAttemptId, launchAttemptIdPrefix } from "./launch-attempt-id.js";
 import {
@@ -337,7 +341,7 @@ export class ProvenanceWriter {
     ctx: LinearHarnessLaunchContext,
     input: {
       providerRunOperationId: string;
-      sendPurpose: string;
+      sendSurface: string;
       sendOrdinal: number;
     },
   ): Promise<WriteOutcome> {
@@ -358,7 +362,7 @@ export class ProvenanceWriter {
       launchContext: ctx,
       recordedAt: nowIso(this.now),
       providerRunOperationId: input.providerRunOperationId,
-      sendPurpose: input.sendPurpose,
+      sendSurface: input.sendSurface,
       sendOrdinal: input.sendOrdinal,
     });
     return this.persist(
@@ -374,7 +378,7 @@ export class ProvenanceWriter {
     ctx: LinearHarnessLaunchContext,
     input: {
       providerRunOperationId: string;
-      sendPurpose: string;
+      sendSurface: string;
       sendOrdinal: number;
     },
   ): Promise<WriteOutcome> {
@@ -388,7 +392,7 @@ export class ProvenanceWriter {
       launchContext: ctx,
       recordedAt: nowIso(this.now),
       providerRunOperationId: input.providerRunOperationId,
-      sendPurpose: input.sendPurpose,
+      sendSurface: input.sendSurface,
       sendOrdinal: input.sendOrdinal,
     });
     return this.persist(
@@ -406,6 +410,8 @@ export class ProvenanceWriter {
       agentId: string;
       runId: string;
       providerRunOperationId: string;
+      sendSurface: string;
+      sendOrdinal: number;
       runStartIso: string;
       startEvidenceSource: ExecutionWindow["startEvidenceSource"];
       providerSdkApiVersion?: string | null;
@@ -495,9 +501,13 @@ export class ProvenanceWriter {
             generation: ctx.generation,
           }),
           providerRunOperationId: input.providerRunOperationId,
+          sendSurface: input.sendSurface,
+          sendOrdinal: input.sendOrdinal,
         },
       }),
       providerRunOperationId: input.providerRunOperationId,
+      sendSurface: input.sendSurface,
+      sendOrdinal: input.sendOrdinal,
       agentHash,
       agentIdEnvelope,
       runHash,
@@ -527,6 +537,8 @@ export class ProvenanceWriter {
       agentId: string;
       runId: string;
       providerRunOperationId: string;
+      sendSurface: string;
+      sendOrdinal: number;
       terminalStatus: string;
       windowStartIso: string;
       windowEndIso: string;
@@ -591,6 +603,8 @@ export class ProvenanceWriter {
         launchContextDigest,
         semanticPayload: {
           providerRunOperationId: input.providerRunOperationId,
+          sendSurface: input.sendSurface,
+          sendOrdinal: input.sendOrdinal,
           agentHash,
           runHash,
           terminalStatus: input.terminalStatus,
@@ -600,6 +614,8 @@ export class ProvenanceWriter {
         },
       }),
       providerRunOperationId: input.providerRunOperationId,
+      sendSurface: input.sendSurface,
+      sendOrdinal: input.sendOrdinal,
       agentHash,
       runHash,
       terminalStatus: input.terminalStatus,
@@ -689,8 +705,8 @@ export class ProvenanceWriter {
       affectedOperationId: string;
       affectedOperationKind: "launch_attempt" | "run_operation";
       authoritativeResolutionInstant: string;
-      resolutionKind: string;
-      evidenceSource: string;
+      resolutionKind: ReconciliationResolutionKind;
+      evidenceSource: ReconciliationEvidenceSource;
       evidenceDigest: string;
       producerSchemaVersion?: string;
     },
