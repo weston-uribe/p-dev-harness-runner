@@ -109,6 +109,32 @@ describe.skipIf(!isCleanEnoughForPackagePack())("p-dev packed artifact", () => {
     expect(listing).toContain(
       "package/workspace-snapshot/files/src/cli/commands/evaluation-canary-cursor-usage-import.ts",
     );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/provenance/canary-issue.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/provenance/canary-observe.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/provenance/key-recoverability.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/src/provenance/committed-envelope-validation.ts",
+    );
+    expect(listing).toContain(
+      "package/workspace-snapshot/files/.github/workflows/harness-auto-runner.yml",
+    );
+    const workflowRaw = execFileSync(
+      "tar",
+      [
+        "-xOf",
+        tarballPath,
+        "package/workspace-snapshot/files/.github/workflows/harness-auto-runner.yml",
+      ],
+      { encoding: "utf8" },
+    );
+    expect(workflowRaw).toContain("harness:doctor -- --profile agent");
+    expect(workflowRaw).toContain("harness:doctor -- --profile merge");
     expect(listing).not.toContain("operations-canvas.tsx");
     expect(listing).not.toMatch(/@xyflow\/react/);
     expect(listing).not.toMatch(/\.env\.local/);

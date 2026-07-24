@@ -1,11 +1,11 @@
-# Provenance canary-readiness rollout pin (draft — do not enable)
+# Provenance operator-package rollout pin (draft — do not enable)
 
-- Source: `weston-uribe/agentic-product-development-harness` @ `d96f13348b4d67b7d0cc1d47870005662f905d76`
-- Snapshot content ID: `718623bc5573b6843c8c9dd02c8ec8a6d36957f65ebe456cbab89cc616afeaae`
-- Snapshot SHA-256: `9744ea19fc912d42b3e6d1b93e0b2626d7ad8bcf937c761e272a9f937fbdac2b`
-- Snapshot git tree: `aaf2d3cc2c5a4dcbbded83c2d597579ff28abb85`
-- Snapshot commit: `26905cb73113441b726615b030508b0a62353482`
-- Marker commit: `265eb2eb6d7952a64a6edb4fbb453ea2a200ba99`
+- Source: `weston-uribe/agentic-product-development-harness` @ `f8b2d6bd4c0f98e5cb49a9fcf76211f5a8c1d525`
+- Snapshot content ID: `fb0b1209408e3cc488bbc36be6f4ca00e2d188e22e080f026de8a7d8c4f344fc`
+- Snapshot SHA-256: `7bd590734a7ae1e861da2f9af040e59fdd9b02dddbe53280bffb72e66fc9438e`
+- Snapshot git tree: `676738296fc2a2614df411f793a047b201c52a3a`
+- Snapshot commit: `1d55a1c207367bba125a8d4940f36fee0acb4fc2`
+- Marker commit: `06236df072dd644a69e3dc792e1b8c80b0901dff`
 - Public identity contract version: `p-dev.public-provider-identity.v1`
 - Execution policy version: `p-dev.execution-policy.v1`
 - Writer: `cursor-provenance-writer-v1`
@@ -14,7 +14,9 @@
 
 Default provenance mode: **disabled**
 Shadow: **not configured**
-Live canary: **not executed**
+Live canary: **TT-15 and TT-16 contained failed attempts (invalid contract / Doctor full+Vercel); mode remains disabled pending this rematerialized candidate**
 
-Do **not** enable shadow or required.
-Do **not** merge or deploy via this PR.
+Production capture remains on runner `main` (not this PR) until controlled merge.
+
+Do **not** enable shadow or required until post-merge live rollout.
+Do **not** merge or deploy via auto-merge; use controlled exact-base merge only.

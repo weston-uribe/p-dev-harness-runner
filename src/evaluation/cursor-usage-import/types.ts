@@ -5,7 +5,7 @@ import type { TraceScoreFetchEvidence } from "../langfuse-inspect/client.js";
 import type { ExportWindow } from "./canonical.js";
 
 export const CURSOR_USAGE_CSV_SCHEMA_VERSION = 1 as const;
-export const CURSOR_USAGE_IMPORTER_VERSION = "13.0.1" as const;
+export const CURSOR_USAGE_IMPORTER_VERSION = "14.0.0" as const;
 
 /** Reserved durable producer field on agent observation metadata (contract B). */
 export const MULTI_MODEL_EXECUTION_PROVEN_FIELD =

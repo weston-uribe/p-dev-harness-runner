@@ -43,7 +43,12 @@ import {
 } from "../../setup/vercel-production-credential.js";
 import { EXIT_CONFIG, EXIT_SUCCESS } from "../exit-codes.js";
 
-export type DoctorProfile = "full" | "merge" | "reconciler" | "production";
+export type DoctorProfile =
+  | "full"
+  | "merge"
+  | "reconciler"
+  | "production"
+  | "agent";
 
 export interface DoctorOptions {
   configPath: string;
@@ -614,6 +619,16 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
         detail: presence.detail,
       });
     }
+  } else if (config && profile === "agent") {
+    checks.push({
+      label: "VERCEL_TOKEN production deployment verification",
+      ok: true,
+      skipped: true,
+      severity: "informational",
+      classification: "not_applicable_agent_profile",
+      detail:
+        "not required for agent-phase Doctor profile (planning, Plan Review, implementation, revision, code-review); production deploy credential is validated by sync-production / production profile",
+    });
   }
 
   // Runner startup / config validation for provenance (not Cursor CSV preflight).

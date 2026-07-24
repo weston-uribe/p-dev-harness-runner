@@ -87,6 +87,7 @@
   ],
   "allowedTargetRepos": [
     "https://github.com/owner/example-target-app",
-    "https://github.com/weston-uribe/agentic-product-development-harness"
+    "https://github.com/weston-uribe/agentic-product-development-harness",
+    "https://github.com/weston-uribe/weston-uribe-portfolio"
   ]
 }

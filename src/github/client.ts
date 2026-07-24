@@ -952,6 +952,29 @@ export class GitHubClient {
     };
   }
 
+  async listCommits(
+    owner: string,
+    repo: string,
+    options: {
+      sha?: string;
+      path?: string;
+      perPage?: number;
+    } = {},
+  ): Promise<Array<{ sha: string }>> {
+    const params = new URLSearchParams();
+    params.set("per_page", String(options.perPage ?? 1));
+    if (options.sha) {
+      params.set("sha", options.sha);
+    }
+    if (options.path) {
+      params.set("path", options.path);
+    }
+    const response = await this.request<Array<{ sha: string }>>(
+      `/repos/${owner}/${repo}/commits?${params.toString()}`,
+    );
+    return response ?? [];
+  }
+
   async listWorkflowRuns(
     owner: string,
     repo: string,

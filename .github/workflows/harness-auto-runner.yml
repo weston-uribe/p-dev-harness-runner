@@ -242,7 +242,7 @@ jobs:
         env:
           P_DEV_CURSOR_PROVENANCE_MODE: ${{ vars.P_DEV_CURSOR_PROVENANCE_MODE }}
           P_DEV_PROVENANCE_KEY_V1: ${{ secrets.P_DEV_PROVENANCE_KEY_V1 }}
-        run: npm run harness:doctor
+        run: npm run harness:doctor -- --profile agent
 
       # Pre-phase Doctor failure must terminalize the claim (not leave it indefinitely claimed).
       - name: Finalize pre-phase doctor failure
