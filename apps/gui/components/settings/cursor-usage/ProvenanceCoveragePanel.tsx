@@ -48,8 +48,12 @@ export function ProvenanceCoveragePanel({ status }: Props) {
   const sealedOk = status.status === "sealed_complete";
   const eligibility =
     status.coverageEligibilityStatus ?? status.status;
+  // Never fall back to sealed-interval end for eligible times when the
+  // importable CSV window is empty (Branch A) or latestEligible is absent.
   const latestEligible =
-    status.latestEligibleCsvUtc ?? status.latestSealedCompleteUtc;
+    status.eligibleCsvRowIntervalEmpty === true
+      ? null
+      : (status.latestEligibleCsvUtc ?? null);
 
   return (
     <section aria-label="Provenance coverage">
