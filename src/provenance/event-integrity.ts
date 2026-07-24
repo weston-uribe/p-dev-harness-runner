@@ -71,7 +71,11 @@ export type CoverageIncompleteReason =
   | "coverage_empty_source_allowlist"
   | "coverage_empty_runner_allowlist"
   | "coverage_attestation_duplicate_install"
-  | "coverage_attestation_conflicting_install";
+  | "coverage_attestation_conflicting_install"
+  | "coverage_start_precedes_activation"
+  | "required_canary_precedes_activation"
+  | "duplicate_required_canary_operation"
+  | "containment_gap_active_ops_ambiguous";
 
 export interface EventSnapshotSourceIdentity {
   stateRepository: string;

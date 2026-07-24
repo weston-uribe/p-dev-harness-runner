@@ -2,6 +2,13 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
+import {
+  InMemoryProvenanceLifecycleStore,
+} from "../../src/provenance/lifecycle-store.js";
+import { activationRecordRemotePath } from "../../src/provenance/paths.js";
+import { buildLiveActivationPayload } from "../../src/provenance/live-activation.js";
+import { buildPersistedActivationRecord } from "../../src/provenance/activation-attestation.js";
+import { persistedActivationRecordDigest } from "../../src/provenance/coverage-lifecycle-schemas.js";
 
 type MockState = { id: string; name: string };
 type MockTeam = { id: string; key: string; name: string };
@@ -365,6 +372,81 @@ describe("provenance canary issue", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.failClosedReason).toBe("issue_not_todo");
+  });
+
+  it("required-mode trigger fails without readiness evidence", async () => {
+    const { canaryTrigger, PROVENANCE_CANARY_TEAM_ID, PROVENANCE_CANARY_PROJECT_ID } =
+      await import("../../src/provenance/canary-issue.js");
+    const { STOP_AFTER_PLANNING_LABEL } = await import("../../src/workflow/execution-policy.js");
+    const { buildProvenanceCanaryIssueDescription, buildProvenanceCanaryIssueTitle } =
+      await import("../../src/provenance/canary-issue.js");
+
+    mock.state.teamById.set(PROVENANCE_CANARY_TEAM_ID, {
+      id: PROVENANCE_CANARY_TEAM_ID,
+      key: "TT",
+      name: "Test Team",
+    });
+    mock.state.projectById.set(PROVENANCE_CANARY_PROJECT_ID, {
+      id: PROVENANCE_CANARY_PROJECT_ID,
+      name: "Test Project",
+    });
+    mock.state.workflowStatesByTeam.set(PROVENANCE_CANARY_TEAM_ID, [
+      { id: "s-todo", name: "Todo" },
+      { id: "s-rfp", name: "Ready for Planning" },
+      { id: "s-canceled", name: "Canceled" },
+    ]);
+    mock.state.labels = [
+      { id: "label-ok", name: STOP_AFTER_PLANNING_LABEL, teamId: PROVENANCE_CANARY_TEAM_ID },
+    ];
+
+    const op = "67cce97f-d7ad-4f94-93d9-a14b922f55b8";
+    const { description } = buildProvenanceCanaryIssueDescription({ operationId: op });
+    const issue: MockIssue = {
+      id: "issue-TT-10",
+      identifier: "TT-10",
+      title: buildProvenanceCanaryIssueTitle({ operationId: op }),
+      description,
+      teamId: PROVENANCE_CANARY_TEAM_ID,
+      projectId: PROVENANCE_CANARY_PROJECT_ID,
+      state: { id: "s-todo", name: "Todo" },
+      labelIds: ["label-ok"],
+    };
+    mock.state.issuesById.set(issue.id, issue);
+    mock.state.issuesByKey.set(issue.identifier, issue);
+
+    const epochId = "epoch-required-1";
+    const lifecycleStore = new InMemoryProvenanceLifecycleStore();
+    const activatedAt = "2026-08-02T12:00:00.000Z";
+    const payload = buildLiveActivationPayload({
+      epochId,
+      activatedAt,
+      interval: {
+        coverageStart: activatedAt,
+        coverageEnd: "2026-08-02T13:00:00.000Z",
+      },
+      captureProducerSourceSha: "a".repeat(40),
+      productionRunnerSha: "runner-1",
+    });
+    const record = buildPersistedActivationRecord(payload);
+    await lifecycleStore.persistImmutableRecord({
+      path: activationRecordRemotePath(epochId),
+      body: `${JSON.stringify(record, null, 2)}\n`,
+      canonicalDigest: persistedActivationRecordDigest(record),
+      commitMessage: "test activation",
+    });
+
+    const result = await canaryTrigger({
+      configPath: "harness.config.json",
+      linearApiKey: "lin_test",
+      issueKey: "TT-10",
+      priorProvenanceEventCount: 0,
+      epochId,
+      lifecycleStore,
+      env: { P_DEV_CURSOR_PROVENANCE_MODE: "required" },
+      now: () => "2026-08-02T11:00:00.000Z",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.failClosedReason).toBe("activation_readiness_missing");
   });
 
   it("duplicate operation marker fails closed", async () => {

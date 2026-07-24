@@ -67,6 +67,61 @@ export function computeHistoryProofEvidenceDigest(input: {
     .digest("hex");
 }
 
+export function parseActivationHistoryProofRecord(
+  bytes: string | object,
+): ActivationHistoryProofRecord {
+  const record = (
+    typeof bytes === "string" ? JSON.parse(bytes) : bytes
+  ) as ActivationHistoryProofRecord;
+  if (record.kind !== ACTIVATION_HISTORY_PROOF_KIND || record.version !== "1") {
+    throw new Error("invalid activation history proof record");
+  }
+
+  const expectedEvidenceDigest = (relationship: "descendant" | "equal") =>
+    computeHistoryProofEvidenceDigest({
+      stateRepository: record.stateRepository,
+      stateBranch: record.stateBranch,
+      activationCommitSha: record.activationCommitSha,
+      eventSnapshotCommitSha: record.eventSnapshotCommitSha,
+      relationship,
+      verifierVersion: ACTIVATION_HISTORY_VERIFIER_VERSION,
+    });
+
+  if (
+    record.claimedRelationship === "descendant" ||
+    record.claimedRelationship === "equal"
+  ) {
+    const expected = expectedEvidenceDigest(record.claimedRelationship);
+    if (record.evidenceDigest && record.evidenceDigest !== expected) {
+      throw new Error("activation history proof evidence digest mismatch");
+    }
+    return record;
+  }
+
+  if (record.claimedRelationship === "unverified") {
+    if (record.evidenceDigest) {
+      const expectedDescendant = expectedEvidenceDigest("descendant");
+      const expectedEqual = expectedEvidenceDigest("equal");
+      if (
+        record.evidenceDigest !== expectedDescendant &&
+        record.evidenceDigest !== expectedEqual
+      ) {
+        throw new Error("activation history proof evidence digest mismatch");
+      }
+    }
+    return record;
+  }
+
+  if (record.claimedRelationship === "invalid") {
+    if (record.evidenceDigest && record.evidenceDigest !== "") {
+      throw new Error("activation history proof evidence digest mismatch");
+    }
+    return record;
+  }
+
+  throw new Error("invalid activation history proof claimedRelationship");
+}
+
 function deriveRelationship(
   graph: CommitGraph,
   activationCommitSha: string,

@@ -256,6 +256,7 @@ function publicAgentHash(cloudAgentId: string): string {
 function provenanceScopeIdentityFields(
   manifest: import("./provenance-scope/contracts.js").ProvenanceScopeManifest | null,
   dispositionDigest: string | null,
+  sealedWindowSelectionDigest: string | null = null,
 ) {
   if (!manifest) return null;
   return {
@@ -282,6 +283,7 @@ function provenanceScopeIdentityFields(
     exactTargetTraceDigest: manifest.exactTargetTraceDigest,
     provenanceScopeManifestDigest: manifest.manifestDigest,
     dispositionManifestDigest: dispositionDigest,
+    sealedWindowSelectionDigest,
   };
 }
 
@@ -451,6 +453,7 @@ function buildAttachmentsFromBundles(params: {
   hasUploadScopedRejection: boolean;
   parserEvidence: ParserRowEvidence[];
   sourceCapabilityExcludedFingerprints: Set<string>;
+  excludedOutsideSealedFingerprints?: Set<string>;
   sourceDigestPrefix: string;
   environment?: string;
   sourceCoverageSafetyMarginMs: number;
@@ -492,9 +495,14 @@ function buildAttachmentsFromBundles(params: {
   const matchedFingerprints = new Set(
     params.bundles.flatMap((b) => b.matchedFingerprints),
   );
+  const outsideSealed =
+    params.excludedOutsideSealedFingerprints ?? new Set<string>();
   for (const seg of params.allSegments) {
     for (const fp of seg.fingerprints) {
       if (params.sourceCapabilityExcludedFingerprints.has(fp)) {
+        continue;
+      }
+      if (outsideSealed.has(fp)) {
         continue;
       }
       if (!matchedFingerprints.has(fp)) {
@@ -1431,6 +1439,9 @@ export async function preflightCsvImport(
   }
 
   const computeFn = params.deps?.computeCostProxies ?? computeCostProxies;
+  const outsideSealedFp = new Set(
+    provenancePipeline.excludedOutsideSealedFingerprints,
+  );
   const built = buildAttachmentsFromBundles({
     namespace,
     bundles,
@@ -1443,6 +1454,7 @@ export async function preflightCsvImport(
     hasUploadScopedRejection,
     parserEvidence: parsed.rowEvidence,
     sourceCapabilityExcludedFingerprints: exclusionFingerprints,
+    excludedOutsideSealedFingerprints: outsideSealedFp,
     sourceDigestPrefix: digestSha256,
     environment: environmentFilter ?? undefined,
     sourceCoverageSafetyMarginMs: margin,
@@ -1465,6 +1477,7 @@ export async function preflightCsvImport(
   const provenanceScopeFields = provenanceScopeIdentityFields(
     provenancePipeline.manifest,
     provenancePipeline.dispositionDigest,
+    provenancePipeline.sealedWindowSelectionDigest,
   );
 
   const identity = buildCanonicalImportIdentity({
@@ -1511,6 +1524,8 @@ export async function preflightCsvImport(
     attributionSnapshotDigest,
     provenanceScopeManifestDigest:
       provenancePipeline.manifest?.manifestDigest ?? null,
+    sealedWindowSelectionDigest:
+      provenancePipeline.sealedWindowSelectionDigest,
   });
 
   const lifecycle: ImportLifecycleState = sourceScopeComplete
@@ -1626,6 +1641,8 @@ export async function preflightCsvImport(
     provenanceScopeManifestDigest:
       provenancePipeline.manifest?.manifestDigest ?? null,
     provenanceScopeIncompleteReason: provenancePipeline.sourceScopeBlockedReason,
+    sealedWindowSelectionDigest:
+      provenancePipeline.sealedWindowSelectionDigest,
   };
 
   const analyticsSummary = buildLedgerAnalyticsSummary({
@@ -1914,11 +1931,12 @@ export async function applyCsvImport(
     }
   }
 
-  if (
-    applyRegistrySnapshot &&
-    stagedProvenanceManifest?.sealedInterval &&
-    params.deps?.listLateEvidence
-  ) {
+  // Authoritative state-backed late-evidence enumeration is required before
+  // score-client creation. Env pins / GUI status are never sufficient.
+  if (applyRegistrySnapshot && stagedProvenanceManifest?.sealedInterval) {
+    if (!params.deps?.listLateEvidence) {
+      throw new Error("late_evidence_enumeration_unavailable");
+    }
     const lateItems = await params.deps.listLateEvidence({
       pin: registryPin!,
       sealCommitSha: stagedProvenanceManifest.pin.coverageSealCommitSha,
@@ -1929,8 +1947,12 @@ export async function applyCsvImport(
       tipCommitSha: registryPin!.registrySnapshotCommitSha,
       sealedInterval: stagedProvenanceManifest.sealedInterval,
       items: lateItems,
+      // listLateEvidence must throw if it cannot fully enumerate seal→tip.
       enumerationComplete: true,
     });
+    if (!lateScan.enumerationComplete) {
+      throw new Error("late_evidence_enumeration_incomplete");
+    }
     assertApplyLateEvidenceClean(lateScan);
   }
 
@@ -2023,10 +2045,18 @@ export async function applyCsvImport(
     ) {
       throw new Error("preflight_plan_changed:provenance_scope_manifest");
     }
+    if (
+      staged.preflight.sealedWindowSelectionDigest &&
+      applyProvenancePipeline.sealedWindowSelectionDigest !==
+        staged.preflight.sealedWindowSelectionDigest
+    ) {
+      throw new Error("preflight_plan_changed:sealed_window_selection");
+    }
 
     const provenanceScopeFields = provenanceScopeIdentityFields(
       applyProvenancePipeline.manifest,
       applyProvenancePipeline.dispositionDigest,
+      applyProvenancePipeline.sealedWindowSelectionDigest,
     );
 
     const identity = buildCanonicalImportIdentity({
@@ -2095,6 +2125,9 @@ export async function applyCsvImport(
       hasUploadScopedRejection: hasUploadScoped,
       parserEvidence: staged.parserEvidence.rows,
       sourceCapabilityExcludedFingerprints: exclusionFingerprints,
+      excludedOutsideSealedFingerprints: new Set(
+        applyProvenancePipeline.excludedOutsideSealedFingerprints,
+      ),
       sourceDigestPrefix: staged.preflight.sourceDigestSha256,
       environment: environmentFilter ?? undefined,
       sourceCoverageSafetyMarginMs: margin,
@@ -2123,6 +2156,8 @@ export async function applyCsvImport(
         applyProvenancePipeline.manifest?.manifestDigest ??
         staged.preflight.provenanceScopeManifestDigest ??
         null,
+      sealedWindowSelectionDigest:
+        applyProvenancePipeline.sealedWindowSelectionDigest,
     });
     if (rebuiltApproval !== staged.preflight.preflightApprovalFingerprint) {
       throw new Error("preflight_plan_changed");

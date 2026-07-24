@@ -3,23 +3,15 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { WorkspaceSnapshotManifest } from "../p-dev/workspace-snapshot-types.js";
 import {
-  isIncludedSnapshotPath,
-  isForbiddenSnapshotPath,
-} from "../p-dev/workspace-snapshot-policy.js";
-import { loadWorkspaceSnapshotEntryContent } from "../p-dev/workspace-snapshot-generator.js";
-import {
-  loadEmbeddedWorkspaceSnapshot,
   loadEmbeddedWorkspaceSnapshotIdentityForStatus,
 } from "./harness-workspace-snapshot-loader.js";
 import {
   HARNESS_MANAGED_REPO_MARKER_FILE,
-  buildHarnessSnapshotManagedRepoMarker,
   parseHarnessManagedRepoMarkerJson,
   validateManagedMarkerForReconnect,
   type HarnessManagedRepoMarker,
 } from "./harness-managed-repo-marker.js";
 import { formatHarnessDispatchRepo, resolveHarnessDispatchRepo } from "./harness-dispatch-repo.js";
-import { deriveProvisioningCommitIdentity } from "./harness-snapshot-provisioning-helpers.js";
 import { syncHarnessConfigCloudPair } from "./sync-harness-config-cloud.js";
 import { recordRunnerUpgradeEvidence } from "./runner-upgrade-evidence.js";
 import {
@@ -34,11 +26,17 @@ import {
   type RunnerUpgradeProgressState,
 } from "./runner-upgrade-progress.js";
 import {
-  compareThreeWayUpgrade,
   extractFileHashesFromManifest,
   extractFileHashesFromMarker,
   type FileHashMap,
 } from "./runner-upgrade-three-way.js";
+import {
+  buildProvisionalUpgradeCommitOnBranch,
+  compareRunnerUpgradeSnapshots,
+  findExistingUpgradePullRequest,
+  loadRunnerUpgradePackagedSnapshot,
+  type RunnerUpgradeTargetContext,
+} from "./runner-upgrade-materialization.js";
 import {
   CANARY_OPERATION_ID_INPUT,
   locateCanaryRunByOperationId,
@@ -56,7 +54,6 @@ import {
   RUNNER_UPGRADE_CANARY_WORKFLOW_PATH,
   buildRunnerUpgradeBranchName,
   buildRunnerUpgradePrMarker,
-  parseRunnerUpgradePrMarker,
   runnerUpgradeStatusLabel,
   type RunnerUpgradeAcceptResult,
   type RunnerUpgradeApplyResult,
@@ -68,7 +65,6 @@ import {
   type RunnerUpgradeStatusResult,
 } from "./runner-upgrade-types.js";
 import {
-  RUNNER_UPGRADE_HEARTBEAT_EVERY_FILES,
   RUNNER_UPGRADE_STATUS_OVERALL_DEADLINE_MS,
   RUNNER_UPGRADE_STATUS_PROVIDER_TIMEOUT_MS,
   RUNNER_UPGRADE_WORKER_PROVIDER_TIMEOUT_MS,
@@ -117,11 +113,6 @@ const DEFAULT_CANARY_POLL_TIMEOUT_MS = 120_000;
 
 type ResolveContextMode = "status" | "worker";
 
-const OPERATOR_LOCAL_ONLY_PATHS = new Set([
-  ".harness/config.local.json",
-  ".env.local",
-]);
-
 export interface RunnerUpgradeApplyOptions {
   previewFingerprint?: string;
   canaryPollIntervalMs?: number;
@@ -135,22 +126,7 @@ export interface RunnerUpgradeAcceptOptions {
   resume?: boolean;
 }
 
-interface ResolvedRunnerUpgradeContext {
-  repoSlug: string;
-  owner: string;
-  repo: string;
-  repositoryId: number;
-  defaultBranch: string;
-  defaultBranchHead: string;
-  marker: HarnessManagedRepoMarker;
-  packagedSnapshot: {
-    packageRoot: string;
-    snapshotRoot: string;
-    packageVersion: string;
-    manifest: WorkspaceSnapshotManifest;
-    fingerprint: string;
-  };
-}
+interface ResolvedRunnerUpgradeContext extends RunnerUpgradeTargetContext {}
 
 function sha256Content(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex");
@@ -194,41 +170,6 @@ function computePreviewFingerprint(input: {
   );
 }
 
-function isOperatorLocalOnlyPath(filePath: string): boolean {
-  if (OPERATOR_LOCAL_ONLY_PATHS.has(filePath)) {
-    return true;
-  }
-  return isForbiddenSnapshotPath(filePath);
-}
-
-function findUnexpectedRemotePaths(input: {
-  remoteTreePaths: string[];
-  nextHashes: FileHashMap;
-  previousHashes: FileHashMap | null;
-}): string[] {
-  const packagePaths = new Set(Object.keys(input.nextHashes));
-  const unexpected: string[] = [];
-  for (const remotePath of input.remoteTreePaths) {
-    if (remotePath === HARNESS_MANAGED_REPO_MARKER_FILE) {
-      continue;
-    }
-    if (!isIncludedSnapshotPath(remotePath)) {
-      continue;
-    }
-    if (packagePaths.has(remotePath)) {
-      continue;
-    }
-    if (isOperatorLocalOnlyPath(remotePath)) {
-      continue;
-    }
-    if (input.previousHashes?.[remotePath]) {
-      continue;
-    }
-    unexpected.push(remotePath);
-  }
-  return [...new Set(unexpected)].sort();
-}
-
 async function resolveHarnessRepository(cwd?: string): Promise<{
   repoSlug: string;
   owner: string;
@@ -249,17 +190,7 @@ async function resolveHarnessRepository(cwd?: string): Promise<{
 async function loadPackagedSnapshot(): Promise<
   ResolvedRunnerUpgradeContext["packagedSnapshot"] | null
 > {
-  const embedded = await loadEmbeddedWorkspaceSnapshot(import.meta.url);
-  if (!embedded.ok) {
-    return null;
-  }
-  return {
-    packageRoot: embedded.packageRoot,
-    snapshotRoot: embedded.snapshotRoot,
-    packageVersion: embedded.packageVersion,
-    manifest: embedded.manifest,
-    fingerprint: embedded.fingerprint,
-  };
+  return loadRunnerUpgradePackagedSnapshot(import.meta.url);
 }
 
 async function loadPackagedSnapshotIdentityForStatus(
@@ -334,49 +265,6 @@ async function readRemoteManagedMarker(
     };
   }
   return { ok: true, marker: parsed.marker };
-}
-
-async function buildRemoteFileHashes(
-  provider: RunnerUpgradeGitHubProvider,
-  input: {
-    owner: string;
-    repo: string;
-    defaultBranchHead: string;
-    paths: string[];
-    onHeartbeat?: (progress: {
-      filesInspected: number;
-      filesTotal: number;
-      lastCompletedBatch: string;
-    }) => Promise<void>;
-  },
-): Promise<FileHashMap> {
-  const hashes: FileHashMap = {};
-  const total = input.paths.length;
-  let inspected = 0;
-  for (const filePath of input.paths) {
-    const content = await provider.readRepositoryFileContent(
-      input.owner,
-      input.repo,
-      filePath,
-      input.defaultBranchHead,
-    );
-    inspected += 1;
-    if (content !== null) {
-      hashes[filePath] = sha256Content(content);
-    }
-    if (
-      input.onHeartbeat &&
-      (inspected % RUNNER_UPGRADE_HEARTBEAT_EVERY_FILES === 0 ||
-        inspected === total)
-    ) {
-      await input.onHeartbeat({
-        filesInspected: inspected,
-        filesTotal: total,
-        lastCompletedBatch: filePath,
-      });
-    }
-  }
-  return hashes;
 }
 
 export interface ResolveRunnerUpgradeContextOptions {
@@ -690,62 +578,9 @@ async function compareUpgradeSnapshots(
 > {
   const previousHashes = extractFileHashesFromMarker(context.marker);
   const nextHashes = extractFileHashesFromManifest(context.packagedSnapshot.manifest);
-  const comparePaths = [
-    ...new Set([
-      ...Object.keys(previousHashes ?? {}),
-      ...Object.keys(nextHashes),
-    ]),
-  ].sort();
-  const remoteHashes = await buildRemoteFileHashes(provider, {
-    owner: context.owner,
-    repo: context.repo,
-    defaultBranchHead: context.defaultBranchHead,
-    paths: comparePaths,
-    onHeartbeat: options?.onHeartbeat,
-  });
-
-  if (provider.listRepositoryTreePaths) {
-    const treePaths = await provider.listRepositoryTreePaths(
-      context.owner,
-      context.repo,
-      context.defaultBranchHead,
-    );
-    const unexpected = findUnexpectedRemotePaths({
-      remoteTreePaths: treePaths.map((entry) => entry.path),
-      nextHashes,
-      previousHashes,
-    });
-    if (unexpected.length > 0) {
-      return {
-        ok: false,
-        status: "blocked_unexpected_remote",
-        message: `Unexpected remote paths outside packaged policy: ${unexpected.join(", ")}`,
-      };
-    }
-  }
-
-  const compare = compareThreeWayUpgrade({
-    previousHashes,
-    remoteHashes,
-    nextHashes,
-    previousSnapshotContentId:
-      context.marker.createdFromPackageSnapshot?.snapshotContentId,
-    remoteSnapshotContentId:
-      context.marker.createdFromPackageSnapshot?.snapshotContentId,
-    remoteTreeSha: context.marker.createdFromPackageSnapshot?.snapshotGitTreeSha1,
-    previousTreeSha: context.marker.createdFromPackageSnapshot?.snapshotGitTreeSha1,
-  });
-
+  const compare = await compareRunnerUpgradeSnapshots(provider, context, options);
   if (!compare.ok) {
-    return {
-      ok: false,
-      status:
-        compare.code === "operator_conflicts"
-          ? "blocked_operator_conflicts"
-          : "blocked_non_managed",
-      conflictPaths: compare.conflictPaths,
-      message: compare.message,
-    };
+    return compare;
   }
 
   const previewFingerprint = computePreviewFingerprint({
@@ -758,194 +593,12 @@ async function compareUpgradeSnapshots(
   return {
     ok: true,
     previousHashes,
-    remoteHashes,
+    remoteHashes: {},
     nextHashes,
     replacePaths: compare.replacePaths,
     deletePaths: compare.deletePaths,
     previewFingerprint,
   };
-}
-
-async function findExistingUpgradePullRequest(
-  provider: RunnerUpgradeGitHubProvider,
-  input: {
-    owner: string;
-    repo: string;
-    repositoryId: number;
-    snapshotContentId: string;
-    defaultBranch: string;
-    branchName: string;
-  },
-): Promise<{ number: number; htmlUrl: string; headSha: string } | null> {
-  const openPulls = await provider.listPullRequests(input.owner, input.repo, {
-    state: "open",
-    base: input.defaultBranch,
-  });
-  for (const pull of openPulls) {
-    const marker = parseRunnerUpgradePrMarker(pull.body);
-    if (
-      marker &&
-      marker.repositoryId === input.repositoryId &&
-      marker.snapshotContentId === input.snapshotContentId
-    ) {
-      return {
-        number: pull.number,
-        htmlUrl: pull.htmlUrl,
-        headSha: pull.headSha,
-      };
-    }
-  }
-  const byBranch = openPulls.find((pull) => pull.headRef === input.branchName);
-  if (byBranch) {
-    return {
-      number: byBranch.number,
-      htmlUrl: byBranch.htmlUrl,
-      headSha: byBranch.headSha,
-    };
-  }
-  return null;
-}
-
-async function buildUpgradeCommitOnBranch(
-  provider: RunnerUpgradeGitHubProvider,
-  context: ResolvedRunnerUpgradeContext,
-  input: {
-    operationId: string;
-    branchName: string;
-    replacePaths: string[];
-    deletePaths: string[];
-  },
-): Promise<{ commitSha: string; headSha: string }> {
-  const parentSha = context.defaultBranchHead;
-  const parentCommit = await provider.getGitCommit(
-    context.owner,
-    context.repo,
-    parentSha,
-  );
-  const parentTreeSha = parentCommit.tree.sha;
-  const manifest = context.packagedSnapshot.manifest;
-  const blobShaByPath = new Map<string, string>();
-
-  for (const filePath of input.replacePaths) {
-    const manifestFile = manifest.files.find((file) => file.path === filePath);
-    if (!manifestFile) {
-      throw new Error(`Packaged snapshot is missing ${filePath}.`);
-    }
-    const content = await loadWorkspaceSnapshotEntryContent({
-      snapshotRoot: context.packagedSnapshot.snapshotRoot,
-      path: filePath,
-      expectedSha256: manifestFile.sha256,
-    });
-    const blob = await provider.createGitBlob({
-      owner: context.owner,
-      repo: context.repo,
-      content,
-    });
-    blobShaByPath.set(filePath, blob.sha);
-  }
-
-  const markerContent = JSON.stringify(
-    buildHarnessSnapshotManagedRepoMarker({
-      repository: context.repoSlug,
-      repositoryId: context.repositoryId,
-      manifest,
-      snapshotCommitSha: "pending",
-      defaultBranch: context.defaultBranch,
-      operationId: input.operationId,
-      pDevVersion: context.packagedSnapshot.packageVersion,
-    }),
-    null,
-    2,
-  );
-  const markerBlob = await provider.createGitBlob({
-    owner: context.owner,
-    repo: context.repo,
-    content: Buffer.from(`${markerContent}\n`, "utf8"),
-  });
-  blobShaByPath.set(HARNESS_MANAGED_REPO_MARKER_FILE, markerBlob.sha);
-
-  const treeEntries = [
-    ...input.replacePaths.map((filePath) => {
-      const manifestFile = manifest.files.find((file) => file.path === filePath);
-      return {
-        path: filePath,
-        mode: manifestFile?.mode ?? "100644",
-        type: "blob" as const,
-        sha: blobShaByPath.get(filePath)!,
-      };
-    }),
-    ...input.deletePaths.map((filePath) => ({
-      path: filePath,
-      mode: "100644",
-      type: "blob" as const,
-      sha: null as unknown as string,
-    })),
-    {
-      path: HARNESS_MANAGED_REPO_MARKER_FILE,
-      mode: "100644",
-      type: "blob" as const,
-      sha: markerBlob.sha,
-    },
-  ];
-
-  const tree = await provider.createGitTree({
-    owner: context.owner,
-    repo: context.repo,
-    baseTree: parentTreeSha,
-    tree: treeEntries,
-  });
-
-  const commitIdentity = deriveProvisioningCommitIdentity({
-    operationId: input.operationId,
-    sourceCommit: manifest.sourceCommit,
-  });
-  const commit = await provider.createGitCommit({
-    owner: context.owner,
-    repo: context.repo,
-    message: `Update p-dev runner to ${manifest.packageVersion}`,
-    tree: tree.sha,
-    parents: [parentSha],
-    author: commitIdentity,
-    committer: commitIdentity,
-  });
-
-  let branchHeadSha: string | null = null;
-  try {
-    const existingRef = await provider.getGitRef(
-      context.owner,
-      context.repo,
-      input.branchName,
-    );
-    branchHeadSha = existingRef.object.sha;
-  } catch {
-    branchHeadSha = null;
-  }
-
-  if (branchHeadSha) {
-    await provider.updateGitRef({
-      owner: context.owner,
-      repo: context.repo,
-      ref: input.branchName,
-      sha: commit.sha,
-      expectedSha: branchHeadSha,
-    });
-  } else if (provider.createGitRef) {
-    await provider.createGitRef({
-      owner: context.owner,
-      repo: context.repo,
-      ref: input.branchName,
-      sha: commit.sha,
-    });
-  } else {
-    await provider.updateGitRef({
-      owner: context.owner,
-      repo: context.repo,
-      ref: input.branchName,
-      sha: commit.sha,
-    });
-  }
-
-  return { commitSha: commit.sha, headSha: commit.sha };
 }
 
 async function verifyProductionMarker(
@@ -1627,7 +1280,7 @@ async function applyRunnerUpgradeInternal(
       workerHeartbeatAt: new Date().toISOString(),
     });
 
-    const upgradeCommit = await buildUpgradeCommitOnBranch(provider, context, {
+    const upgradeCommit = await buildProvisionalUpgradeCommitOnBranch(provider, context, {
       operationId,
       branchName,
       replacePaths: compare!.replacePaths,

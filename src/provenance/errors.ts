@@ -11,6 +11,7 @@ export type CursorProvenanceErrorCode =
   | "cursor_provenance_encryption_unavailable"
   | "cursor_provenance_coverage_incomplete"
   | "cursor_provenance_coverage_integrity_error"
+  | "cursor_provenance_read_only_violation"
   | "cursor_provenance_launch_failed_write_failed"
   | "cursor_provenance_invalid_context"
   | "cursor_provenance_invalid_execution_window"

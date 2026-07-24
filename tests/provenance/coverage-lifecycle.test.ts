@@ -234,6 +234,11 @@ describe("coverage lifecycle foundation", () => {
     const divergent = buildPersistedActivationRecord({
       ...payload,
       activatedAt: "2026-06-02T00:00:00.000Z",
+      lifecycleRecords: payload.lifecycleRecords.map((row) =>
+        row.lifecycleKind === "activation"
+          ? { ...row, effectiveAt: "2026-06-02T00:00:00.000Z" }
+          : row,
+      ),
     });
     await expect(
       store.persistImmutableRecord({
@@ -467,5 +472,62 @@ describe("coverage lifecycle foundation", () => {
     expect(
       graph.isEqualOrDescendant(ACTIVATION_COMMIT, EVENT_COMMIT),
     ).toBe(true);
+  });
+
+  it("writes epoch invalidation and duplicate incident records", async () => {
+    const lifecycleStore = new InMemoryProvenanceLifecycleStore();
+    const eventStore = new InMemoryProvenanceEventStore();
+    const service = new CoverageLifecycleService({
+      lifecycleStore,
+      eventStore,
+      client: loopbackClient([]) as never,
+      owner: "weston-uribe",
+      repo: "p-dev-harness-state",
+      branch: STATE_BRANCH,
+      stateRepository: STATE_REPO,
+    });
+
+    const invalidation = await service.invalidateNeverSealedEpoch({
+      epochId: EPOCH,
+      activationCommitSha: ACTIVATION_COMMIT,
+      invalidInterval: { ...INTERVAL },
+      reasons: ["coverage_start_precedes_activation"],
+      publicCanaryIdentities: ["TT-18", "TT-19"],
+      workflowRunIds: ["12345"],
+      eventCommitRange: {
+        startCommitSha: ACTIVATION_COMMIT,
+        endCommitSha: EVENT_COMMIT,
+      },
+      operatorToolSourceSha: "a".repeat(40),
+      improperPriorSeal: {
+        sealCommitSha: SEAL_COMMIT,
+        sealDigest: DIGEST,
+        treatedAsValidCompleteSeal: false,
+      },
+    });
+    expect(invalidation.invalidation.improperPriorSeal?.treatedAsValidCompleteSeal).toBe(
+      false,
+    );
+
+    const incident = await service.reportDuplicateOperationIncident({
+      epochId: EPOCH,
+      recoveryOperationId: "11111111-1111-4111-8111-111111111111",
+      stage: "required_canary",
+      attemptOrdinal: 1,
+      duplicateOperationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      priorOperationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      recordedAt: "2026-07-24T00:00:00.000Z",
+    });
+    expect(incident.incident.incidentDigest).toMatch(/^[0-9a-f]{64}$/);
+
+    const gap = await service.reportGap({
+      epochId: EPOCH,
+      intervalAttempted: { ...INTERVAL },
+      incompleteReasons: ["containment_gap_active_ops_ambiguous"],
+      evidenceDigest: DIGEST,
+    });
+    expect(gap.gap.incompleteReasons).toContain(
+      "containment_gap_active_ops_ambiguous",
+    );
   });
 });

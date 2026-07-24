@@ -129,6 +129,14 @@ export interface GitHubGitCommit {
   parents: Array<{ sha: string }>;
 }
 
+export interface GitHubCommitDetail {
+  sha: string;
+  commit: {
+    author?: { date?: string | null } | null;
+    committer?: { date?: string | null } | null;
+  };
+}
+
 export interface GitHubCreateRepositoryFromTemplateInput {
   templateOwner: string;
   templateRepo: string;
@@ -973,6 +981,14 @@ export class GitHubClient {
       `/repos/${owner}/${repo}/commits?${params.toString()}`,
     );
     return response ?? [];
+  }
+
+  async getCommit(
+    owner: string,
+    repo: string,
+    sha: string,
+  ): Promise<GitHubCommitDetail> {
+    return this.request<GitHubCommitDetail>(`/repos/${owner}/${repo}/commits/${sha}`);
   }
 
   async listWorkflowRuns(

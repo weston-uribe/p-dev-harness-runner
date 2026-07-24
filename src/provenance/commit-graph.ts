@@ -10,6 +10,11 @@ export interface LoadGitHubCommitGraphInput {
   branch: string;
   /** Commits whose ancestry must be resolvable. */
   anchorShas: string[];
+  /**
+   * When walking parent chains, stop after loading these SHAs (do not recurse
+   * into their parents). Use for known ancestors (e.g. seal) when checking tip.
+   */
+  stopAtShas?: string[];
 }
 
 /**
@@ -22,6 +27,9 @@ export async function loadGitHubCommitGraph(
   const repository = `${input.owner}/${input.repo}`;
   const commits = new Set<string>();
   const parentMap = new Map<string, string[]>();
+  const stopAt = new Set(
+    (input.stopAtShas ?? []).map((sha) => sha.trim()).filter(Boolean),
+  );
 
   const loadCommit = async (sha: string): Promise<void> => {
     if (commits.has(sha)) {
@@ -35,6 +43,9 @@ export async function loadGitHubCommitGraph(
     commits.add(commit.sha);
     const parents = commit.parents.map((parent) => parent.sha);
     parentMap.set(commit.sha, parents);
+    if (stopAt.has(commit.sha)) {
+      return;
+    }
     for (const parent of parents) {
       await loadCommit(parent);
     }
@@ -81,4 +92,27 @@ export async function loadGitHubCommitGraph(
     hasCommit: (sha: string) => commits.has(sha),
     isEqualOrDescendant,
   };
+}
+
+/**
+ * Efficient tip-vs-seal ancestry check via GitHub compare (avoids walking
+ * the full tip→root parent chain).
+ */
+export async function isCommitAncestorViaCompare(input: {
+  client: GitHubClient;
+  owner: string;
+  repo: string;
+  ancestorSha: string;
+  descendantSha: string;
+}): Promise<boolean> {
+  if (input.ancestorSha === input.descendantSha) {
+    return true;
+  }
+  const comparison = await input.client.compareCommits(
+    input.owner,
+    input.repo,
+    input.ancestorSha,
+    input.descendantSha,
+  );
+  return comparison.status === "identical" || comparison.status === "ahead";
 }

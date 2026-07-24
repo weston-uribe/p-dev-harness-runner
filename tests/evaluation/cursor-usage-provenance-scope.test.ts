@@ -15,6 +15,9 @@ import {
   formSourceSegmentsFromUsage,
 } from "../../src/evaluation/cursor-usage-import/provenance-scope/classify.js";
 import { resolveProvenanceCoveragePublicStatus } from "../../src/evaluation/cursor-usage-import/provenance-scope/coverage-status.js";
+import { runProvenanceScopePipeline } from "../../src/evaluation/cursor-usage-import/provenance-scope/pipeline.js";
+import { readRegistrySnapshotFromInput } from "../../src/evaluation/cursor-usage-import/provenance-scope/reader.js";
+import { buildEpochInvalidationRecord } from "../../src/provenance/coverage-lifecycle-schemas.js";
 import { CURSOR_USAGE_IMPORTER_VERSION } from "../../src/evaluation/cursor-usage-import/types.js";
 import { hashProviderIdentity } from "../../src/provenance/encryption.js";
 import {
@@ -126,6 +129,8 @@ function registryWith(bindings: RunOperationBinding[]): RegistryReadResult {
     includedRunOperationSetDigest: "8".repeat(64),
     integrityFailures: [],
     integrityOk: true,
+    epochInvalidation: null,
+    epochInvalidated: false,
   };
 }
 
@@ -286,5 +291,78 @@ describe("cursor usage provenance scope", () => {
       "Historical scope unrecoverable",
     );
     expect(status.mode).toBe("disabled");
+    expect(status.status).toBe("unknown");
+  });
+
+  it("blocks staging when epoch invalidation is present", () => {
+    const invalidation = buildEpochInvalidationRecord({
+      epochId: "epoch-1",
+      activationCommitSha: "2".repeat(40),
+      invalidInterval: {
+        coverageStart: "2026-07-23T00:00:00.000Z",
+        coverageEnd: "2026-07-24T00:00:00.000Z",
+      },
+      reasons: ["coverage_start_precedes_activation"],
+      eventCommitRange: {
+        startCommitSha: "1".repeat(40),
+        endCommitSha: "2".repeat(40),
+      },
+      operatorToolSourceSha: "a".repeat(40),
+    });
+    const registry = registryWith([]);
+    registry.epochInvalidation = invalidation;
+    registry.epochInvalidated = true;
+    registry.integrityOk = false;
+    registry.integrityFailures = [
+      { code: "epoch_invalidated", detail: "coverage_start_precedes_activation" },
+    ];
+    registry.sealedInterval = null;
+
+    const pipeline = runProvenanceScopePipeline({
+      registry,
+      segments: [],
+      candidates: [],
+      sourceDigestSha256: "d".repeat(64),
+    });
+    expect(pipeline.registryIntegrityFailure).toBe(true);
+    expect(pipeline.sourceScopeBlockedReason).toBe("epoch_invalidated");
+  });
+
+  it("reader does not fall back to activation interval when invalidated", () => {
+    const invalidation = buildEpochInvalidationRecord({
+      epochId: "epoch-1",
+      activationCommitSha: "2".repeat(40),
+      invalidInterval: {
+        coverageStart: "2026-07-23T00:00:00.000Z",
+        coverageEnd: "2026-07-24T00:00:00.000Z",
+      },
+      reasons: ["coverage_start_precedes_activation"],
+      eventCommitRange: {
+        startCommitSha: "1".repeat(40),
+        endCommitSha: "2".repeat(40),
+      },
+      operatorToolSourceSha: "a".repeat(40),
+    });
+    const result = readRegistrySnapshotFromInput({
+      pin: {
+        stateRepository: "weston-uribe/p-dev-harness-state",
+        stateBranch: "p-dev-runtime-state",
+        registrySnapshotCommitSha: "1".repeat(40),
+        activationCommitSha: "2".repeat(40),
+        activationHistoryProofCommitSha: "3".repeat(40),
+        coverageSealCommitSha: "4".repeat(40),
+        coverageSnapshotCommitSha: "5".repeat(40),
+      },
+      activationRecord: null,
+      activationSource: null,
+      activationHistoryProof: null,
+      events: [],
+      coverageSnapshot: null,
+      sealRecord: null,
+      epochInvalidation: invalidation,
+    });
+    expect(result.epochInvalidated).toBe(true);
+    expect(result.sealedInterval).toBeNull();
+    expect(result.integrityOk).toBe(false);
   });
 });

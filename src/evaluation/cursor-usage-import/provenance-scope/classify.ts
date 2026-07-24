@@ -170,6 +170,16 @@ export function classifySegmentOwnership(input: {
     };
   }
 
+  if (input.registry.epochInvalidated) {
+    return {
+      segment: input.segment,
+      classification: "coverage_incomplete",
+      reasonCode: "epoch_invalidated",
+      compatibleRunOperations: [],
+      matchedRunOperation: null,
+    };
+  }
+
   void timeContractVersion;
 
   const sealed = input.registry.sealedInterval;

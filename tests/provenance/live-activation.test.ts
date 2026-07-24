@@ -69,9 +69,44 @@ describe("buildLiveActivationPayload", () => {
     expect(payload.lifecycleRecords[0]?.reasonCode).toBe(
       "operator_required_activation",
     );
+    expect(payload.lifecycleRecords[0]?.effectiveAt).toBe(
+      "2026-06-01T00:00:00.000Z",
+    );
     expect(
-      Date.parse(payload.lifecycleRecords[0]!.effectiveAt),
+      Date.parse(payload.workflowInstallAttestations[0]!.installedFrom),
     ).toBeLessThanOrEqual(Date.parse(INTERVAL.coverageStart));
+  });
+
+  it("rejects coverageStart before activatedAt", () => {
+    expect(() =>
+      buildLiveActivationPayload({
+        epochId: EPOCH,
+        activatedAt: "2026-07-15T00:00:00.000Z",
+        interval: {
+          coverageStart: "2026-07-10T00:00:00.000Z",
+          coverageEnd: "2026-07-20T00:00:00.000Z",
+        },
+        captureProducerSourceSha: CAPTURE_SHA,
+        productionRunnerSha: RUNNER_SHA,
+      }),
+    ).toThrow(/coverageStart must be >= activatedAt/);
+  });
+
+  it("allows installedFrom to precede coverageStart while effectiveAt equals activatedAt", () => {
+    const payload = buildLiveActivationPayload({
+      epochId: EPOCH,
+      activatedAt: "2026-07-10T00:00:00.000Z",
+      interval: { ...INTERVAL },
+      captureProducerSourceSha: CAPTURE_SHA,
+      productionRunnerSha: RUNNER_SHA,
+      installedFrom: "2026-06-01T00:00:00.000Z",
+    });
+    expect(payload.lifecycleRecords[0]?.effectiveAt).toBe(
+      "2026-07-10T00:00:00.000Z",
+    );
+    expect(payload.workflowInstallAttestations[0]?.installedFrom).toBe(
+      "2026-06-01T00:00:00.000Z",
+    );
   });
 
   it("passes canonicalizeActivationPayload and buildPersistedActivationRecord", () => {
