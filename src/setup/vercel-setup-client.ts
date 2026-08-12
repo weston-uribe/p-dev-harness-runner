@@ -294,13 +294,29 @@ export async function listVercelProjects(
   teamId?: string,
 ): Promise<VercelProjectSummary[]> {
   const data = await vercelFetch<{
-    projects: Array<{ id: string; name: string; accountId?: string }>;
+    projects: Array<{
+      id: string;
+      name: string;
+      accountId?: string;
+      gitRepository?: VercelGitRepository;
+      link?: { type?: string; org?: string; repo?: string };
+    }>;
   }>(token, "/v9/projects", { teamId });
-  return (data.projects ?? []).map((project) => ({
-    id: project.id,
-    name: project.name,
-    accountId: project.accountId,
-  }));
+  return (data.projects ?? []).map((project) => {
+    const linkedRepo =
+      project.gitRepository?.repo ??
+      (project.link?.type === "github" && project.link.org && project.link.repo
+        ? `${project.link.org}/${project.link.repo}`
+        : undefined);
+    return {
+      id: project.id,
+      name: project.name,
+      accountId: project.accountId,
+      gitRepository: linkedRepo
+        ? { type: "github" as const, repo: linkedRepo }
+        : project.gitRepository,
+    };
+  });
 }
 
 export async function createVercelProject(

@@ -244,3 +244,72 @@ export function mapRepairPathToMode(
   if (repairPath === "agent") return "cursor_agent";
   return "none";
 }
+
+/** Production-delivery milestone score names (idempotent, non-final until verified). */
+export type ProductionDeliveryMilestone =
+  | "merged_to_dev"
+  | "promoted_to_main"
+  | "production_deployment_started"
+  | "production_deployment_ready"
+  | "production_verified";
+
+export function deriveProductionMilestoneScoreId(params: {
+  namespace: string;
+  sessionId: string;
+  milestone: ProductionDeliveryMilestone;
+  productionCompletionId: string;
+}): string {
+  return deriveScoreId(
+    params.namespace,
+    "session",
+    `${params.sessionId}:${params.productionCompletionId}`,
+    params.milestone,
+  );
+}
+
+export function buildProductionMilestoneScore(params: {
+  namespace: string;
+  sessionId: string;
+  milestone: ProductionDeliveryMilestone;
+  productionCompletionId: string;
+  timestamp: string;
+  value?: boolean;
+  comment?: string;
+}): EvaluationScoreInput {
+  return {
+    id: deriveProductionMilestoneScoreId(params),
+    target: "session",
+    sessionId: params.sessionId,
+    name: params.milestone,
+    dataType: "BOOLEAN",
+    value: params.value ?? true,
+    timestamp: params.timestamp,
+    ...(params.comment ? { comment: params.comment } : {}),
+  };
+}
+
+/**
+ * Final successful delivery_outcome — only after production_verified.
+ * Merge-time merged_to_integration remains a non-final intermediate score.
+ */
+export function buildFinalProductionDeliveryOutcomeScore(params: {
+  namespace: string;
+  sessionId: string;
+  productionCompletionId: string;
+  timestamp: string;
+}): EvaluationScoreInput {
+  return {
+    id: deriveScoreId(
+      params.namespace,
+      "session",
+      `${params.sessionId}:${params.productionCompletionId}`,
+      "delivery_outcome:merged_to_production_deployed",
+    ),
+    target: "session",
+    sessionId: params.sessionId,
+    name: "delivery_outcome",
+    dataType: "CATEGORICAL",
+    value: "merged_to_production_deployed",
+    timestamp: params.timestamp,
+  };
+}

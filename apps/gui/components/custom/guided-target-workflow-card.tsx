@@ -47,6 +47,10 @@ function workflowStatusLabel(status: RemoteWorkflowStatus): string {
       return "workflow missing";
     case "differs":
       return "workflow outdated";
+    case "stale_dispatch_target":
+      return "stale dispatch target";
+    case "contract_outdated":
+      return "contract outdated";
     default:
       return "workflow status unknown";
   }

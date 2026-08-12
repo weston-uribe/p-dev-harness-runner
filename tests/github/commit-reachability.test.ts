@@ -141,7 +141,7 @@ describe("resolvePromotionProof", () => {
 
     expect(proof.proof).toBe(false);
     if (!proof.proof) {
-      expect(proof.reason).toBe("production_not_promoted");
+      expect(proof.reason).toBe("promotion_method_unsupported");
       expect(proof.diagnosticIssueKeyCommits).toEqual(["diag1"]);
     }
   });

@@ -43,6 +43,20 @@ export {
 } from "./side-effects.js";
 
 export {
+  PRODUCTION_COMPLETION_KIND,
+  buildProductionCompletionId,
+  buildProductionEffectId,
+  createProductionCompletionRecord,
+  isProductionEffectCompleted,
+  upsertProductionEffect,
+  withProductionState,
+  type ProductionCompletionRecord,
+  type ProductionCompletionState,
+  type ProductionEffectKind,
+  type ProductionEffectRecord,
+} from "./production-completion.js";
+
+export {
   DEFAULT_WORKFLOW_STATE_MAX_RETRIES,
   decideConflictRetry,
   type RetryDecision,

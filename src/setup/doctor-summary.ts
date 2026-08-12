@@ -48,7 +48,9 @@ const GROUP_RULES: Array<{
     match: (label) =>
       label.startsWith("GITHUB_TOKEN") ||
       label.includes("base branch exists") ||
-      label.includes("PR head-branch write"),
+      label.includes("PR head-branch write") ||
+      label.includes("target workflow") ||
+      label.includes("Harness dispatch repository"),
   },
 ];
 

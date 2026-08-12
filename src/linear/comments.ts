@@ -91,6 +91,8 @@ export interface ProductionSyncCommentFooterInput extends MergeCommentFooterInpu
   productionHeadSha?: string;
   previousMergeRunId?: string;
   promotionProofMethod?: string;
+  productionCompletionId?: string;
+  productionEffectId?: string;
 }
 
 export interface PhaseStartCommentFooterInput extends HarnessCommentFooterInput {
@@ -236,6 +238,12 @@ function buildHarnessMetadataLines(
   }
   if (input.promotionProofMethod) {
     lines.push(`promotion_proof_method: ${input.promotionProofMethod}`);
+  }
+  if (input.productionCompletionId) {
+    lines.push(`production_completion_id: ${input.productionCompletionId}`);
+  }
+  if (input.productionEffectId) {
+    lines.push(`production_effect_id: ${input.productionEffectId}`);
   }
   if (input.deploymentUrl) {
     lines.push(`deployment_url: ${input.deploymentUrl}`);

@@ -6,6 +6,9 @@ import {
   deriveRevisionCycleIndex,
   buildPhaseSuccessScore,
   buildTerminalSessionScores,
+  buildProductionMilestoneScore,
+  buildFinalProductionDeliveryOutcomeScore,
+  deriveProductionMilestoneScoreId,
 } from "../../src/evaluation/outcomes.js";
 import { deriveScoreId } from "../../src/evaluation/identifiers.js";
 import { hasRevisionCompletionMarker } from "../../src/linear/comments.js";
@@ -180,5 +183,45 @@ describe("deterministic score ids", () => {
     });
     expect(score.timestamp).toBe("2026-07-10T08:00:00.000Z");
     expect(score.target).toBe("trace");
+  });
+
+  it("builds distinct production milestone score ids; final delivery_outcome only via verified helper", () => {
+    const sessionId = "c".repeat(64);
+    const productionCompletionId = "d".repeat(64);
+    const milestones = [
+      "promoted_to_main",
+      "production_deployment_started",
+      "production_deployment_ready",
+      "production_verified",
+    ] as const;
+    const ids = milestones.map((milestone) =>
+      deriveProductionMilestoneScoreId({
+        namespace: "dogfood",
+        sessionId,
+        milestone,
+        productionCompletionId,
+      }),
+    );
+    expect(new Set(ids).size).toBe(4);
+
+    const verified = buildProductionMilestoneScore({
+      namespace: "dogfood",
+      sessionId,
+      milestone: "production_verified",
+      productionCompletionId,
+      timestamp: "2026-07-20T21:41:18.000Z",
+    });
+    expect(verified.name).toBe("production_verified");
+    expect(verified.dataType).toBe("BOOLEAN");
+
+    const finalOutcome = buildFinalProductionDeliveryOutcomeScore({
+      namespace: "dogfood",
+      sessionId,
+      productionCompletionId,
+      timestamp: "2026-07-20T21:41:18.000Z",
+    });
+    expect(finalOutcome.name).toBe("delivery_outcome");
+    expect(finalOutcome.value).toBe("merged_to_production_deployed");
+    expect(finalOutcome.id).not.toBe(verified.id);
   });
 });

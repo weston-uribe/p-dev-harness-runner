@@ -6,6 +6,7 @@
 import type { ReviewDecision } from "../review-contracts.js";
 import type { PlanArtifactIdentity } from "../plan-artifact.js";
 import type { ImplementationArtifactIdentity } from "../implementation-artifact.js";
+import type { ProductionCompletionRecord } from "./production-completion.js";
 
 export const WORKFLOW_STATE_RECORD_KIND = "p-dev.workflow-state.v1" as const;
 
@@ -140,6 +141,11 @@ export interface WorkflowStateRecord {
   handoffSubjectIdentity?: string | null;
   /** Pending/completed deterministic side effects for crash-safe replay. */
   sideEffects?: WorkflowSideEffectRecord[];
+  /**
+   * Private production-completion authority (not Linear comments).
+   * Identity is issue + target repo + merge-to-dev SHA + production branch.
+   */
+  productionCompletion?: ProductionCompletionRecord | null;
 }
 
 /** Immutable snapshot reference stored on manifests/comments. */
@@ -191,6 +197,7 @@ export function createEmptyWorkflowState(input: {
     acceptedReviewSubjects: {},
     handoffSubjectIdentity: null,
     sideEffects: [],
+    productionCompletion: null,
   };
 }
 

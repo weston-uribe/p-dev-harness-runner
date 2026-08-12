@@ -1,0 +1,73 @@
+name: Harness Reconcile Production
+
+# Recovers missed production_promoted events and advances deploy-verified Linear projection.
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Optional repo config id to reconcile a single target"
+        required: false
+      dry_run:
+        description: "Evaluate only; no Linear / Langfuse writes"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-reconcile-production-${{ github.event.inputs.repo || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.HARNESS_GITHUB_TOKEN }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      HARNESS_CONFIG_JSON_B64: ${{ secrets.HARNESS_CONFIG_JSON_B64 }}
+      HARNESS_CONFIG_FINGERPRINT: ${{ vars.HARNESS_CONFIG_FINGERPRINT }}
+      GITHUB_DISPATCH_REPOSITORY: ${{ github.repository }}
+      P_DEV_PUBLIC_RUNNER_MODE: "1"
+      P_DEV_WORKFLOW_STATE_STORE_MODE: managed_github
+      P_DEV_WORKFLOW_STATE_REPOSITORY: ${{ vars.P_DEV_WORKFLOW_STATE_REPOSITORY }}
+      P_DEV_WORKFLOW_STATE_BRANCH: ${{ vars.P_DEV_WORKFLOW_STATE_BRANCH }}
+      P_DEV_STATE_GITHUB_TOKEN: ${{ secrets.P_DEV_STATE_GITHUB_TOKEN }}
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+
+    steps:
+      - name: Checkout harness repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Reconcile production delivery
+        env:
+          REPO: ${{ github.event.inputs.repo || '' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          ARGS=(--json)
+          if [ -n "$REPO" ]; then
+            ARGS+=(--repo "$REPO")
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          npm run harness:reconcile-production -- "${ARGS[@]}"

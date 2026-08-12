@@ -14,12 +14,22 @@ When `owner/example-target-app` **`main`** receives a push (after manual integra
 target repo push to main → repository_dispatch production_promoted → harness GHA → harness:sync-production --repo target-app
 ```
 
+A scheduled reconciler also runs every 20 minutes (`harness-reconcile-production.yml` → `harness:reconcile-production`) so missed dispatches still advance deploy-verified completion.
+
+**Promotion contract:** only **merge or fast-forward** production promotions are supported. Squash/rebase promotions that drop merge-commit ancestry are recorded as `promotion_method_unsupported` and do **not** project **Merged / Deployed**.
+
+**Deploy gate:** when `previewProvider=vercel`, Linear **Merged / Deployed** requires a READY production deployment whose SHA contains the merge-to-dev commit, plus alias/head proof. Promotion alone records Langfuse `promoted_to_main` only.
+
+**Target workflow upgrades:** stale dispatch targets (e.g. archived `p-dev-harness`) are a managed product upgrade via `npm run harness:upgrade-target-workflows` (contract v2 marker + upgrade PR). Do not hand-edit target workflows outside that path.
+
 Powerful tokens stay in the **harness repo** GitHub Actions secrets only. The target repo receives at most **`HARNESS_DISPATCH_TOKEN`** (dispatch-only PAT scoped to the harness repo).
 
 Manual CLI remains supported:
 
 ```bash
 npm run harness:sync-production -- --repo target-app
+npm run harness:reconcile-production -- --dry-run --json
+npm run harness:upgrade-target-workflows -- --dry-run --json
 ```
 
 ---
@@ -165,7 +175,7 @@ The harness workflow change on `production_promoted` is **still required**; webh
 3. Target repo push to **`main`** → dispatch → sync job
 4. Target repo push to integration branch → no dispatch workflow run
 5. Repeat **`main`** push → idempotent (no duplicate Linear comments)
-6. Issues update to **Merged / Deployed** only when merge commit is reachable on `main` (strong proof)
+6. Issues update to **Merged / Deployed** only when merge commit is reachable on `main` **and** (for Vercel targets) a READY production deployment/alias proves the merge is live
 
 ---
 

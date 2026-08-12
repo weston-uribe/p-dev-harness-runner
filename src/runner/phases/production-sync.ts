@@ -5,9 +5,7 @@ import {
 } from "../../config/defaults.js";
 import { writeManifest } from "../../artifacts/manifest.js";
 import { writeRunSummary } from "../../artifacts/summary.js";
-import {
-  getIssueSnapshotAfterPath,
-} from "../../artifacts/paths.js";
+import { getIssueSnapshotAfterPath } from "../../artifacts/paths.js";
 import {
   buildProductionPromotionCommentBody,
   findLatestMergeMarker,
@@ -24,6 +22,7 @@ import { GitHubClient } from "../../github/client.js";
 import { resolvePromotionProof } from "../../github/commit-reachability.js";
 import { resolveTargetRepo } from "../../resolver/target-repo.js";
 import { shouldCaptureApplicationPreview } from "../../preview/preview-capability.js";
+import { verifyVercelProductionDeployment } from "../../preview/production-deployment-verify.js";
 import { loadHarnessConfig } from "../../config/load-config.js";
 import { resolveHarnessWorkspaceRootFromConfigSource } from "../../config/workspace-root.js";
 import { checkProductionSyncIdempotency } from "../idempotency.js";
@@ -40,6 +39,32 @@ import { createRunId } from "../../artifacts/run-id.js";
 import { getRunDirectory } from "../../artifacts/paths.js";
 import { EventLogger } from "../../artifacts/events.js";
 import { emptyMergeManifestFields } from "../../artifacts/manifest-fields.js";
+import {
+  createEmptyWorkflowState,
+  resolvePhaseWorkflowStateStore,
+  type WorkflowStateStore,
+  type WorkflowStateRecord,
+} from "../../workflow/state/index.js";
+import { WORKFLOW_SCHEMA_VERSION } from "../../workflow/definition/product-development.v2.js";
+import type { HarnessConfig } from "../../config/types.js";
+import {
+  buildProductionEffectId,
+  createProductionCompletionRecord,
+  isProductionEffectCompleted,
+  upsertProductionEffect,
+  withProductionState,
+  type ProductionCompletionRecord,
+  type ProductionEffectKind,
+} from "../../workflow/state/production-completion.js";
+import { createEvaluationRuntime } from "../../evaluation/runtime.js";
+import { deriveSessionId } from "../../evaluation/identifiers.js";
+import {
+  buildFinalProductionDeliveryOutcomeScore,
+  buildProductionMilestoneScore,
+  type ProductionDeliveryMilestone,
+} from "../../evaluation/outcomes.js";
+import { safeRecordScore } from "../../evaluation/phase-helpers.js";
+import type { EvaluationRuntime } from "../../evaluation/types.js";
 
 export interface ProductionSyncIssueOptions {
   issueKey: string;
@@ -54,6 +79,8 @@ export interface ProductionSyncIssueResult {
   exitCode: number;
   skippedReason?: string;
   diagnosticIssueKeyCommits?: string[];
+  productionCompletionId?: string;
+  productionState?: string;
 }
 
 function requireEnv(name: string): string {
@@ -62,6 +89,133 @@ function requireEnv(name: string): string {
     throw new Error(`${name} is required for production sync`);
   }
   return value;
+}
+
+async function loadWorkflowStateForIssue(input: {
+  issueKey: string;
+  config: HarnessConfig;
+  teamId?: string | null;
+}): Promise<{ store: WorkflowStateStore | null; state: WorkflowStateRecord }> {
+  try {
+    const store = await resolvePhaseWorkflowStateStore({
+      config: input.config,
+      teamId: input.teamId ?? undefined,
+    });
+    const existing = await store.load(input.issueKey);
+    if (existing) {
+      return { store, state: existing };
+    }
+    return {
+      store,
+      state: createEmptyWorkflowState({
+        issueKey: input.issueKey,
+        workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
+      }),
+    };
+  } catch {
+    return {
+      store: null,
+      state: createEmptyWorkflowState({
+        issueKey: input.issueKey,
+        workflowSchemaVersion: WORKFLOW_SCHEMA_VERSION,
+      }),
+    };
+  }
+}
+
+async function persistCompletion(
+  store: WorkflowStateStore | null,
+  state: WorkflowStateRecord,
+  completion: ProductionCompletionRecord,
+): Promise<WorkflowStateRecord> {
+  const next: WorkflowStateRecord = {
+    ...state,
+    stateRevision: state.stateRevision + 1,
+    productionCompletion: completion,
+  };
+  if (!store) {
+    return next;
+  }
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const saved = await store.compareAndSet({
+      issueKey: state.issueKey,
+      expectedRevision: state.stateRevision,
+      next,
+    });
+    if (saved) {
+      return saved;
+    }
+    const latest = await store.load(state.issueKey);
+    if (!latest) {
+      break;
+    }
+    state = latest;
+    next.stateRevision = latest.stateRevision + 1;
+    next.productionCompletion = completion;
+  }
+  return next;
+}
+
+function resolveCompletionRecord(
+  state: WorkflowStateRecord,
+  input: {
+    issueKey: string;
+    targetRepository: string;
+    mergeToDevSha: string;
+    productionBranch: string;
+  },
+): ProductionCompletionRecord {
+  const existing = state.productionCompletion;
+  if (
+    existing &&
+    existing.mergeToDevSha.toLowerCase() === input.mergeToDevSha.toLowerCase() &&
+    existing.productionBranch === input.productionBranch &&
+    existing.targetRepository.trim().toLowerCase() ===
+      input.targetRepository.trim().toLowerCase()
+  ) {
+    return existing;
+  }
+  return createProductionCompletionRecord(input);
+}
+
+function milestoneForEffect(
+  kind: ProductionEffectKind,
+): ProductionDeliveryMilestone | null {
+  switch (kind) {
+    case "langfuse_promoted_to_main":
+      return "promoted_to_main";
+    case "langfuse_production_deployment_started":
+      return "production_deployment_started";
+    case "langfuse_production_deployment_ready":
+      return "production_deployment_ready";
+    case "langfuse_production_verified":
+      return "production_verified";
+    default:
+      return null;
+  }
+}
+
+function emitProductionMilestone(
+  runtime: EvaluationRuntime | null,
+  sessionId: string,
+  completion: ProductionCompletionRecord,
+  kind: ProductionEffectKind,
+  timestamp: string,
+): void {
+  const milestone = milestoneForEffect(kind);
+  if (!runtime || !milestone) {
+    return;
+  }
+  safeRecordScore(
+    runtime,
+    buildProductionMilestoneScore({
+      namespace: runtime.namespace,
+      sessionId,
+      milestone,
+      productionCompletionId: completion.productionCompletionId,
+      timestamp,
+    }),
+  );
 }
 
 async function writeFinalManifest(
@@ -116,6 +270,8 @@ export async function executeProductionSyncForIssue(
   let errorClassification: ErrorClassification = null;
   let skippedReason: string | undefined;
   let diagnosticIssueKeyCommits: string[] | undefined;
+  let productionCompletionId: string | undefined;
+  let productionState: string | undefined;
 
   const emptyParsed: ParsedIssue = {
     task: "",
@@ -199,7 +355,7 @@ export async function executeProductionSyncForIssue(
           integrationSuccessStatus,
         );
 
-        if (idempotency.skip) {
+        if (idempotency.skip && !options.force) {
           finalOutcome = "duplicate";
           errorClassification = "duplicate_phase_completed";
           skippedReason = idempotency.reason;
@@ -219,71 +375,350 @@ export async function executeProductionSyncForIssue(
             issueKey: options.issueKey,
           });
 
-          if (!proof.proof) {
-            finalOutcome = "skipped";
-            errorClassification = "production_not_promoted";
-            skippedReason = proof.reason;
-            diagnosticIssueKeyCommits = proof.diagnosticIssueKeyCommits;
-          } else if (options.dryRun) {
-            finalOutcome = "success";
-            skippedReason = "dry_run";
-          } else {
-            const productionUrl = resolved.productionUrl ?? null;
+          const { store, state: initialState } = await loadWorkflowStateForIssue({
+            issueKey: options.issueKey,
+            config,
+            teamId: issue.teamId,
+          });
+          let state = initialState;
 
-            const promotionBody = buildProductionPromotionCommentBody({
-              prUrl: prUrl ?? markers.prUrl ?? "",
-              branch: markers.branch ?? "unknown",
-              targetRepo: markers.targetRepo ?? resolved.targetRepo,
-              baseBranch: resolved.baseBranch,
+          if (!proof.proof) {
+            if (proof.reason === "promotion_method_unsupported") {
+              const mergeShaForIdentity =
+                mergeCommitSha ?? proof.diagnosticIssueKeyCommits?.[0] ?? "unknown";
+              let completion = resolveCompletionRecord(state, {
+                issueKey: options.issueKey,
+                targetRepository: markers.targetRepo ?? resolved.targetRepo,
+                mergeToDevSha: mergeShaForIdentity,
+                productionBranch: resolved.productionBranch,
+              });
+              completion = withProductionState(completion, "blocked", {
+                blockedReason: "promotion_method_unsupported",
+              });
+              state = await persistCompletion(store, state, completion);
+              productionCompletionId = completion.productionCompletionId;
+              productionState = completion.state;
+              finalOutcome = "skipped";
+              errorClassification = "production_not_promoted";
+              skippedReason = "promotion_method_unsupported";
+              diagnosticIssueKeyCommits = proof.diagnosticIssueKeyCommits;
+            } else {
+              finalOutcome = "skipped";
+              errorClassification = "production_not_promoted";
+              skippedReason = proof.reason;
+              diagnosticIssueKeyCommits = proof.diagnosticIssueKeyCommits;
+            }
+          } else {
+            let completion = resolveCompletionRecord(state, {
+              issueKey: options.issueKey,
+              targetRepository: markers.targetRepo ?? resolved.targetRepo,
+              mergeToDevSha: proof.mergeCommitSha,
               productionBranch: resolved.productionBranch,
-              mergeCommitSha: proof.mergeCommitSha,
-              productionHeadSha: proof.productionHeadSha,
-              productionUrl,
-              harnessRunId: runId,
-              previousMergeRunId: markers.runId ?? null,
-              promotionProofMethod: proof.method,
+            });
+            productionCompletionId = completion.productionCompletionId;
+
+            completion = withProductionState(completion, "promotion_proven", {
+              firstProductionHeadContainingMerge: proof.productionHeadSha,
+              promotionSha: proof.productionHeadSha,
             });
 
-            const footer = {
-              orchestratorMarker: config.orchestratorMarker,
-              phase: "production_sync",
-              runId,
-              model,
-              promptVersion: PRODUCTION_SYNC_PROMPT_VERSION,
-              targetRepo: markers.targetRepo ?? resolved.targetRepo,
-              issueKey: options.issueKey,
-              baseBranch: resolved.baseBranch,
-              productionBranch: resolved.productionBranch,
-              branch: markers.branch,
-              prUrl: prUrl ?? undefined,
-              prNumber: markers.prNumber,
-              mergeCommitSha: proof.mergeCommitSha,
-              productionHeadSha: proof.productionHeadSha,
-              previousMergeRunId: markers.runId,
-              promotionProofMethod: proof.method,
-              deploymentUrl: productionUrl ?? undefined,
-            };
-
-            await postProductionSyncComment(
-              client,
-              issue.id,
-              promotionBody,
-              footer,
-            );
-            await transitionIssueStatus(client, issue, productionSuccessStatus);
-
-            const afterIssue = await fetchLinearIssue(
+            const evaluationRuntime = await createEvaluationRuntime();
+            const sessionId = deriveSessionId(
+              evaluationRuntime.namespace,
               options.issueKey,
-              linearApiKey,
             );
-            await mkdir(`${runDirectory}/linear`, { recursive: true });
-            await writeFile(
-              getIssueSnapshotAfterPath(runDirectory),
-              `${JSON.stringify(afterIssue, null, 2)}\n`,
-              "utf8",
-            );
+            const now = new Date().toISOString();
 
-            finalOutcome = "success";
+            if (
+              !isProductionEffectCompleted(completion, "langfuse_promoted_to_main")
+            ) {
+              if (!options.dryRun) {
+                emitProductionMilestone(
+                  evaluationRuntime,
+                  sessionId,
+                  completion,
+                  "langfuse_promoted_to_main",
+                  now,
+                );
+                completion = upsertProductionEffect(
+                  completion,
+                  "langfuse_promoted_to_main",
+                  "completed",
+                  { now },
+                );
+              }
+            }
+
+            const previewProvider = (
+              resolved.previewProvider ?? ""
+            ).trim().toLowerCase();
+            const requiresVercelDeploy = previewProvider === "vercel";
+
+            if (!requiresVercelDeploy) {
+              // No deployment provider: record promotion only; do not project terminal.
+              completion = withProductionState(completion, "blocked", {
+                blockedReason: "deployment_provider_not_configured",
+              });
+              state = await persistCompletion(store, state, completion);
+              productionState = completion.state;
+              finalOutcome = "skipped";
+              skippedReason = "deployment_provider_not_configured";
+              errorClassification = null;
+            } else {
+              completion = withProductionState(
+                completion,
+                "deployment_verification_pending",
+              );
+
+              const vercelToken = process.env.VERCEL_TOKEN;
+              if (!vercelToken) {
+                completion = withProductionState(completion, "blocked", {
+                  blockedReason: "vercel_token_missing",
+                });
+                state = await persistCompletion(store, state, completion);
+                productionState = completion.state;
+                finalOutcome = "skipped";
+                skippedReason = "vercel_token_missing";
+                errorClassification = "production_not_promoted";
+              } else {
+                if (
+                  !isProductionEffectCompleted(
+                    completion,
+                    "langfuse_production_deployment_started",
+                  ) &&
+                  !options.dryRun
+                ) {
+                  emitProductionMilestone(
+                    evaluationRuntime,
+                    sessionId,
+                    completion,
+                    "langfuse_production_deployment_started",
+                    now,
+                  );
+                  completion = upsertProductionEffect(
+                    completion,
+                    "langfuse_production_deployment_started",
+                    "completed",
+                    { now },
+                  );
+                }
+
+                const deploy = await verifyVercelProductionDeployment({
+                  vercelToken,
+                  githubClient: github,
+                  targetRepo: markers.targetRepo ?? resolved.targetRepo,
+                  productionBranch: resolved.productionBranch,
+                  mergeToDevSha: proof.mergeCommitSha,
+                  productionHeadSha: proof.productionHeadSha,
+                });
+
+                if (!deploy.verified) {
+                  completion = withProductionState(completion, "blocked", {
+                    blockedReason: deploy.reason,
+                    deploymentId: deploy.deploymentId,
+                    deploymentSha: deploy.deploymentSha,
+                  });
+                  state = await persistCompletion(store, state, completion);
+                  productionState = completion.state;
+                  finalOutcome = "skipped";
+                  skippedReason = deploy.reason;
+                  errorClassification = "production_not_promoted";
+                } else {
+                  if (
+                    !isProductionEffectCompleted(
+                      completion,
+                      "langfuse_production_deployment_ready",
+                    ) &&
+                    !options.dryRun
+                  ) {
+                    emitProductionMilestone(
+                      evaluationRuntime,
+                      sessionId,
+                      completion,
+                      "langfuse_production_deployment_ready",
+                      now,
+                    );
+                    completion = upsertProductionEffect(
+                      completion,
+                      "langfuse_production_deployment_ready",
+                      "completed",
+                      { now },
+                    );
+                  }
+
+                  completion = withProductionState(
+                    completion,
+                    "deployment_verified",
+                    {
+                      deploymentProvider: deploy.provider,
+                      deploymentId: deploy.deploymentId,
+                      deploymentSha: deploy.deploymentSha,
+                      aliasSha: deploy.aliasSha,
+                      productionAliasVerifiedAt: now,
+                    },
+                  );
+
+                  if (options.dryRun) {
+                    productionState = completion.state;
+                    finalOutcome = "success";
+                    skippedReason = "dry_run";
+                  } else {
+                    completion = withProductionState(
+                      completion,
+                      "linear_projection_pending",
+                    );
+
+                    const linearCommentEffect: ProductionEffectKind =
+                      "linear_production_comment";
+                    const linearStatusEffect: ProductionEffectKind =
+                      "linear_status_transition";
+                    const commentEffectId = buildProductionEffectId(
+                      completion.productionCompletionId,
+                      linearCommentEffect,
+                    );
+
+                    if (
+                      !isProductionEffectCompleted(completion, linearCommentEffect)
+                    ) {
+                      const productionUrl =
+                        resolved.productionUrl ?? deploy.deploymentUrl;
+
+                      const promotionBody = buildProductionPromotionCommentBody({
+                        prUrl: prUrl ?? markers.prUrl ?? "",
+                        branch: markers.branch ?? "unknown",
+                        targetRepo: markers.targetRepo ?? resolved.targetRepo,
+                        baseBranch: resolved.baseBranch,
+                        productionBranch: resolved.productionBranch,
+                        mergeCommitSha: proof.mergeCommitSha,
+                        productionHeadSha: proof.productionHeadSha,
+                        productionUrl,
+                        harnessRunId: runId,
+                        previousMergeRunId: markers.runId ?? null,
+                        promotionProofMethod: proof.method,
+                      });
+
+                      const footer = {
+                        orchestratorMarker: config.orchestratorMarker,
+                        phase: "production_sync" as const,
+                        runId,
+                        model,
+                        promptVersion: PRODUCTION_SYNC_PROMPT_VERSION,
+                        targetRepo: markers.targetRepo ?? resolved.targetRepo,
+                        issueKey: options.issueKey,
+                        baseBranch: resolved.baseBranch,
+                        productionBranch: resolved.productionBranch,
+                        branch: markers.branch,
+                        prUrl: prUrl ?? undefined,
+                        prNumber: markers.prNumber,
+                        mergeCommitSha: proof.mergeCommitSha,
+                        productionHeadSha: proof.productionHeadSha,
+                        previousMergeRunId: markers.runId,
+                        promotionProofMethod: proof.method,
+                        deploymentUrl: productionUrl,
+                        productionCompletionId: completion.productionCompletionId,
+                        productionEffectId: commentEffectId,
+                      };
+
+                      await postProductionSyncComment(
+                        client,
+                        issue.id,
+                        promotionBody,
+                        footer,
+                      );
+                      completion = upsertProductionEffect(
+                        completion,
+                        linearCommentEffect,
+                        "completed",
+                        { now },
+                      );
+                    }
+
+                    if (
+                      !isProductionEffectCompleted(completion, linearStatusEffect)
+                    ) {
+                      await transitionIssueStatus(
+                        client,
+                        issue,
+                        productionSuccessStatus,
+                      );
+                      completion = upsertProductionEffect(
+                        completion,
+                        linearStatusEffect,
+                        "completed",
+                        { now },
+                      );
+                    }
+
+                    completion = withProductionState(
+                      completion,
+                      "langfuse_projection_pending",
+                    );
+
+                    if (
+                      !isProductionEffectCompleted(
+                        completion,
+                        "langfuse_production_verified",
+                      )
+                    ) {
+                      emitProductionMilestone(
+                        evaluationRuntime,
+                        sessionId,
+                        completion,
+                        "langfuse_production_verified",
+                        now,
+                      );
+                      completion = upsertProductionEffect(
+                        completion,
+                        "langfuse_production_verified",
+                        "completed",
+                        { now },
+                      );
+                    }
+
+                    if (
+                      !isProductionEffectCompleted(
+                        completion,
+                        "langfuse_delivery_outcome",
+                      )
+                    ) {
+                      safeRecordScore(
+                        evaluationRuntime,
+                        buildFinalProductionDeliveryOutcomeScore({
+                          namespace: evaluationRuntime.namespace,
+                          sessionId,
+                          productionCompletionId:
+                            completion.productionCompletionId,
+                          timestamp: now,
+                        }),
+                      );
+                      completion = upsertProductionEffect(
+                        completion,
+                        "langfuse_delivery_outcome",
+                        "completed",
+                        { now },
+                      );
+                    }
+
+                    completion = withProductionState(completion, "completed");
+                    state = await persistCompletion(store, state, completion);
+                    productionState = completion.state;
+
+                    const afterIssue = await fetchLinearIssue(
+                      options.issueKey,
+                      linearApiKey,
+                    );
+                    await mkdir(`${runDirectory}/linear`, { recursive: true });
+                    await writeFile(
+                      getIssueSnapshotAfterPath(runDirectory),
+                      `${JSON.stringify(afterIssue, null, 2)}\n`,
+                      "utf8",
+                    );
+
+                    finalOutcome = "success";
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -337,5 +772,11 @@ export async function executeProductionSyncForIssue(
     resolved,
     events,
   );
-  return { ...result, skippedReason, diagnosticIssueKeyCommits };
+  return {
+    ...result,
+    skippedReason,
+    diagnosticIssueKeyCommits,
+    productionCompletionId,
+    productionState,
+  };
 }

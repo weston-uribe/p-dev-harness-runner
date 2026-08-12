@@ -1,6 +1,7 @@
 import type { RemoteWorkflowStatus } from "./remote-actions.js";
 import {
   buildTargetWorkflowBranchName,
+  compareTargetWorkflowContent,
 } from "./target-workflow-setup.js";
 import { targetRepoSlugFromUrl } from "./harness-secret-setup.js";
 import type {
@@ -144,14 +145,10 @@ export function advanceMockTargetWorkflowFinalization(input: {
   );
 
   const existing = input.existingWorkflowContent;
-  let workflowStatus: RemoteWorkflowStatus = "unknown";
-  if (existing === null || existing === undefined) {
-    workflowStatus = "missing";
-  } else if (existing === input.intendedWorkflowContent) {
-    workflowStatus = "present";
-  } else {
-    workflowStatus = "differs";
-  }
+  const workflowStatus: RemoteWorkflowStatus =
+    existing === null || existing === undefined
+      ? "missing"
+      : compareTargetWorkflowContent(existing, input.intendedWorkflowContent);
 
   if (workflowStatus === "present") {
     runtimeByKey.delete(runtimeKey(targetRepoSlug, input.finalizeInput.repoConfigId));

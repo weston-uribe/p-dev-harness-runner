@@ -29,6 +29,7 @@ import {
   compareTargetWorkflowContent,
   previewTargetWorkflowSetup,
 } from "./target-workflow-setup.js";
+import { workflowStatusNeedsUpgrade } from "./target-workflow-contract.js";
 import {
   blockedCategoryMessage,
   classifyWorkflowInstallMergeRejection,
@@ -661,10 +662,7 @@ async function attemptEmptyInstallRecovery(input: {
   lockContended: boolean;
   supersededPrNumber?: number;
 }): Promise<TargetWorkflowFinalizationResult | null> {
-  if (
-    input.productionStatus.workflowStatus !== "missing" &&
-    input.productionStatus.workflowStatus !== "differs"
-  ) {
+  if (!workflowStatusNeedsUpgrade(input.productionStatus.workflowStatus)) {
     return null;
   }
 

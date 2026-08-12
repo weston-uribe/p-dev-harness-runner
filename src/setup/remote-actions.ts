@@ -53,6 +53,8 @@ export type RemoteWorkflowStatus =
   | "present"
   | "missing"
   | "differs"
+  | "stale_dispatch_target"
+  | "contract_outdated"
   | "unknown";
 
 export type RemoteAccessStatus = "available" | "denied" | "unknown";

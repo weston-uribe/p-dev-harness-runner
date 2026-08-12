@@ -30,6 +30,9 @@ import {
   formatDoctorCheckLine,
   type DoctorCheckResult,
 } from "../../setup/doctor-summary.js";
+import { createLiveGitHubRemoteSetupProvider } from "../../setup/github-remote-setup-live.js";
+import { previewTargetWorkflowSetup } from "../../setup/target-workflow-setup.js";
+import { workflowStatusNeedsUpgrade } from "../../setup/target-workflow-contract.js";
 import { EXIT_CONFIG, EXIT_SUCCESS } from "../exit-codes.js";
 
 export interface DoctorOptions {
@@ -345,6 +348,66 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
       ok: false,
       detail: "required for handoff runs (Milestone 4+)",
     });
+  }
+
+  if (config) {
+    const cwd = path.dirname(path.resolve(options.configPath));
+    const dispatchRepo = await resolveHarnessDispatchRepo({ cwd });
+    if (dispatchRepo.resolved && dispatchRepo.repo) {
+      const token = process.env.GITHUB_TOKEN ?? process.env.HARNESS_GITHUB_TOKEN;
+      const provider = token
+        ? createLiveGitHubRemoteSetupProvider(token)
+        : null;
+
+      for (const repo of config.repos) {
+        if (repo.baseBranch === repo.productionBranch) {
+          continue;
+        }
+        const preview = previewTargetWorkflowSetup({
+          repoConfigId: repo.id,
+          targetRepo: repo.targetRepo,
+          productionBranch: repo.productionBranch,
+          harnessDispatchRepo: dispatchRepo,
+        });
+        let status = preview.plan.workflowStatus;
+        if (provider && !preview.validationError) {
+          try {
+            const remote = await provider.checkTargetWorkflowStatus({
+              targetRepoSlug: preview.plan.targetRepoSlug,
+              productionBranch: repo.productionBranch,
+              workflowPath: preview.plan.workflowPath,
+              intendedWorkflowContent: preview.workflowContent,
+            });
+            status = remote.workflowStatus;
+          } catch (error) {
+            checks.push({
+              label: `${repo.id} target workflow`,
+              ok: false,
+              detail: error instanceof Error ? error.message : String(error),
+            });
+            continue;
+          }
+        } else if (!provider) {
+          status = "unknown";
+        }
+
+        const needsUpgrade = workflowStatusNeedsUpgrade(status);
+        checks.push({
+          label: `${repo.id} target workflow`,
+          ok:
+            status !== "stale_dispatch_target" &&
+            status !== "missing" &&
+            status !== "unknown",
+          skipped: status === "unknown",
+          detail:
+            status === "unknown"
+              ? "GITHUB_TOKEN required for live audit"
+              : needsUpgrade
+                ? `${status} — run harness:upgrade-target-workflows`
+                : status,
+        });
+      }
+    }
   }
 
   if (isPublicRunnerMode()) {

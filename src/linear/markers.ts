@@ -32,6 +32,8 @@ export interface HarnessMarkers {
   productionHeadSha?: string;
   previousMergeRunId?: string;
   promotionProofMethod?: string;
+  productionCompletionId?: string;
+  productionEffectId?: string;
   repairAttempt?: string;
   repairPath?: string;
   triggerReason?: string;
@@ -192,6 +194,12 @@ function parseHarnessMarkerLines(block: string): HarnessMarkers {
         break;
       case "promotion_proof_method":
         markers.promotionProofMethod = value;
+        break;
+      case "production_completion_id":
+        markers.productionCompletionId = value;
+        break;
+      case "production_effect_id":
+        markers.productionEffectId = value;
         break;
       case "repair_attempt":
         markers.repairAttempt = value;

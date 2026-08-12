@@ -24,7 +24,7 @@ describe("target-workflow-setup", () => {
     expect(yaml).toContain("branches: [main]");
   });
 
-  it("compares workflow content as present, missing, or differs", () => {
+  it("compares workflow content including stale archived dispatch and contract version", () => {
     const intended = generateTargetWorkflowYaml({
       harnessDispatchRepo: "owner/harness",
       repoConfigId: "target-app",
@@ -34,7 +34,18 @@ describe("target-workflow-setup", () => {
 
     expect(compareTargetWorkflowContent(null, intended)).toBe("missing");
     expect(compareTargetWorkflowContent(intended, intended)).toBe("present");
-    expect(compareTargetWorkflowContent("different", intended)).toBe("differs");
+    expect(compareTargetWorkflowContent("different", intended)).toBe(
+      "contract_outdated",
+    );
+
+    const archived = intended.replaceAll(
+      "owner/harness",
+      "weston-uribe/p-dev-harness",
+    );
+    expect(compareTargetWorkflowContent(archived, intended)).toBe(
+      "stale_dispatch_target",
+    );
+    expect(intended).toContain("p-dev-target-workflow-contract:v2");
   });
 
   it("builds branch/PR preview without direct production branch writes", () => {

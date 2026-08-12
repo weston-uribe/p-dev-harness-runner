@@ -32,7 +32,13 @@ npm run harness:sync-production -- --issue WES-19
 
 Harness Actions also supports **`workflow_dispatch`** with input **`sync_repo=target-app`** on **Harness Auto Runner**. Use **`sync_dry_run=true`** (default) to validate sync routing without Linear writes; set **`sync_dry_run=false`** only for live updates.
 
-**Promotion guidance:** prefer merge or fast-forward when promoting `dev` → `main`. Squash promotion may make the original dev merge commit unreachable; sync will correctly no-op with `production_not_promoted`.
+**Promotion contract:** only **merge or fast-forward** when promoting `dev` → `main`. Squash/rebase promotions that drop merge-commit ancestry are unsupported (`promotion_method_unsupported`) and will not project **Merged / Deployed**. For Vercel-backed targets, sync also requires a READY production deployment/alias containing the merge before that terminal status.
+
+Upgrade stale target workflows with:
+
+```bash
+npm run harness:upgrade-target-workflows -- --dry-run --json
+```
 
 ## Linear setup (before changing target repo `baseBranch`)
 

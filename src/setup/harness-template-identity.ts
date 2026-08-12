@@ -31,6 +31,12 @@ export const HARNESS_MARKER_VERSION = 1;
 export const HARNESS_LEGACY_PUBLIC_SOURCE_REPO =
   "weston-uribe/agentic-product-development-harness";
 
+/**
+ * Archived legacy managed runner that still appears in older target workflows.
+ * Dispatches to this repo fail (HTTP 404); treat as stale_dispatch_target.
+ */
+export const HARNESS_LEGACY_ARCHIVED_RUNNER_REPO = "weston-uribe/p-dev-harness";
+
 export interface HarnessTemplateIdentity {
   schemaVersion: number;
   product: string;

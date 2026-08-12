@@ -10,6 +10,26 @@ export interface CommitReachabilityResult {
   productionHeadSha: string;
 }
 
+/** True when `ancestorSha` is an ancestor of `descendantSha` (or equal). */
+export async function isCommitAncestorOf(
+  client: GitHubClient,
+  owner: string,
+  repo: string,
+  ancestorSha: string,
+  descendantSha: string,
+): Promise<boolean> {
+  if (ancestorSha.toLowerCase() === descendantSha.toLowerCase()) {
+    return true;
+  }
+  const compare = await client.compareCommits(
+    owner,
+    repo,
+    ancestorSha,
+    descendantSha,
+  );
+  return compare.behind_by === 0 && compare.status !== "diverged";
+}
+
 export async function isCommitReachableFromBranch(
   client: GitHubClient,
   owner: string,
@@ -19,13 +39,21 @@ export async function isCommitReachableFromBranch(
 ): Promise<CommitReachabilityResult> {
   const branchRef = await client.getBranchRef(owner, repo, productionBranch);
   const productionHeadSha = branchRef.object.sha;
+  if (commitSha.toLowerCase() === productionHeadSha.toLowerCase()) {
+    return {
+      reachable: true,
+      status: "identical",
+      aheadBy: 0,
+      behindBy: 0,
+      productionHeadSha,
+    };
+  }
   const compare = await client.compareCommits(
     owner,
     repo,
     commitSha,
     productionHeadSha,
   );
-
   const reachable =
     compare.behind_by === 0 && compare.status !== "diverged";
 
@@ -136,6 +164,16 @@ export async function resolvePromotionProof(
       input.issueKey,
       input.baseBranch,
     );
+  }
+
+  // Issue-key commits on production without merge-SHA ancestry indicate an
+  // unsupported squash/rebase production promotion (merge/FF contract only).
+  if (diagnosticIssueKeyCommits && diagnosticIssueKeyCommits.length > 0) {
+    return {
+      proof: false,
+      reason: "promotion_method_unsupported",
+      diagnosticIssueKeyCommits,
+    };
   }
 
   return {

@@ -62,7 +62,13 @@ export interface TargetWorkflowFinalizationResult {
   prNumber?: number;
   supersededPrNumber?: number;
   validatedHeadSha?: string;
-  workflowStatus: "present" | "missing" | "differs" | "unknown";
+  workflowStatus:
+    | "present"
+    | "missing"
+    | "differs"
+    | "stale_dispatch_target"
+    | "contract_outdated"
+    | "unknown";
   canRetry: boolean;
   /** Server-authoritative: client must not infer retryability from message text. */
   retryable: boolean;
