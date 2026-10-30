@@ -161,6 +161,11 @@ export interface AcquireBuilderAgentParams {
     orchestratorMarker: string;
     previousImplementationRunId?: string;
     previousRevisionRunId?: string;
+    workflowState?: {
+      builderAgentId?: string | null;
+      builderRunId?: string | null;
+      issueKey?: string;
+    } | null;
   };
   events: EventLogger;
   /** Optional for tests/nonproduction; production wrapper always supplies one. */

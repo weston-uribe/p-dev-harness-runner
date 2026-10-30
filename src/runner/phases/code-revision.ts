@@ -27,6 +27,7 @@ import {
   postIssueComment,
   transitionIssueStatus,
 } from "../../linear/writer.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import { formatCodeRevisionComment } from "../../linear/code-revision-comment.js";
 import {
   createCodeRevisionAgent,
@@ -778,8 +779,10 @@ export async function executeCodeRevisionPhase(
           promptVersion: version,
           targetRepo: resolved.targetRepo,
           baseBranch: resolved.baseBranch,
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
+          ...toPublicProviderIdentityHashes({
+            cursorAgentId,
+            cursorRunId,
+          }),
           revisionIdentity: runId,
           causedByReviewDecisionIdentity: reviewDecision!.decisionIdentity,
           currentHeadSha: revisedHeadSha,
@@ -852,8 +855,10 @@ export async function executeCodeRevisionPhase(
           promptVersion: promptVersion ?? "code-revision@1",
           targetRepo: resolved.targetRepo,
           baseBranch: resolved.baseBranch,
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
+          ...toPublicProviderIdentityHashes({
+            cursorAgentId,
+            cursorRunId,
+          }),
           branch: branch ?? undefined,
           prUrl: prUrl ?? latestImplementation.prUrl,
         },

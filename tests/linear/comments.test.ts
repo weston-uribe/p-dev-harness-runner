@@ -7,6 +7,7 @@ import {
   hasPlanningCompletionMarker,
   hasPhaseStartMarker,
 } from "../../src/linear/comments.js";
+import { hashProviderIdentity } from "../../src/identity/provider-identity-hash.js";
 import {
   getVisibleCommentBody,
   hasVisibleMachineMetadata,
@@ -14,12 +15,14 @@ import {
 
 describe("linear comments", () => {
   it("formats harness hidden metadata with required marker fields", () => {
+    const cursorAgentId = "agent-123";
+    const cursorRunId = "run-456";
     const footer = formatHarnessCommentFooter({
       orchestratorMarker: "harness-orchestrator-v1",
       phase: "planning",
       runId: "2026-07-06T20-30-00Z-WES-11",
-      cursorAgentId: "agent-123",
-      cursorRunId: "run-456",
+      cursorAgentIdHash: hashProviderIdentity(cursorAgentId),
+      cursorRunIdHash: hashProviderIdentity(cursorRunId),
       model: "composer-2.5",
       promptVersion: "planning@1",
       targetRepo: "https://github.com/owner/example-target-app",
@@ -29,8 +32,14 @@ describe("linear comments", () => {
     expect(footer).toContain("harness-orchestrator-v1");
     expect(footer).toContain("phase: planning");
     expect(footer).toContain("run_id: 2026-07-06T20-30-00Z-WES-11");
-    expect(footer).toContain("cursor_agent_id: agent-123");
-    expect(footer).toContain("cursor_run_id: run-456");
+    expect(footer).toContain(
+      `cursor_agent_id_hash: ${hashProviderIdentity(cursorAgentId)}`,
+    );
+    expect(footer).toContain(
+      `cursor_run_id_hash: ${hashProviderIdentity(cursorRunId)}`,
+    );
+    expect(footer).not.toContain("cursor_agent_id:");
+    expect(footer).not.toContain("cursor_run_id:");
     expect(footer).toContain("model: composer-2.5");
     expect(footer).toContain("prompt_version: planning@1");
     expect(footer).toContain(
@@ -62,6 +71,26 @@ describe("linear comments", () => {
     expect(body).not.toContain("🤖 Harness update");
   });
 
+  it("formats planning-only terminal comment when planningOnlyTerminal is true", () => {
+    const body = formatPlanningComment(
+      "Plan only scope",
+      {
+        orchestratorMarker: "harness-orchestrator-v1",
+        phase: "planning",
+        runId: "run-plan-only",
+        model: "composer-2.5",
+        promptVersion: "planning@1",
+        targetRepo: "https://github.com/example/repo",
+      },
+      { planningOnlyTerminal: true },
+    );
+
+    expect(body).toContain("planning-only execution");
+    expect(body).toContain("implementation was not started");
+    expect(body).toContain("**Canceled**");
+    expect(body).not.toContain("Implementation will start automatically.");
+  });
+
   it("detects planning completion marker in comment body", () => {
     const comment = formatPlanningComment("Plan content", {
       orchestratorMarker: "harness-orchestrator-v1",
@@ -80,7 +109,9 @@ describe("linear comments", () => {
     );
   });
 
-  it("formats building start comment with links only and no visible metadata", () => {
+  it("formats building start comment with GitHub Actions link only and no visible metadata", () => {
+    const cursorAgentId = "bc-agent";
+    const cursorRunId = "run-abc";
     const body = formatPhaseStartComment(
       "implementation_start",
       {
@@ -89,8 +120,6 @@ describe("linear comments", () => {
         branch: "cursor/wes-18-test",
         githubActionsRunUrl:
           "https://github.com/weston-uribe/agentic-product-development-harness/actions/runs/123",
-        cursorAgentId: "bc-agent",
-        cursorRunId: "run-abc",
       },
       {
         orchestratorMarker: "harness-orchestrator-v1",
@@ -101,8 +130,8 @@ describe("linear comments", () => {
         branch: "cursor/wes-18-test",
         githubActionsRunUrl:
           "https://github.com/weston-uribe/agentic-product-development-harness/actions/runs/123",
-        cursorAgentId: "bc-agent",
-        cursorRunId: "run-abc",
+        cursorAgentIdHash: hashProviderIdentity(cursorAgentId),
+        cursorRunIdHash: hashProviderIdentity(cursorRunId),
       },
     );
 
@@ -111,11 +140,12 @@ describe("linear comments", () => {
     expect(body).toContain("# Comment from harness");
     expect(body).toContain("**Phase:** Building");
     expect(visible).toContain("[GitHub Actions run]");
-    expect(visible).toContain("[Cursor Cloud run]");
+    expect(visible).not.toContain("[Cursor Cloud run]");
     expect(visible).not.toContain("## For the PM");
     expect(visible).not.toContain("## For the engineer");
     expect(visible).not.toContain("Issue: WES-18");
     expect(visible).not.toContain("cursor_agent_id");
+    expect(visible).not.toContain("cursor_agent_id_hash");
     expect(hasVisibleMachineMetadata(body)).toBe(false);
   });
 
@@ -145,6 +175,7 @@ describe("linear comments", () => {
 
     expect(body).toContain("**Phase:** Merging");
     expect(visible).toContain("[GitHub Actions run]");
+    expect(visible).not.toContain("[Cursor Cloud run]");
     expect(visible).not.toContain("[Pull request]");
     expect(visible).not.toContain("## For the PM");
     expect(visible).not.toContain("## For the engineer");

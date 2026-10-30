@@ -28,6 +28,7 @@ import {
   transitionIssueStatus,
   type LinearCommentRecord,
 } from "../../linear/writer.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import {
   claimAgentRun,
   DEFAULT_ACTIVE_RUN_LEASE_TTL_MS,
@@ -514,6 +515,13 @@ export async function executeImplementationPhase(
 
     let supersededGenerationIds: string[] = [];
     let implementationSubjectIdentity: string | null = null;
+    let builderWorkflowState:
+      | {
+          builderAgentId?: string | null;
+          builderRunId?: string | null;
+          issueKey?: string;
+        }
+      | null = null;
     try {
       const resolvedSubject = await resolveImplementationSubject({
         config,
@@ -523,6 +531,13 @@ export async function executeImplementationPhase(
       implementationSubjectIdentity = resolvedSubject.subjectIdentity;
       const stateStore = resolvedSubject.stateStore;
       let workflowState = resolvedSubject.state;
+      if (workflowState) {
+        builderWorkflowState = {
+          builderAgentId: workflowState.builderAgentId,
+          builderRunId: workflowState.builderRunId,
+          issueKey: options.issueKey,
+        };
+      }
       if (stateStore && workflowState) {
         supersededGenerationIds = [
           ...(workflowState.supersededGenerationIdentities ?? []),
@@ -883,6 +898,7 @@ export async function executeImplementationPhase(
         idempotencyKey: implementationIdempotencyKey,
         comments,
         orchestratorMarker: config.orchestratorMarker,
+        workflowState: builderWorkflowState,
       },
       buildLaunchContext: (info) =>
         buildPhaseLaunchContext({
@@ -1338,8 +1354,10 @@ export async function executeImplementationPhase(
       try {
         await postErrorComment(client, issue.id, message, {
           ...footerBase,
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
+          ...toPublicProviderIdentityHashes({
+            cursorAgentId,
+            cursorRunId,
+          }),
           branch: branch ?? undefined,
           prUrl: prUrl ?? undefined,
         }, "implementation");

@@ -80,14 +80,17 @@ AES-256-GCM envelopes for full agent/run IDs (`P_DEV_PROVENANCE_KEY_V1`). Joins 
 
 **Provenance event store and public-safe provenance diagnostics** must not persist or emit plaintext Cursor agent/run IDs in paths, commit messages, or gap logs.
 
-**Existing operational plaintext identity surfaces** (out of scope for this capture-only change; documented for honest privacy verdicts):
+**Public Linear identity contract (canary-readiness repair):** new harness comments must write only canonical SHA-256 public hashes (`cursor_agent_id_hash`, `cursor_run_id_hash`, `builder_agent_id_hash`, `previous_builder_agent_id_hash`) matching `hashProviderIdentity` (`^[0-9a-f]{64}$`). Legacy raw marker fields remain readable for historical issues; new comments must never write them. Cursor Cloud URLs embedding complete provider IDs are not emitted on new comments.
 
-- Linear harness markers / phase-start comments that may include `cursorAgentId` / `cursorRunId`
-- Workflow and builder continuity state used for resume
-- Local run manifests, event logs, and Cursor run-observer telemetry under `runs/`
-- Existing Cursor event log lines such as `cursor_agent_created`
+**Approved private plaintext identity boundaries** (not public/Linear):
 
-Privacy verdicts for this feature are scoped to the provenance event store and public-safe provenance diagnostics — not a claim that no plaintext ID exists anywhere in the harness.
+- Transient in-memory provider calls and responses
+- Encrypted provenance envelopes
+- Private workflow-state Builder resume fields
+- Existing private Langfuse telemetry
+- Ephemeral local `runs/` artifacts that are not uploaded or publicly projected
+
+Privacy verdicts for the provenance event store remain scoped to that store and public-safe provenance diagnostics.
 
 ### Closed coverage epochs
 

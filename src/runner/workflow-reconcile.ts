@@ -20,6 +20,7 @@ import { evaluateMergeReconcile } from "./merge-reconcile.js";
 import { resolveRoute } from "./resolve-route.js";
 import type { RunPhase } from "../types/run.js";
 import type { WorkflowStateRecord } from "../workflow/state/types.js";
+import { createEmptyWorkflowState } from "../workflow/state/types.js";
 import type { WorkflowStateStore } from "../workflow/state/index.js";
 import { listIncompleteSideEffects } from "../workflow/state/side-effects.js";
 import {
@@ -67,6 +68,11 @@ import {
 import { isActiveRunLeaseExpired } from "../workflow/state/apply.js";
 import { buildPlanReviewDispatchEffectId } from "../workflow/plan-review-dispatch-effect.js";
 import { buildImplementationDispatchEffectId } from "../workflow/implementation-dispatch-effect.js";
+import {
+  isPlanningOnlySuppressed,
+  reconcilePlanningOnlyTerminalTransition,
+} from "../workflow/execution-policy.js";
+import { transitionIssueStatusById } from "../linear/writer.js";
 
 import { reconcileWorkflowStateTeamCandidates } from "./workflow-state-team-candidates.js";
 export { reconcileWorkflowStateTeamCandidates };
@@ -897,6 +903,55 @@ export async function evaluateWorkflowReconcileIssue(input: {
     reason = `pending_side_effects:${incompleteSideEffects.join(",")}`;
   }
 
+  if (
+    authoritativeState &&
+    stateStore &&
+    authoritativeState.executionPolicyFreeze &&
+    authoritativeState.executionPolicyResult?.kind === "terminalization_pending" &&
+    input.dispatch &&
+    !input.dryRun
+  ) {
+    const pendingTerminal = (authoritativeState.sideEffects ?? []).find(
+      (effect) =>
+        effect.kind === "planning_only_terminal_transition" &&
+        (effect.status === "pending" || effect.status === "dispatching"),
+    );
+    if (pendingTerminal) {
+      const freeze = authoritativeState.executionPolicyFreeze;
+      const client = createLinearClient(input.linearApiKey);
+      const freshIssue = await fetchLinearIssue(issueKey, input.linearApiKey);
+      authoritativeState = await reconcilePlanningOnlyTerminalTransition({
+        store: stateStore,
+        issueKey,
+        freeze,
+        currentStatusId: freshIssue.statusId,
+        transitionToTerminal: async () => {
+          await transitionIssueStatusById(
+            client,
+            freshIssue,
+            freeze.terminalStatusId,
+          );
+        },
+      });
+      return {
+        issueKey,
+        linearStatus: freeze.terminalStatusName,
+        phase: "planning",
+        action: "noop",
+        reason: "planning_only_terminalization_reconciled",
+        shouldRun: false,
+        dispatched: false,
+        pendingRecorded,
+        incompleteSideEffectIdentities: listIncompleteSideEffects(
+          authoritativeState,
+        ).map((effect) => effect.identity),
+        workflowStateRevision: authoritativeState.stateRevision,
+        pmFeedbackCommentId,
+        mergePrUrl,
+      };
+    }
+  }
+
   // Explicit Code Review recovery: do not rely on Linear webhooks the harness owns.
   // Also recovers Blocked issues whose durable phase is still code_review (FRE-5).
   const linearStatusLower = (issue.status ?? "").trim().toLowerCase();
@@ -993,6 +1048,10 @@ export async function evaluateWorkflowReconcileIssue(input: {
 
   // Explicit Plan Review recovery: harness-authored Plan Review is webhook-silent.
   const durablePlanReviewEligible =
+    !isPlanningOnlySuppressed(authoritativeState ?? createEmptyWorkflowState({
+      issueKey,
+      workflowSchemaVersion: "product-development-v2",
+    })) &&
     authoritativeState?.currentPhaseId === "plan_review" &&
     Boolean(authoritativeState.latestPlanArtifact) &&
     (linearStatusLower === "plan review" || linearStatusLower === "blocked");
@@ -1202,6 +1261,10 @@ export async function evaluateWorkflowReconcileIssue(input: {
     .trim()
     .toLowerCase();
   const durableImplementationEligible =
+    !isPlanningOnlySuppressed(authoritativeState ?? createEmptyWorkflowState({
+      issueKey,
+      workflowSchemaVersion: "product-development-v2",
+    })) &&
     (route.phase === "implementation" ||
       linearStatusLower === readyForBuildName ||
       authoritativeState?.currentPhaseId === "implementation_dispatch" ||

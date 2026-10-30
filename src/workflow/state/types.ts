@@ -82,7 +82,44 @@ export type WorkflowSideEffectKind =
   | "pm_handoff_marker"
   | "code_review_dispatch"
   | "plan_review_dispatch"
-  | "implementation_dispatch";
+  | "implementation_dispatch"
+  | "planning_only_terminal_transition";
+
+export const EXECUTION_POLICY_SCHEMA_VERSION =
+  "p-dev.execution-policy.v1" as const;
+export type ExecutionPolicyKind = "stop_after_planning";
+export type ExecutionPolicyResultKind =
+  | "terminalization_pending"
+  | "terminalized";
+
+export interface ExecutionPolicyFreeze {
+  schemaVersion: typeof EXECUTION_POLICY_SCHEMA_VERSION;
+  policyKind: ExecutionPolicyKind;
+  policyIdentity: string;
+  linearTeamId: string;
+  issueInternalId: string;
+  issueKey: string;
+  sourceLabelId: string;
+  sourceLabelName: string;
+  terminalStatusId: string;
+  terminalStatusName: string;
+  workflowSchemaVersion: string;
+  /** First-claim audit only — NOT part of policyIdentity */
+  firstClaim: {
+    linearDeliveryId: string;
+    claimedAt: string;
+    firstPlanningRunId: string;
+  };
+}
+
+export interface ExecutionPolicyResult {
+  kind: ExecutionPolicyResultKind;
+  policyIdentity: string;
+  terminalStatusId: string;
+  terminalizedAt?: string;
+  planningPhaseExecutionId?: string;
+  planGenerationId?: string;
+}
 
 export type WorkflowSideEffectStatus =
   | "pending"
@@ -106,6 +143,8 @@ export interface WorkflowSideEffectRecord {
   dispatchedAt?: string;
   /** Optional GitHub delivery id from repository_dispatch response headers. */
   githubDeliveryId?: string | null;
+  /** Frozen terminal status id for planning_only_terminal_transition. */
+  terminalStatusId?: string;
   blockedReason?: string;
   blockedAt?: string;
   /** Count of opaque HTTP dispatch attempts for this effect. */
@@ -168,6 +207,10 @@ export interface WorkflowStateRecord {
    * Identity is issue + target repo + merge-to-dev SHA + production branch.
    */
   productionCompletion?: ProductionCompletionRecord | null;
+  executionPolicyFreeze?: ExecutionPolicyFreeze | null;
+  executionPolicyResult?: ExecutionPolicyResult | null;
+  /** When true, Plan Review and implementation dispatch must not run */
+  planningOnlyDownstreamSuppressed?: boolean;
 }
 
 /** Immutable snapshot reference stored on manifests/comments. */
@@ -227,6 +270,9 @@ export function createEmptyWorkflowState(input: {
     handoffSubjectIdentity: null,
     sideEffects: [],
     productionCompletion: null,
+    executionPolicyFreeze: null,
+    executionPolicyResult: null,
+    planningOnlyDownstreamSuppressed: false,
   };
 }
 

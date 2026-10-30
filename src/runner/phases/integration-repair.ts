@@ -29,6 +29,7 @@ import {
 } from "../../github/pr-inspector.js";
 import type { ParsedPrUrl } from "../../github/pr-url.js";
 import { formatHarnessCommentFooter } from "../../linear/comments.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import type { LinearIssueSnapshot } from "../../linear/client.js";
 import { postIssueComment } from "../../linear/writer.js";
 import { inferVercelReadyFromComments } from "../../preview/production-from-merge.js";
@@ -53,6 +54,7 @@ import {
   builderMarkerEvidenceFromResolution,
 } from "../builder-thread-evidence.js";
 import { MergeError } from "../errors.js";
+import { loadWorkflowStateForIssue } from "../../workflow/resolve-implementation-subject.js";
 
 const DETERMINISTIC_UPDATE_ATTEMPTS = 2;
 const AGENT_REPAIR_ATTEMPTS = 1;
@@ -184,14 +186,16 @@ async function postRepairComment(
     touchedFiles: joinMarkerList(input.touchedFiles ?? []),
     mergeCommitSha: input.mergeCommitSha,
     repairCycleId: input.repairCycleId,
-    cursorAgentId: input.cursorAgentId,
-    cursorRunId: input.cursorRunId,
-    builderAgentId: input.builderAgentId,
+    ...toPublicProviderIdentityHashes({
+      cursorAgentId: input.cursorAgentId,
+      cursorRunId: input.cursorRunId,
+      builderAgentId: input.builderAgentId,
+      previousBuilderAgentId: input.previousBuilderAgentId,
+    }),
     builderThreadGeneration: input.builderThreadGeneration,
     builderThreadAction: input.builderThreadAction,
     builderOriginRunId: input.builderOriginRunId,
     builderThreadIdempotencyKey: input.builderThreadIdempotencyKey,
-    previousBuilderAgentId: input.previousBuilderAgentId,
     builderThreadReplacementReason: input.builderThreadReplacementReason,
   });
   await postIssueComment(
@@ -541,6 +545,11 @@ async function attemptAgentRepair(
     options.markerTargetRepo,
   );
   const comments = await listIssueComments(options.linearClient, options.issue.id);
+  const { state: repairWorkflowState } = await loadWorkflowStateForIssue({
+    config: options.config,
+    issueKey: options.issue.identifier,
+    issueTeamId: options.issue.teamId,
+  });
   const repairIdempotencyKey = buildIntegrationRepairIdempotencyKey({
     issueKey: options.issue.identifier,
     prUrl: inspectionBeforeAgent.url,
@@ -563,6 +572,13 @@ async function attemptAgentRepair(
       idempotencyKey: repairIdempotencyKey,
       comments,
       orchestratorMarker: options.config.orchestratorMarker,
+      workflowState: repairWorkflowState
+        ? {
+            builderAgentId: repairWorkflowState.builderAgentId,
+            builderRunId: repairWorkflowState.builderRunId,
+            issueKey: options.issue.identifier,
+          }
+        : null,
     },
     buildLaunchContext: (info) =>
       buildPhaseLaunchContext({

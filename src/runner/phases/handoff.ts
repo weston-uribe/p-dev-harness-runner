@@ -38,6 +38,7 @@ import {
   postHandoffComment,
   transitionIssueStatus,
 } from "../../linear/writer.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import { GitHubClient } from "../../github/client.js";
 import { assertPrBaseBranchMatches } from "../../github/base-branch.js";
 import {
@@ -632,19 +633,6 @@ export async function executeHandoffPhase(
       previousImplementationRunId,
     };
 
-    const builderEvidence =
-      resolveBuilderThreadMarkerEvidence({
-        comments,
-        orchestratorMarker: config.orchestratorMarker,
-        issueKey: issue.identifier,
-        targetRepo: markerTargetRepo,
-        branch: inspection.branch,
-        prUrl: inspection.url,
-        previousImplementationRunId: previousImplementationRunId ?? undefined,
-      }) ?? {};
-
-    // Create immutable implementation identity BEFORE posting the Linear handoff
-    // comment so PR correlation markers survive ephemeral GHA jobs.
     let linearStatuses: Array<{ name: string; type: string; id?: string }> = [];
     try {
       const teamId = resolveAuthoritativeLinearTeamIdFromConfig(config);
@@ -660,11 +648,6 @@ export async function executeHandoffPhase(
       linearStatuses,
       issueKey: options.issueKey,
     });
-    // Build-complete ("Code Review is starting") is deferred until durable CR
-    // dispatch is proven. PM handoff body may be posted before transition.
-    const handoffBody = codeReadiness.configuredReady
-      ? buildBuildCompleteCommentBody(handoffCommentInput)
-      : buildHandoffCommentBody(handoffCommentInput);
     const logDirectory = config.logDirectory ?? "runs";
     const store = await resolvePhaseWorkflowStateStore({
       config,
@@ -684,6 +667,31 @@ export async function executeHandoffPhase(
       },
       currentPhaseId: "handoff",
     });
+
+    const builderEvidence =
+      resolveBuilderThreadMarkerEvidence({
+        comments,
+        orchestratorMarker: config.orchestratorMarker,
+        issueKey: issue.identifier,
+        targetRepo: markerTargetRepo,
+        branch: inspection.branch,
+        prUrl: inspection.url,
+        previousImplementationRunId: previousImplementationRunId ?? undefined,
+        workflowState: {
+          builderAgentId: workflowState.builderAgentId,
+          builderRunId: workflowState.builderRunId,
+          issueKey: issue.identifier,
+        },
+      }) ?? {};
+
+    // Create immutable implementation identity BEFORE posting the Linear handoff
+    // comment so PR correlation markers survive ephemeral GHA jobs.
+
+    // Build-complete ("Code Review is starting") is deferred until durable CR
+    // dispatch is proven. PM handoff body may be posted before transition.
+    const handoffBody = codeReadiness.configuredReady
+      ? buildBuildCompleteCommentBody(handoffCommentInput)
+      : buildHandoffCommentBody(handoffCommentInput);
 
     const implementationArtifact = createImplementationArtifactIdentity({
       targetRepository: markerTargetRepo,
@@ -829,12 +837,14 @@ export async function executeHandoffPhase(
         prUrl: prUrl ?? undefined,
         previewUrl: previewUrl ?? undefined,
         previousImplementationRunId: previousImplementationRunId ?? undefined,
-        builderAgentId: builderEvidence.builderAgentId,
+        ...toPublicProviderIdentityHashes({
+          builderAgentId: builderEvidence.builderAgentId,
+          previousBuilderAgentId: builderEvidence.previousBuilderAgentId,
+        }),
         builderThreadGeneration: builderEvidence.builderThreadGeneration,
         builderThreadAction: builderEvidence.builderThreadAction,
         builderOriginRunId: builderEvidence.builderOriginRunId,
         builderThreadIdempotencyKey: builderEvidence.builderThreadIdempotencyKey,
-        previousBuilderAgentId: builderEvidence.previousBuilderAgentId,
         builderThreadReplacementReason:
           builderEvidence.builderThreadReplacementReason,
         implementationGenerationId:

@@ -1,13 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { buildCursorCloudRunUrl } from "../cursor/urls.js";
 import {
   formatCommitLink,
   formatMarkdownLink,
   formatPullRequestLink,
 } from "../github/links.js";
 import type { ResolvedPreviewLinks } from "../preview/urls.js";
-import { parseHarnessMarkers } from "./markers.js";
+import { HarnessMarkerParseError, parseHarnessMarkers } from "./markers.js";
+import { toPublicProviderIdentityHashes } from "./provider-identity-public.js";
 import {
   buildHarnessComment,
   buildMinimalHarnessComment,
@@ -32,14 +32,14 @@ export interface HarnessCommentFooterInput {
   orchestratorMarker: string;
   phase: string;
   runId: string;
-  cursorAgentId?: string;
-  cursorRunId?: string;
-  builderAgentId?: string;
+  cursorAgentIdHash?: string;
+  cursorRunIdHash?: string;
+  builderAgentIdHash?: string;
   builderThreadGeneration?: number;
   builderThreadAction?: string;
   builderOriginRunId?: string;
   builderThreadIdempotencyKey?: string;
-  previousBuilderAgentId?: string;
+  previousBuilderAgentIdHash?: string;
   builderThreadReplacementReason?: string;
   model: string;
   promptVersion: string;
@@ -103,11 +103,27 @@ export interface PhaseStartCommentFooterInput extends HarnessCommentFooterInput 
   githubActionsRunUrl?: string;
 }
 
+function tryParseHarnessMarkers(
+  commentBody: string,
+): ReturnType<typeof parseHarnessMarkers> | null {
+  try {
+    return parseHarnessMarkers(commentBody);
+  } catch (error) {
+    if (error instanceof HarnessMarkerParseError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export function isHarnessOrchestratorComment(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = parseHarnessMarkers(commentBody);
+  const markers = tryParseHarnessMarkers(commentBody);
+  if (!markers) {
+    return false;
+  }
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     Boolean(markers.phase) &&
@@ -133,14 +149,14 @@ function buildHarnessMetadataLines(
     `phase: ${input.phase}`,
     `run_id: ${input.runId}`,
   ];
-  if (input.cursorAgentId) {
-    lines.push(`cursor_agent_id: ${input.cursorAgentId}`);
+  if (input.cursorAgentIdHash) {
+    lines.push(`cursor_agent_id_hash: ${input.cursorAgentIdHash}`);
   }
-  if (input.cursorRunId) {
-    lines.push(`cursor_run_id: ${input.cursorRunId}`);
+  if (input.cursorRunIdHash) {
+    lines.push(`cursor_run_id_hash: ${input.cursorRunIdHash}`);
   }
-  if (input.builderAgentId) {
-    lines.push(`builder_agent_id: ${input.builderAgentId}`);
+  if (input.builderAgentIdHash) {
+    lines.push(`builder_agent_id_hash: ${input.builderAgentIdHash}`);
   }
   if (input.builderThreadGeneration !== undefined) {
     lines.push(`builder_thread_generation: ${input.builderThreadGeneration}`);
@@ -154,8 +170,10 @@ function buildHarnessMetadataLines(
   if (input.builderThreadIdempotencyKey) {
     lines.push(`builder_thread_idempotency_key: ${input.builderThreadIdempotencyKey}`);
   }
-  if (input.previousBuilderAgentId) {
-    lines.push(`previous_builder_agent_id: ${input.previousBuilderAgentId}`);
+  if (input.previousBuilderAgentIdHash) {
+    lines.push(
+      `previous_builder_agent_id_hash: ${input.previousBuilderAgentIdHash}`,
+    );
   }
   if (input.builderThreadReplacementReason) {
     lines.push(
@@ -284,21 +302,6 @@ function summarizeAgentText(text: string, maxLength = 600): string {
   return `${trimmed.slice(0, maxLength).trim()}…`;
 }
 
-function buildCursorLinks(
-  cursorAgentId?: string,
-  cursorRunId?: string,
-): HarnessCommentLink[] {
-  if (!cursorAgentId) {
-    return [];
-  }
-  return [
-    {
-      label: "Cursor Cloud run",
-      url: buildCursorCloudRunUrl(cursorAgentId, cursorRunId),
-    },
-  ];
-}
-
 function buildGithubActionsLink(
   githubActionsRunUrl?: string | null,
 ): HarnessCommentLink[] {
@@ -311,12 +314,14 @@ function buildGithubActionsLink(
 export function formatPlanningComment(
   planBody: string,
   footer: HarnessCommentFooterInput,
-  options?: { planReviewNext?: boolean },
+  options?: { planReviewNext?: boolean; planningOnlyTerminal?: boolean },
 ): string {
   const summary = summarizeAgentText(planBody);
-  const nextStep = options?.planReviewNext
-    ? "Plan Review will start automatically. No PM action is needed until the issue reaches **PM Review**."
-    : "Implementation will start automatically. No PM action is needed until the issue reaches **PM Review**.";
+  const nextStep = options?.planningOnlyTerminal
+    ? "This was a planning-only execution; implementation was not started. The issue is being placed in the terminal canary status (**Canceled**)."
+    : options?.planReviewNext
+      ? "Plan Review will start automatically. No PM action is needed until the issue reaches **PM Review**."
+      : "Implementation will start automatically. No PM action is needed until the issue reaches **PM Review**.";
   return buildHarnessComment({
     phaseLabel: getCompletionLabel("planning"),
     pmSection: [
@@ -344,7 +349,10 @@ export function hasPlanningCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = parseHarnessMarkers(commentBody);
+  const markers = tryParseHarnessMarkers(commentBody);
+  if (!markers) {
+    return false;
+  }
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "planning" &&
@@ -356,7 +364,10 @@ export function hasHandoffCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = parseHarnessMarkers(commentBody);
+  const markers = tryParseHarnessMarkers(commentBody);
+  if (!markers) {
+    return false;
+  }
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "handoff" &&
@@ -369,7 +380,10 @@ export function hasRevisionCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = parseHarnessMarkers(commentBody);
+  const markers = tryParseHarnessMarkers(commentBody);
+  if (!markers) {
+    return false;
+  }
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "revision" &&
@@ -385,7 +399,10 @@ export function findRevisionMarkerForPmFeedback(
   pmFeedbackCommentId: string,
 ): boolean {
   return comments.some((comment) => {
-    const markers = parseHarnessMarkers(comment.body);
+    const markers = tryParseHarnessMarkers(comment.body);
+    if (!markers) {
+      return false;
+    }
     return (
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === "revision" &&
@@ -604,7 +621,10 @@ export function hasMergeCompletionMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = parseHarnessMarkers(commentBody);
+  const markers = tryParseHarnessMarkers(commentBody);
+  if (!markers) {
+    return false;
+  }
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "merge" &&
@@ -617,7 +637,10 @@ export function hasProductionSyncMarker(
   commentBody: string,
   orchestratorMarker: string,
 ): boolean {
-  const markers = parseHarnessMarkers(commentBody);
+  const markers = tryParseHarnessMarkers(commentBody);
+  if (!markers) {
+    return false;
+  }
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === "production_sync" &&
@@ -632,7 +655,10 @@ export function findMergeMarkerForPrUrl(
 ): boolean {
   const normalized = prUrl.trim().toLowerCase();
   return comments.some((comment) => {
-    const markers = parseHarnessMarkers(comment.body);
+    const markers = tryParseHarnessMarkers(comment.body);
+    if (!markers) {
+      return false;
+    }
     return (
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === "merge" &&
@@ -649,13 +675,19 @@ export function findLatestMergeMarker(
   const mergeComments = comments
     .map((comment) => ({
       comment,
-      markers: parseHarnessMarkers(comment.body),
+      markers: tryParseHarnessMarkers(comment.body),
     }))
     .filter(
-      ({ markers }) =>
-        markers.orchestratorMarker === orchestratorMarker &&
-        markers.phase === "merge" &&
-        Boolean(markers.runId),
+      (
+        entry,
+      ): entry is {
+        comment: { body: string; createdAt?: string };
+        markers: NonNullable<ReturnType<typeof tryParseHarnessMarkers>>;
+      } =>
+        entry.markers !== null &&
+        entry.markers.orchestratorMarker === orchestratorMarker &&
+        entry.markers.phase === "merge" &&
+        Boolean(entry.markers.runId),
     );
 
   mergeComments.sort((a, b) => {
@@ -678,7 +710,10 @@ export function findProductionSyncMarkerForMergeCommit(
 ): boolean {
   const normalized = mergeCommitSha.trim().toLowerCase();
   return comments.some((comment) => {
-    const markers = parseHarnessMarkers(comment.body);
+    const markers = tryParseHarnessMarkers(comment.body);
+    if (!markers) {
+      return false;
+    }
     return (
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === "production_sync" &&
@@ -714,8 +749,9 @@ export function findAdoptableProductionSyncComment(input: {
   const productionBranch = input.productionBranch.trim();
 
   for (const comment of input.comments) {
-    const markers = parseHarnessMarkers(comment.body);
+    const markers = tryParseHarnessMarkers(comment.body);
     if (
+      !markers ||
       markers.orchestratorMarker !== input.orchestratorMarker ||
       markers.phase !== "production_sync" ||
       !markers.runId
@@ -938,8 +974,6 @@ export interface PhaseStartCommentBodyInput {
   branch?: string;
   prUrl?: string;
   githubActionsRunUrl?: string | null;
-  cursorAgentId?: string;
-  cursorRunId?: string;
   harnessRunId?: string;
 }
 
@@ -950,17 +984,9 @@ export function buildPhaseStartCommentBody(
   const label = getPhaseStartLabel(phase);
 
   if (phase === "implementation_start" || phase === "merge_start") {
-    const links =
-      phase === "merge_start"
-        ? buildGithubActionsLink(input.githubActionsRunUrl)
-        : [
-            ...buildGithubActionsLink(input.githubActionsRunUrl),
-            ...buildCursorLinks(input.cursorAgentId, input.cursorRunId),
-          ];
-
     return buildMinimalHarnessComment({
       phaseLabel: label,
-      links,
+      links: buildGithubActionsLink(input.githubActionsRunUrl),
     }).replace(/\n\n$/, "");
   }
 
@@ -974,10 +1000,7 @@ export function buildPhaseStartCommentBody(
     merge_start: "Merging has started.",
   };
 
-  const links = [
-    ...buildGithubActionsLink(input.githubActionsRunUrl),
-    ...buildCursorLinks(input.cursorAgentId, input.cursorRunId),
-  ];
+  const links = buildGithubActionsLink(input.githubActionsRunUrl);
 
   const pmSection = [statusByPhase[phase], ""];
   if (links.length > 0) {
@@ -1056,7 +1079,10 @@ export function hasPhaseStartMarker(
   phase: PhaseStartPhase,
   runId: string,
 ): boolean {
-  const markers = parseHarnessMarkers(commentBody);
+  const markers = tryParseHarnessMarkers(commentBody);
+  if (!markers) {
+    return false;
+  }
   return (
     markers.orchestratorMarker === orchestratorMarker &&
     markers.phase === phase &&
@@ -1085,8 +1111,9 @@ export function findLatestPhaseStartRunId(
     if (!comment) {
       continue;
     }
-    const markers = parseHarnessMarkers(comment.body);
+    const markers = tryParseHarnessMarkers(comment.body);
     if (
+      markers &&
       markers.orchestratorMarker === orchestratorMarker &&
       markers.phase === phase &&
       markers.runId
@@ -1116,9 +1143,14 @@ export function parsePrNumberFromUrl(prUrl: string): string | null {
 export function withBuilderThreadMarkerEvidence<
   T extends HarnessCommentFooterInput,
 >(footer: T, evidence: BuilderThreadMarkerEvidence): T {
+  const evidenceHashes = toPublicProviderIdentityHashes({
+    builderAgentId: evidence.builderAgentId,
+    previousBuilderAgentId: evidence.previousBuilderAgentId,
+  });
   return {
     ...footer,
-    builderAgentId: evidence.builderAgentId ?? footer.builderAgentId,
+    builderAgentIdHash:
+      evidenceHashes.builderAgentIdHash ?? footer.builderAgentIdHash,
     builderThreadGeneration:
       evidence.builderThreadGeneration ?? footer.builderThreadGeneration,
     builderThreadAction:
@@ -1126,8 +1158,9 @@ export function withBuilderThreadMarkerEvidence<
     builderOriginRunId: evidence.builderOriginRunId ?? footer.builderOriginRunId,
     builderThreadIdempotencyKey:
       evidence.builderThreadIdempotencyKey ?? footer.builderThreadIdempotencyKey,
-    previousBuilderAgentId:
-      evidence.previousBuilderAgentId ?? footer.previousBuilderAgentId,
+    previousBuilderAgentIdHash:
+      evidenceHashes.previousBuilderAgentIdHash ??
+      footer.previousBuilderAgentIdHash,
     builderThreadReplacementReason:
       evidence.builderThreadReplacementReason ??
       footer.builderThreadReplacementReason,

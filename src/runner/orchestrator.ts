@@ -17,6 +17,12 @@ import type { EvaluationRuntime } from "../evaluation/types.js";
 export function shouldContinueToImplementationAfterPlanning(
   manifest: RunManifest,
 ): boolean {
+  if (
+    manifest.linearStatusAfter &&
+    manifest.linearStatusAfter.trim().toLowerCase() === "canceled"
+  ) {
+    return false;
+  }
   // When Plan Review is effectively enabled, planning lands on Plan Review — do not auto-build.
   if (
     manifest.linearStatusAfter &&

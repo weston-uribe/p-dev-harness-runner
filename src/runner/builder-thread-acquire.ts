@@ -38,6 +38,11 @@ export interface AcquireBuilderAgentContext {
   orchestratorMarker: string;
   previousImplementationRunId?: string;
   previousRevisionRunId?: string;
+  workflowState?: {
+    builderAgentId?: string | null;
+    builderRunId?: string | null;
+    issueKey?: string;
+  } | null;
 }
 
 /**
@@ -206,6 +211,7 @@ function resolvePriorReference(
       prUrl: params.context.prUrl,
       previousImplementationRunId: params.context.previousImplementationRunId,
       previousRevisionRunId: params.context.previousRevisionRunId,
+      workflowState: params.context.workflowState,
     });
   } catch (error) {
     if (error instanceof BuilderThreadLineageError) {

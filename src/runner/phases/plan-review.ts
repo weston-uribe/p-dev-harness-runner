@@ -25,6 +25,7 @@ import {
   postIssueComment,
   transitionIssueStatus,
 } from "../../linear/writer.js";
+import { toPublicProviderIdentityHashes } from "../../linear/provider-identity-public.js";
 import { formatPlanReviewComment } from "../../linear/plan-review-comment.js";
 import {
   createPlanReviewAgent,
@@ -872,8 +873,10 @@ export async function executePlanReviewPhase(
           promptVersion: version,
           targetRepo: resolved.targetRepo,
           baseBranch: resolved.baseBranch,
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
+          ...toPublicProviderIdentityHashes({
+            cursorAgentId,
+            cursorRunId,
+          }),
           decisionIdentity: review.decisionIdentity,
           reviewedPlanGenerationId: validated.outcome.reviewedPlanGenerationId,
           reviewedPlanArtifactHash: validated.outcome.reviewedPlanArtifactHash,
@@ -1000,8 +1003,10 @@ export async function executePlanReviewPhase(
           promptVersion: promptVersion ?? "plan-review@2",
           targetRepo: resolved.targetRepo,
           baseBranch: resolved.baseBranch,
-          cursorAgentId: cursorAgentId ?? undefined,
-          cursorRunId: cursorRunId ?? undefined,
+          ...toPublicProviderIdentityHashes({
+            cursorAgentId,
+            cursorRunId,
+          }),
         },
         "plan_review",
         { errorClassification: errorClassification ?? undefined },

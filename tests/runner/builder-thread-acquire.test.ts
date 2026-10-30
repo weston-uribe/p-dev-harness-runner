@@ -26,6 +26,7 @@ vi.mock("@cursor/sdk", async (importOriginal) => {
 
 import { acquireBuilderAgent } from "../../src/runner/builder-thread-acquire.js";
 import { BuilderThreadLineageError } from "../../src/runner/builder-thread-lineage.js";
+import { hashProviderIdentity } from "../../src/identity/provider-identity-hash.js";
 import type { HarnessConfig } from "../../src/config/types.js";
 
 const TARGET_REPO = "https://github.com/owner/example-target-app";
@@ -261,6 +262,36 @@ describe("acquireBuilderAgent", () => {
         },
       }),
     ).rejects.toBeInstanceOf(BuilderThreadLineageError);
+    expect(createMock).not.toHaveBeenCalled();
+    expect(resumeMock).not.toHaveBeenCalled();
+  });
+
+  it("rethrows missing_private_identity instead of creating a replacement", async () => {
+    const builderHash = hashProviderIdentity("bc-existing");
+    await expect(
+      acquireBuilderAgent({
+        apiKey: "key",
+        config: makeConfig(),
+        phase: "revision",
+        events: makeEvents() as never,
+        context: {
+          issueKey: "WES-1",
+          harnessRunId: "run-hash",
+          targetRepo: TARGET_REPO,
+          baseBranch: "main",
+          branch: BRANCH,
+          prUrl: PR_URL,
+          idempotencyKey: "p-dev:revision:WES-1:fb-hash",
+          comments: [
+            {
+              id: "c-hash",
+              body: `<!--\nharness-orchestrator-v1\nphase: handoff\nrun_id: handoff-1\nbuilder_agent_id_hash: ${builderHash}\nbuilder_thread_generation: 1\nbuilder_thread_action: created\nbuilder_origin_run_id: impl-1\ntarget_repo: ${TARGET_REPO}\npr_url: ${PR_URL}\nbranch: ${BRANCH}\n-->`,
+            },
+          ],
+          orchestratorMarker: "harness-orchestrator-v1",
+        },
+      }),
+    ).rejects.toMatchObject({ reason: "missing_private_identity" });
     expect(createMock).not.toHaveBeenCalled();
     expect(resumeMock).not.toHaveBeenCalled();
   });

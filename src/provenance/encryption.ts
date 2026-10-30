@@ -1,5 +1,7 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { CursorProvenanceError } from "./errors.js";
+
+export { hashProviderIdentity } from "../identity/provider-identity-hash.js";
 
 export const PROVENANCE_KEY_ENV = "P_DEV_PROVENANCE_KEY_V1";
 export const PROVENANCE_KEY_ID_V1 = "provenance-key-v1";
@@ -47,10 +49,6 @@ function encodeAad(aad: EncryptAad): Buffer {
     }),
     "utf8",
   );
-}
-
-export function hashProviderIdentity(id: string): string {
-  return createHash("sha256").update(id, "utf8").digest("hex");
 }
 
 export function parseProvenanceKey(

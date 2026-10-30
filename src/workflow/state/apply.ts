@@ -57,6 +57,9 @@ export interface ApplyWorkflowTransitionInput {
   latestPlanArtifact?: PlanArtifactIdentity | null;
   latestImplementationArtifact?: ImplementationArtifactIdentity | null;
   phaseExecutionFreeze?: PhaseExecutionFreeze | null;
+  executionPolicyFreeze?: import("./types.js").ExecutionPolicyFreeze | null;
+  executionPolicyResult?: import("./types.js").ExecutionPolicyResult | null;
+  planningOnlyDownstreamSuppressed?: boolean;
   maxRetries?: number;
   now?: () => string;
 }
@@ -83,6 +86,10 @@ function normalizeWorkflowState(record: WorkflowStateRecord): WorkflowStateRecor
     latestPlanArtifact: record.latestPlanArtifact ?? null,
     latestImplementationArtifact: record.latestImplementationArtifact ?? null,
     phaseExecutionFreeze: record.phaseExecutionFreeze ?? null,
+    executionPolicyFreeze: record.executionPolicyFreeze ?? null,
+    executionPolicyResult: record.executionPolicyResult ?? null,
+    planningOnlyDownstreamSuppressed:
+      record.planningOnlyDownstreamSuppressed ?? false,
     supersededGenerationIdentities: record.supersededGenerationIdentities ?? [],
     activeRunLease: record.activeRunLease ?? null,
     productionCompletion: record.productionCompletion ?? null,
@@ -119,6 +126,9 @@ function buildNextState(input: {
   latestPlanArtifact?: PlanArtifactIdentity | null;
   latestImplementationArtifact?: ImplementationArtifactIdentity | null;
   phaseExecutionFreeze?: PhaseExecutionFreeze | null;
+  executionPolicyFreeze?: import("./types.js").ExecutionPolicyFreeze | null;
+  executionPolicyResult?: import("./types.js").ExecutionPolicyResult | null;
+  planningOnlyDownstreamSuppressed?: boolean;
   now: string;
 }): WorkflowStateRecord {
   const previous = normalizeWorkflowState(input.previous);
@@ -272,6 +282,22 @@ function buildNextState(input: {
     // keep previous unless explicitly cleared via null
   }
 
+  let executionPolicyFreeze = previous.executionPolicyFreeze ?? null;
+  if (input.executionPolicyFreeze !== undefined) {
+    executionPolicyFreeze = input.executionPolicyFreeze;
+  }
+
+  let executionPolicyResult = previous.executionPolicyResult ?? null;
+  if (input.executionPolicyResult !== undefined) {
+    executionPolicyResult = input.executionPolicyResult;
+  }
+
+  let planningOnlyDownstreamSuppressed =
+    previous.planningOnlyDownstreamSuppressed ?? false;
+  if (input.planningOnlyDownstreamSuppressed !== undefined) {
+    planningOnlyDownstreamSuppressed = input.planningOnlyDownstreamSuppressed;
+  }
+
   return {
     ...previous,
     stateRevision: previous.stateRevision + 1,
@@ -294,6 +320,9 @@ function buildNextState(input: {
     latestPlanArtifact,
     latestImplementationArtifact,
     phaseExecutionFreeze,
+    executionPolicyFreeze,
+    executionPolicyResult,
+    planningOnlyDownstreamSuppressed,
   };
 }
 
@@ -499,6 +528,9 @@ export async function applyWorkflowTransition(
       latestPlanArtifact: input.latestPlanArtifact,
       latestImplementationArtifact: input.latestImplementationArtifact,
       phaseExecutionFreeze: input.phaseExecutionFreeze,
+      executionPolicyFreeze: input.executionPolicyFreeze,
+      executionPolicyResult: input.executionPolicyResult,
+      planningOnlyDownstreamSuppressed: input.planningOnlyDownstreamSuppressed,
       now: now(),
     });
 
